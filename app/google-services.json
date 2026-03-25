@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "795455852000",
+    "project_id": "kampus-app-9a26a",
+    "storage_bucket": "kampus-app-9a26a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:795455852000:android:32f92e7efdc01cd700ef85",
+        "android_client_info": {
+          "package_name": "com.example.kampus"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBCGHLgBiEcGBHEWK9nSC4lCRwcYgBZrJU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
