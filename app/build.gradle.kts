@@ -52,6 +52,9 @@ dependencies {
     implementation("com.google.firebase:firebase-storage")
     implementation("com.google.firebase:firebase-messaging")
 
+    // Google Sign-In (for Firebase Auth with Google)
+    implementation("com.google.android.gms:play-services-auth:21.3.0")
+
     // Core
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -65,11 +68,23 @@ dependencies {
     // Icons
     implementation("androidx.compose.material:material-icons-extended:1.7.0")
 
+    // Image loading (for gallery attachments)
+    implementation("io.coil-kt:coil-compose:2.7.0")
+
+    // Video playback (Media3 / ExoPlayer)
+    implementation("androidx.media3:media3-exoplayer:1.3.1")
+    implementation("androidx.media3:media3-ui:1.3.1")
+
+    // Image crop editor
+    implementation("com.github.yalantis:ucrop:2.2.10")
+
     // Navigation
     implementation("androidx.navigation:navigation-compose:2.7.7")
 
+
     // ViewModel
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
+    implementation(libs.androidx.compose.runtime)
 
     // Test
     testImplementation(libs.junit)
