@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">KAMPUS</string>
+    <!-- Required for Google Sign-In with Firebase Auth. Value should match the Web client ID in google-services.json -->
+    <string name="default_web_client_id">795455852000-rsp4o9o11upm7mo6q48lbtdte4e968oe.apps.googleusercontent.com</string>
 </resources>

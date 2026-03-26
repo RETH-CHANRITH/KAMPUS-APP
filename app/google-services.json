@@ -12,7 +12,20 @@
           "package_name": "com.example.kampus"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "795455852000-udu8gth9la2m8embuj9qt291otldabkj.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.kampus",
+            "certificate_hash": "d9ee2dd72796711d940889e231709c10899d68b4"
+          }
+        },
+        {
+          "client_id": "795455852000-rsp4o9o11upm7mo6q48lbtdte4e968oe.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyBCGHLgBiEcGBHEWK9nSC4lCRwcYgBZrJU"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "795455852000-rsp4o9o11upm7mo6q48lbtdte4e968oe.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
