@@ -31,6 +31,19 @@ import com.example.kampus.ui.groups.GroupViewModel
 import com.example.kampus.ui.events.EventDetailScreen
 import com.example.kampus.ui.events.EventListScreen
 import com.example.kampus.ui.events.EventViewModel
+import com.example.kampus.ui.profile.AccountSettingsScreen
+import com.example.kampus.ui.profile.AboutScreen
+import com.example.kampus.ui.profile.AppearanceSettingsScreen
+import com.example.kampus.ui.profile.BlockedUsersScreen
+import com.example.kampus.ui.profile.EditProfileScreen
+import com.example.kampus.ui.profile.DiscoverPeopleScreen
+import com.example.kampus.ui.profile.FriendRequestsScreen
+import com.example.kampus.ui.profile.FriendsScreen
+import com.example.kampus.ui.profile.HelpSupportScreen
+import com.example.kampus.ui.profile.NotificationSettingsScreen
+import com.example.kampus.ui.profile.PrivacySecurityScreen
+import com.example.kampus.ui.profile.ProfileScreen
+import com.example.kampus.ui.profile.SettingsScreen
 import com.google.firebase.auth.FirebaseAuth
 
 object Routes {
@@ -59,6 +72,21 @@ object Routes {
     // Chat
     const val CHAT_LIST   = "chat_list"
     const val CHAT_SCREEN = "chat_screen/{chatId}"
+
+    // Profile
+    const val PROFILE      = "profile"
+    const val FRIEND_REQUESTS = "friend_requests"
+    const val FRIENDS = "friends"
+    const val DISCOVER_PEOPLE = "discover_people"
+    const val SETTINGS     = "settings"
+    const val ACCOUNT_SETTINGS = "account_settings"
+    const val NOTIFICATION_SETTINGS = "notification_settings"
+    const val PRIVACY_SECURITY_SETTINGS = "privacy_security_settings"
+    const val APPEARANCE_SETTINGS = "appearance_settings"
+    const val BLOCKED_USERS_SETTINGS = "blocked_users_settings"
+    const val HELP_SUPPORT_SETTINGS = "help_support_settings"
+    const val ABOUT_SETTINGS = "about_settings"
+    const val PROFILE_EDIT = "profile_edit"
 
     fun groupDetail(groupId: Int) = "group_detail/$groupId"
     fun eventDetail(eventId: Int) = "event_detail/$eventId"
@@ -192,7 +220,7 @@ fun NavGraph(navController: NavHostController) {
         composable(Routes.HOME) {
             HomeScreen(
                 onCreatePost   = { navController.navigate(Routes.POST_CREATE) },
-                onProfileClick = { },
+                onProfileClick = { navController.navigate(Routes.PROFILE) },
                 onNotifClick   = { },
                 onSearchClick  = { },
                 onGroupsClick  = { navController.navigate(Routes.GROUP_LIST) },
@@ -240,7 +268,7 @@ fun NavGraph(navController: NavHostController) {
                 onEventsClick  = { navController.navigate(Routes.EVENT_LIST) },
                 onChatClick    = { navController.navigate(Routes.CHAT_LIST) },
                 onFabClick     = { },
-                onProfileClick = { },
+                onProfileClick = { navController.navigate(Routes.PROFILE) },
             )
         }
 
@@ -285,7 +313,7 @@ fun NavGraph(navController: NavHostController) {
                 onGroupsClick  = { navController.navigate(Routes.GROUP_LIST) },
                 onChatClick    = { navController.navigate(Routes.CHAT_LIST) },
                 onFabClick     = { navController.navigate(Routes.EVENT_CREATE) },
-                onProfileClick = { },
+                onProfileClick = { navController.navigate(Routes.PROFILE) },
             )
         }
 
@@ -341,7 +369,117 @@ fun NavGraph(navController: NavHostController) {
                 },
                 onGroupsClick  = { navController.navigate(Routes.GROUP_LIST) },
                 onEventsClick  = { navController.navigate(Routes.EVENT_LIST) },
-                onProfileClick = { },
+                onProfileClick = { navController.navigate(Routes.PROFILE) },
+            )
+        }
+
+        // ── Profile ───────────────────────────────────────────────────────────
+        composable(Routes.PROFILE) {
+            ProfileScreen(
+                onBack = { navController.popBackStack() },
+                onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                onEditProfile = { navController.navigate(Routes.PROFILE_EDIT) },
+                onOpenFriendRequests = { navController.navigate(Routes.FRIEND_REQUESTS) },
+                onOpenFriends = { navController.navigate(Routes.FRIENDS) },
+                onOpenDiscoverPeople = { navController.navigate(Routes.DISCOVER_PEOPLE) },
+                onHomeClick = {
+                    navController.navigate(Routes.HOME) {
+                        popUpTo(Routes.HOME) { inclusive = false }
+                    }
+                },
+                onGroupsClick = { navController.navigate(Routes.GROUP_LIST) },
+                onEventsClick = { navController.navigate(Routes.EVENT_LIST) },
+                onChatClick = { navController.navigate(Routes.CHAT_LIST) },
+                onCreatePost = { navController.navigate(Routes.POST_CREATE) },
+                onLogout = {
+                    navController.navigate(Routes.LOGIN) {
+                        popUpTo(Routes.HOME) { inclusive = true }
+                    }
+                },
+            )
+        }
+
+        // ── Friend Requests ───────────────────────────────────────────────────
+        composable(Routes.FRIEND_REQUESTS) {
+            FriendRequestsScreen(onBack = { navController.popBackStack() })
+        }
+
+        // ── Friends ───────────────────────────────────────────────────────────
+        composable(Routes.FRIENDS) {
+            FriendsScreen(onBack = { navController.popBackStack() })
+        }
+
+        // ── Discover People ───────────────────────────────────────────────────
+        composable(Routes.DISCOVER_PEOPLE) {
+            DiscoverPeopleScreen(onBack = { navController.popBackStack() })
+        }
+
+        // ── Settings ──────────────────────────────────────────────────────────
+        composable(Routes.SETTINGS) {
+            SettingsScreen(
+                onBack = { navController.popBackStack() },
+                onOpenAccountSettings = { navController.navigate(Routes.ACCOUNT_SETTINGS) },
+                onOpenNotificationSettings = { navController.navigate(Routes.NOTIFICATION_SETTINGS) },
+                onOpenPrivacySecurity = { navController.navigate(Routes.PRIVACY_SECURITY_SETTINGS) },
+                onOpenAppearance = { navController.navigate(Routes.APPEARANCE_SETTINGS) },
+                onOpenBlockedUsers = { navController.navigate(Routes.BLOCKED_USERS_SETTINGS) },
+                onOpenHelpSupport = { navController.navigate(Routes.HELP_SUPPORT_SETTINGS) },
+                onOpenAbout = { navController.navigate(Routes.ABOUT_SETTINGS) },
+            )
+        }
+
+        // ── Account Settings ────────────────────────────────────────────────
+        composable(Routes.ACCOUNT_SETTINGS) {
+            AccountSettingsScreen(onBack = { navController.popBackStack() })
+        }
+
+        // ── Notification Settings ─────────────────────────────────────────────
+        composable(Routes.NOTIFICATION_SETTINGS) {
+            NotificationSettingsScreen(onBack = { navController.popBackStack() })
+        }
+
+        // ── Appearance Settings ───────────────────────────────────────────────
+        composable(Routes.APPEARANCE_SETTINGS) {
+            AppearanceSettingsScreen(onBack = { navController.popBackStack() })
+        }
+
+        // ── Blocked Users ─────────────────────────────────────────────────────
+        composable(Routes.BLOCKED_USERS_SETTINGS) {
+            BlockedUsersScreen(onBack = { navController.popBackStack() })
+        }
+
+        // ── Help & Support ───────────────────────────────────────────────────
+        composable(Routes.HELP_SUPPORT_SETTINGS) {
+            HelpSupportScreen(onBack = { navController.popBackStack() })
+        }
+
+        // ── About ────────────────────────────────────────────────────────────
+        composable(Routes.ABOUT_SETTINGS) {
+            AboutScreen(
+                onBack = { navController.popBackStack() },
+                onHomeClick = {
+                    navController.navigate(Routes.HOME) {
+                        popUpTo(Routes.HOME) { inclusive = false }
+                    }
+                },
+                onGroupsClick = { navController.navigate(Routes.GROUP_LIST) },
+                onEventsClick = { navController.navigate(Routes.EVENT_LIST) },
+                onChatClick = { navController.navigate(Routes.CHAT_LIST) },
+                onCreatePost = { navController.navigate(Routes.POST_CREATE) },
+                onProfileClick = { navController.navigate(Routes.PROFILE) },
+            )
+        }
+
+        // ── Privacy & Security ───────────────────────────────────────────────
+        composable(Routes.PRIVACY_SECURITY_SETTINGS) {
+            PrivacySecurityScreen(onBack = { navController.popBackStack() })
+        }
+
+        // ── Edit Profile ──────────────────────────────────────────────────────
+        composable(Routes.PROFILE_EDIT) {
+            EditProfileScreen(
+                onBack = { navController.popBackStack() },
+                onSaved = { navController.popBackStack() },
             )
         }
 
