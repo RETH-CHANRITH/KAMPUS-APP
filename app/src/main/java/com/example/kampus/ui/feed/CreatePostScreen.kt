@@ -1,142 +1,778 @@
+@file:Suppress("SpellCheckingInspection")
 package com.example.kampus.ui.feed
 
+import android.net.Uri
+import androidx.compose.ui.platform.LocalContext
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.SentimentSatisfied
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CropSquare
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.MediaItem
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
+
+private enum class FbComposerTheme { A_LIGHT, B_DARK }
+
+private enum class PickerType { FEELING, PEOPLE, LOCATION, EVENT, GIF }
 
 @Composable
 fun CreatePostScreen(
-	onClose: () -> Unit,
-	onPost: (
-		text: String,
-		mediaUri: String?,
-		mediaType: PostItem.MediaType,
-		visibility: String,
-		allowComments: Boolean,
-		taggedPeople: List<String>,
-		feelingEmoji: String?,
-		location: String?,
-	) -> Unit,
+    onClose: () -> Unit,
+    onPost: (text: String, mediaUris: List<Uri>, mediaTypes: List<PostItem.MediaType>, visibility: PostItem.PostVisibility, allowComments: Boolean, taggedPeople: List<String>, feelingEmoji: String?, location: String?) -> Unit,
 ) {
-	var text by remember { mutableStateOf("") }
-	var mediaUri by remember { mutableStateOf<String?>(null) }
-	var mediaType by remember { mutableStateOf(PostItem.MediaType.NONE) }
-	var visibility by remember { mutableStateOf("Public") }
-	var allowComments by remember { mutableStateOf(true) }
-	var taggedPeopleRaw by remember { mutableStateOf("") }
-	var feelingEmoji by remember { mutableStateOf<String?>(null) }
-	var location by remember { mutableStateOf<String?>(null) }
+    var lightMode by remember { mutableStateOf(false) }
+    val p = if (lightMode) FbLight else FbDark
 
-	Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-		Column(
-			modifier = Modifier
-				.fillMaxSize()
-				.padding(16.dp),
-			verticalArrangement = Arrangement.spacedBy(12.dp),
-		) {
-			Text("Create Post", style = MaterialTheme.typography.headlineSmall)
+    var text by remember { mutableStateOf("") }
 
-			OutlinedTextField(
-				value = text,
-				onValueChange = { text = it },
-				label = { Text("What's on your mind?") },
-				modifier = Modifier.fillMaxWidth(),
-				minLines = 4,
-				keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
-			)
+    // Support multiple media items
+    var mediaUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    var mediaTypes by remember { mutableStateOf<List<PostItem.MediaType>>(emptyList()) }
 
-			OutlinedTextField(
-				value = mediaUri.orEmpty(),
-				onValueChange = {
-					mediaUri = it.ifBlank { null }
-					mediaType = if (mediaUri == null) PostItem.MediaType.NONE else PostItem.MediaType.IMAGE
-				},
-				label = { Text("Media URL (optional)") },
-				modifier = Modifier.fillMaxWidth(),
-				keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-			)
+    // Keep old single media for backward compatibility with onPost callback
+    var imageUri by remember { mutableStateOf<Uri?>(null) }
+    var mediaType by remember { mutableStateOf<PostItem.MediaType?>(null) }
 
-			OutlinedTextField(
-				value = visibility,
-				onValueChange = { visibility = it },
-				label = { Text("Visibility") },
-				modifier = Modifier.fillMaxWidth(),
-			)
+    var visibility by remember { mutableStateOf(PostItem.PostVisibility.PUBLIC) }
+    val allowComments = true
 
-			OutlinedTextField(
-				value = taggedPeopleRaw,
-				onValueChange = { taggedPeopleRaw = it },
-				label = { Text("Tagged people (comma separated)") },
-				modifier = Modifier.fillMaxWidth(),
-			)
+    var taggedPeople by remember { mutableStateOf(emptyList<String>()) }
+    var locationText by remember { mutableStateOf("") }
+    var feelingEmoji by remember { mutableStateOf<String?>(null) }
+    var eventText by remember { mutableStateOf("") }
+    var musicText by remember { mutableStateOf("") }
 
-			OutlinedTextField(
-				value = feelingEmoji.orEmpty(),
-				onValueChange = { feelingEmoji = it.ifBlank { null } },
-				label = { Text("Feeling emoji (optional)") },
-				modifier = Modifier.fillMaxWidth(),
-			)
+    var pickerShown by remember { mutableStateOf<PickerType?>(null) }
 
-			OutlinedTextField(
-				value = location.orEmpty(),
-				onValueChange = { location = it.ifBlank { null } },
-				label = { Text("Location (optional)") },
-				modifier = Modifier.fillMaxWidth(),
-			)
+    val canPost = text.isNotBlank()
 
-			Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-				Text("Allow comments")
-				Switch(checked = allowComments, onCheckedChange = { allowComments = it })
-			}
+    // Track selected index for editing
+    var selectedMediaIndex by remember { mutableStateOf<Int?>(null) }
 
-			Spacer(Modifier.height(8.dp))
+    // Track if edit menu is shown
+    var showEditMenu by remember { mutableStateOf<Int?>(null) }
 
-			Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-				Button(onClick = onClose, modifier = Modifier.weight(1f)) {
-					Text("Cancel")
-				}
-				Button(
-					onClick = {
-						val taggedPeople = taggedPeopleRaw
-							.split(',')
-							.map { it.trim() }
-							.filter { it.isNotEmpty() }
-						onPost(
-							text.trim(),
-							mediaUri,
-							mediaType,
-							visibility,
-							allowComments,
-							taggedPeople,
-							feelingEmoji,
-							location,
-						)
-					},
-					modifier = Modifier.weight(1f),
-				) {
-					Text("Post")
-				}
-			}
-		}
-	}
+    val context = LocalContext.current
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent(),
+        onResult = { uri ->
+            if (uri != null) {
+                val mime = context.contentResolver.getType(uri)
+                val type = when {
+                    mime?.startsWith("video/") == true -> PostItem.MediaType.VIDEO
+                    mime?.startsWith("image/") == true -> PostItem.MediaType.IMAGE
+                    else -> null
+                }
+
+                if (type != null) {
+                    // If editing existing media at selectedMediaIndex, replace it
+                    if (selectedMediaIndex != null && selectedMediaIndex!! < mediaUris.size) {
+                        mediaUris = mediaUris.toMutableList().apply {
+                            set(selectedMediaIndex!!, uri)
+                        }
+                        mediaTypes = mediaTypes.toMutableList().apply {
+                            set(selectedMediaIndex!!, type)
+                        }
+                        selectedMediaIndex = null
+                    } else {
+                        // Otherwise add new media to list
+                        mediaUris = mediaUris + uri
+                        mediaTypes = mediaTypes + type
+                    }
+
+                    // Keep old single media for backward compatibility
+                    imageUri = mediaUris.firstOrNull()
+                    mediaType = mediaTypes.firstOrNull()
+                }
+            }
+        }
+    )
+
+    val cropLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
+        onResult = { result ->
+            if (result.resultCode == android.app.Activity.RESULT_OK) {
+                val out = MediaCropper.getOutput(result.data)
+                if (out != null) {
+                    // If editing specific media index, update that item
+                    if (selectedMediaIndex != null && selectedMediaIndex!! < mediaUris.size) {
+                        mediaUris = mediaUris.toMutableList().apply {
+                            set(selectedMediaIndex!!, out)
+                        }
+                        mediaTypes = mediaTypes.toMutableList().apply {
+                            set(selectedMediaIndex!!, PostItem.MediaType.IMAGE)
+                        }
+                        selectedMediaIndex = null
+                    } else {
+                        // Backward compatibility: update single media
+                        imageUri = out
+                        mediaType = PostItem.MediaType.IMAGE
+                    }
+                }
+            }
+        },
+    )
+
+    // Pickers modal
+    when (pickerShown) {
+        PickerType.FEELING -> {
+            Dialog(
+                onDismissRequest = { pickerShown = null },
+                properties = DialogProperties(usePlatformDefaultWidth = false),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.95f)
+                        .clip(RoundedCornerShape(16.dp)),
+                ) {
+                    FeelingEmojiPicker(
+                        p = p,
+                        onSelect = { emoji ->
+                            feelingEmoji = emoji
+                            pickerShown = null
+                        },
+                        onClose = { pickerShown = null },
+                    )
+                }
+            }
+        }
+        PickerType.PEOPLE -> {
+            Dialog(
+                onDismissRequest = { pickerShown = null },
+                properties = DialogProperties(usePlatformDefaultWidth = false),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.95f)
+                        .clip(RoundedCornerShape(16.dp)),
+                ) {
+                    PeoplePicker(
+                        p = p,
+                        selected = taggedPeople,
+                        onSelect = { people ->
+                            taggedPeople = people
+                            pickerShown = null
+                        },
+                        onClose = { pickerShown = null },
+                    )
+                }
+            }
+        }
+        PickerType.LOCATION -> {
+            Dialog(
+                onDismissRequest = { pickerShown = null },
+                properties = DialogProperties(usePlatformDefaultWidth = false),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.95f)
+                        .clip(RoundedCornerShape(16.dp)),
+                ) {
+                    LocationPicker(
+                        p = p,
+                        onSelect = { loc ->
+                            locationText = loc
+                            pickerShown = null
+                        },
+                        onClose = { pickerShown = null },
+                    )
+                }
+            }
+        }
+        PickerType.EVENT -> {
+            Dialog(
+                onDismissRequest = { pickerShown = null },
+                properties = DialogProperties(usePlatformDefaultWidth = false),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.95f)
+                        .clip(RoundedCornerShape(16.dp)),
+                ) {
+                    EventPicker(
+                        p = p,
+                        onSelect = { event ->
+                            eventText = event
+                            pickerShown = null
+                        },
+                        onClose = { pickerShown = null },
+                    )
+                }
+            }
+        }
+        PickerType.GIF -> {
+            Dialog(
+                onDismissRequest = { pickerShown = null },
+                properties = DialogProperties(usePlatformDefaultWidth = false),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.95f)
+                        .clip(RoundedCornerShape(16.dp)),
+                ) {
+                    GifPicker(
+                        p = p,
+                        onSelect = { gif ->
+                            // For now, just close. Can integrate GIF as media later.
+                            pickerShown = null
+                        },
+                        onClose = { pickerShown = null },
+                    )
+                }
+            }
+        }
+        null -> {}
+    }
+
+    Surface(color = p.bg) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Top bar
+            CreatePostTopBar(
+                p = p,
+                onClose = onClose,
+                onThemeToggle = { lightMode = !lightMode },
+                isDarkMode = !lightMode,
+            )
+
+            // Header row (avatar + name + tags)
+            CreatePostHeader(
+                p = p,
+                taggedPeople = taggedPeople,
+                locationText = locationText,
+                feelingEmoji = feelingEmoji,
+                eventText = eventText,
+                visibility = visibility,
+                onVisibilityChange = { visibility = it },
+            )
+
+            // Chips row (horizontally scrollable)
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(horizontal = 4.dp),
+            ) {
+                items(
+                    listOf(
+                        Pair(Icons.Default.SentimentSatisfied, "Feeling") to PickerType.FEELING,
+                        Pair(Icons.Default.PersonAdd, "People") to PickerType.PEOPLE,
+                        Pair(Icons.Default.Place, "Location") to PickerType.LOCATION,
+                        Pair(Icons.Default.CalendarMonth, "Event") to PickerType.EVENT,
+                        Pair(Icons.Default.PhotoLibrary, "Album") to null,
+                    )
+                ) { (iconLabel, pickerType) ->
+                    val (icon, label) = iconLabel
+                    FbChipPill(
+                        p = p,
+                        icon = icon,
+                        label = label,
+                        onClick = {
+                            pickerType?.let { pickerShown = it }
+                        },
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            // Media gallery - show all selected media in a scrollable row
+            if (mediaUris.isNotEmpty()) {
+                LazyRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(240.dp)
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp),
+                ) {
+                    items(mediaUris.size) { index ->
+                        Box(
+                            modifier = Modifier
+                                .width(180.dp)
+                                .height(240.dp)
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(p.card)
+                                .border(1.dp, p.border, RoundedCornerShape(18.dp)),
+                        ) {
+                            // Display image or video
+                            if (mediaTypes.getOrNull(index) == PostItem.MediaType.VIDEO) {
+                                val player = remember(mediaUris[index]) {
+                                    ExoPlayer.Builder(context).build().apply {
+                                        setMediaItem(MediaItem.fromUri(mediaUris[index]))
+                                        prepare()
+                                        playWhenReady = false
+                                    }
+                                }
+                                DisposableEffect(player) {
+                                    onDispose { player.release() }
+                                }
+                                AndroidView(
+                                    modifier = Modifier.fillMaxSize(),
+                                    factory = { ctx ->
+                                        PlayerView(ctx).apply {
+                                            useController = true
+                                            this.player = player
+                                        }
+                                    },
+                                    update = { it.player = player },
+                                )
+                            } else {
+                                AsyncImage(
+                                    model = mediaUris[index],
+                                    contentDescription = "Selected media $index",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop,
+                                )
+                            }
+
+                            // Delete button for this media
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(8.dp)
+                                    .size(32.dp)
+                                    .clip(CircleShape)
+                                    .background(p.bg.copy(alpha = 0.8f))
+                                    .border(1.dp, p.border, CircleShape)
+                                    .clickable(remember { MutableInteractionSource() }, null) {
+                                        // Remove this media item
+                                        mediaUris = mediaUris.filterIndexed { i, _ -> i != index }
+                                        mediaTypes = mediaTypes.filterIndexed { i, _ -> i != index }
+                                        // Update single media for compatibility
+                                        imageUri = mediaUris.firstOrNull()
+                                        mediaType = mediaTypes.firstOrNull()
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    "Remove",
+                                    tint = p.text,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+
+                            // Edit/Replace button for this media
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .padding(8.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(999.dp))
+                                        .background(p.primary.copy(alpha = 0.85f))
+                                        .clickable(remember { MutableInteractionSource() }, null) {
+                                            showEditMenu = index
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        "Edit",
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
+
+                                // Edit menu dropdown
+                                DropdownMenu(
+                                    expanded = showEditMenu == index,
+                                    onDismissRequest = { showEditMenu = null },
+                                    modifier = Modifier.background(p.card),
+                                ) {
+                                    // Crop option (only for images)
+                                    if (mediaTypes.getOrNull(index) == PostItem.MediaType.IMAGE) {
+                                        DropdownMenuItem(
+                                            text = {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    modifier = Modifier.fillMaxWidth()
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.CropSquare,
+                                                        "Crop",
+                                                        tint = p.text,
+                                                        modifier = Modifier.size(18.dp).padding(end = 8.dp)
+                                                    )
+                                                    Text("Crop", color = p.text)
+                                                }
+                                            },
+                                            onClick = {
+                                                selectedMediaIndex = index
+                                                val mediaUri = mediaUris[index]
+                                                val cropIntent = MediaCropper.createCropIntent(context, mediaUri)
+                                                cropLauncher.launch(cropIntent)
+                                                showEditMenu = null
+                                            },
+                                        )
+                                    }
+
+                                    // Change/Replace option
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.PhotoLibrary,
+                                                    "Change",
+                                                    tint = p.text,
+                                                    modifier = Modifier.size(18.dp).padding(end = 8.dp)
+                                                )
+                                                Text("Change", color = p.text)
+                                            }
+                                        },
+                                        onClick = {
+                                            selectedMediaIndex = index
+                                            galleryLauncher.launch("*/*")
+                                            showEditMenu = null
+                                        },
+                                    )
+                                }
+                            }
+
+                            // Media count badge
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(8.dp)
+                                    .clip(CircleShape)
+                                    .background(p.primary)
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    "${index + 1}/${mediaUris.size}",
+                                    color = Color.White,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                // Add more media button
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .height(54.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(p.card)
+                        .border(1.dp, p.border, RoundedCornerShape(16.dp))
+                        .clickable(remember { MutableInteractionSource() }, null) {
+                            selectedMediaIndex = null // Add new, don't replace
+                            galleryLauncher.launch("*/*")
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Default.Add, "Add more", tint = p.primary, modifier = Modifier.size(18.dp))
+                        Text("Add more photos", color = p.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+
+                Spacer(Modifier.height(10.dp))
+            } else {
+                // Show initial gallery upload button when no media selected
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .height(120.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(p.card)
+                        .border(2.dp, p.border, RoundedCornerShape(16.dp))
+                        .clickable(remember { MutableInteractionSource() }, null) {
+                            galleryLauncher.launch("*/*")
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.PhotoLibrary,
+                            "Add media",
+                            tint = p.primary,
+                            modifier = Modifier.size(32.dp)
+                        )
+                        Text("Add photos or videos", color = p.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Tap to select", color = p.textMuted, fontSize = 12.sp)
+                    }
+                }
+
+                Spacer(Modifier.height(10.dp))
+            }
+
+            // Text input
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+            ) {
+                BasicTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    textStyle = TextStyle(color = p.text, fontSize = 18.sp),
+                    modifier = Modifier.fillMaxSize(),
+                    decorationBox = { inner ->
+                        if (text.isBlank()) {
+                            Text(
+                                text = "What's on your mind?",
+                                color = p.placeholder,
+                                fontSize = 18.sp,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
+                        inner()
+                    }
+                )
+            }
+
+            // Bottom action bar (facebook-like)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .background(p.bg)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    ActionPill(p, "Gallery") { galleryLauncher.launch("*/*") }
+                    ActionPill(p, "GIF") { galleryLauncher.launch("image/gif") }
+                    ActionPill(p, "Video") { galleryLauncher.launch("video/*") }
+                    ActionPill(p, "Live")
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    ActionSmallPill(
+                        p = p,
+                        label = when (visibility) {
+                            PostItem.PostVisibility.PUBLIC -> "Public"
+                            PostItem.PostVisibility.FRIENDS -> "Friends"
+                            PostItem.PostVisibility.PRIVATE -> "Private"
+                        },
+                        selected = true,
+                        onClick = {
+                            visibility = when (visibility) {
+                                PostItem.PostVisibility.PUBLIC -> PostItem.PostVisibility.FRIENDS
+                                PostItem.PostVisibility.FRIENDS -> PostItem.PostVisibility.PRIVATE
+                                PostItem.PostVisibility.PRIVATE -> PostItem.PostVisibility.PUBLIC
+                            }
+                        }
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (canPost) p.primary else p.card)
+                            .border(1.dp, if (canPost) p.primary else p.border, RoundedCornerShape(12.dp))
+                            .clickable(
+                                enabled = canPost,
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                            ) { onPost(text.trim(), mediaUris, mediaTypes, visibility, allowComments, taggedPeople, feelingEmoji, locationText) },
+                    ) {
+                        Text(
+                            text = "Post",
+                            color = if (canPost) Color.White else p.textMuted,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PostChip(p: ComposerPalette, label: String, emoji: String) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(p.card)
+            .border(1.dp, p.border, RoundedCornerShape(999.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(emoji, fontSize = 14.sp)
+            Text(label, color = p.text, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        }
+    }
+}
+
+@Composable
+private fun PostChip(p: ComposerPalette, label: String, emoji: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(p.card)
+            .border(1.dp, p.border, RoundedCornerShape(999.dp))
+            .clickable(remember { MutableInteractionSource() }, null, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(emoji, fontSize = 14.sp)
+            Text(label, color = p.text, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+        }
+    }
+}
+
+@Composable
+private fun FbChipPill(
+    p: ComposerPalette,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .height(40.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .background(p.card)
+            .border(1.dp, p.border, RoundedCornerShape(999.dp))
+            .clickable(remember { MutableInteractionSource() }, null, onClick = onClick)
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(icon, contentDescription = label, tint = p.textMuted, modifier = Modifier.size(18.dp))
+        Text(label, color = p.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun RoundIconButton(
+    p: ComposerPalette,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(38.dp)
+            .clip(CircleShape)
+            .background(p.bg.copy(alpha = 0.65f))
+            .border(1.dp, p.border.copy(alpha = 0.6f), CircleShape)
+            .clickable(remember { MutableInteractionSource() }, null, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = contentDescription, tint = p.text, modifier = Modifier.size(18.dp))
+    }
+}
+
+@Composable
+private fun RowScope.ActionPill(p: ComposerPalette, label: String, onClick: () -> Unit = {}) {
+    Box(
+        modifier = Modifier
+            .weight(1f)
+            .height(54.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(p.card)
+            .border(1.dp, p.border, RoundedCornerShape(16.dp))
+            .clickable(remember { MutableInteractionSource() }, null, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, color = p.text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun ActionSmallPill(p: ComposerPalette, label: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(if (selected) p.card else p.bg)
+            .border(1.dp, if (selected) p.border else p.border.copy(alpha = 0.6f), RoundedCornerShape(999.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .clickable(remember { MutableInteractionSource() }, null, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, color = p.text, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+    }
 }

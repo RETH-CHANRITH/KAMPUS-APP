@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -419,7 +420,71 @@ private fun PostCard(post: PostItem, isLiked: Boolean, onLike: () -> Unit) {
             }
         }
 
-        if (post.imageUri != null && post.mediaType == PostItem.MediaType.VIDEO) {
+        // Display multiple media items in a horizontal scrollable gallery
+        if (post.mediaUris.isNotEmpty()) {
+            Spacer(Modifier.height(6.dp))
+            LazyRow(
+                modifier = Modifier
+                    .padding(horizontal = 14.dp)
+                    .fillMaxWidth()
+                    .height(220.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(HNavBg)
+                    .border(1.dp, HBorder, RoundedCornerShape(18.dp)),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(post.mediaUris.size) { index ->
+                    val mediaUri = post.mediaUris[index]
+                    val mediaType = post.mediaTypes.getOrNull(index) ?: PostItem.MediaType.IMAGE
+
+                    if (mediaType == PostItem.MediaType.VIDEO) {
+                        Box(
+                            modifier = Modifier
+                                .width(300.dp)
+                                .height(220.dp)
+                                .fillParentMaxHeight()
+                        ) {
+                            val player = remember(mediaUri) {
+                                ExoPlayer.Builder(context).build().apply {
+                                    setMediaItem(MediaItem.fromUri(mediaUri))
+                                    prepare()
+                                    playWhenReady = false
+                                }
+                            }
+                            DisposableEffect(player) {
+                                onDispose { player.release() }
+                            }
+                            AndroidView(
+                                modifier = Modifier.fillMaxSize(),
+                                factory = { ctx ->
+                                    PlayerView(ctx).apply {
+                                        useController = true
+                                        this.player = player
+                                    }
+                                },
+                                update = { it.player = player },
+                            )
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .width(300.dp)
+                                .height(220.dp)
+                                .fillParentMaxHeight()
+                        ) {
+                            AsyncImage(
+                                model = mediaUri,
+                                contentDescription = "Post media",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop,
+                            )
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+        } else if (post.imageUri != null && post.mediaType == PostItem.MediaType.VIDEO) {
+            // Backward compatibility: single media from old model
             Spacer(Modifier.height(6.dp))
             Box(
                 modifier = Modifier
@@ -453,6 +518,7 @@ private fun PostCard(post: PostItem, isLiked: Boolean, onLike: () -> Unit) {
             }
             Spacer(Modifier.height(10.dp))
         } else if (post.imageUri != null) {
+            // Backward compatibility: single image from old model
             Spacer(Modifier.height(6.dp))
             Box(
                 modifier = Modifier

@@ -1,4 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.Kampus" parent="Theme.AppCompat.Light.NoActionBar" />
+
+    <!-- Custom theme for UCrop Activity with safe area insets -->
+    <style name="UCropActivityTheme" parent="Theme.AppCompat.Light.NoActionBar">
+        <!-- Ensure navigation bar visibility and color -->
+        <item name="android:navigationBarColor">#000000</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        
+        <!-- Ensure content is drawn behind system bars, but respects insets -->
+        <item name="android:fitsSystemWindows">true</item>
+        
+        <!-- Add bottom padding to keep controls above navigation bar -->
+        <item name="android:windowFullscreen">false</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
 </resources>

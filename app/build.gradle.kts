@@ -54,6 +54,9 @@ dependencies {
 
     // Google Sign-In (for Firebase Auth with Google)
     implementation("com.google.android.gms:play-services-auth:21.3.0")
+    
+    // Location services
+    implementation("com.google.android.gms:play-services-location:21.1.0")
 
     // Core
     implementation(libs.androidx.core.ktx)
@@ -85,6 +88,7 @@ dependencies {
     // ViewModel
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
     implementation(libs.androidx.compose.runtime)
+    implementation(libs.play.services.location)
 
     // Test
     testImplementation(libs.junit)

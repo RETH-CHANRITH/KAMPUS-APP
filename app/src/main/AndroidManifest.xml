@@ -2,6 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
     <application
         android:name="com.example.kampus.KampusApp"
         android:allowBackup="true"
@@ -26,7 +29,10 @@
         <activity
             android:name="com.yalantis.ucrop.UCropActivity"
             android:screenOrientation="portrait"
-            android:theme="@style/Theme.Kampus" />
+            android:theme="@style/UCropActivityTheme"
+            android:windowSoftInputMode="adjustPan"
+            android:fitsSystemWindows="true"
+            android:windowDrawsSystemBarBackgrounds="true" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

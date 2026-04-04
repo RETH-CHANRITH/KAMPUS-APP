@@ -235,18 +235,16 @@ fun NavGraph(navController: NavHostController) {
             val feedViewModel: FeedViewModel = viewModel(homeEntry)
             CreatePostScreen(
                 onClose = { navController.popBackStack() },
-                onPost = { text, mediaUri, mediaType, visibility, allowComments, taggedPeople, feelingEmoji, location ->
+                onPost = { text, mediaUris, mediaTypes, visibility, allowComments, taggedPeople, feelingEmoji, location ->
                     feedViewModel.addPost(
                         text = text,
-                        imageUri = mediaUri,
-                        mediaType = mediaType,
-                        feeling = null,
-                        location = location,
+                        mediaUris = mediaUris,
+                        mediaTypes = mediaTypes,
                         visibility = visibility,
                         allowComments = allowComments,
-                        tags = emptyList(),
                         taggedPeople = taggedPeople,
                         feelingEmoji = feelingEmoji,
+                        location = location,
                     )
                     navController.popBackStack()
                 },
