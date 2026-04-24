@@ -23,9 +23,6 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items as lazyItems
-import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
-import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
-import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
@@ -44,18 +41,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import android.os.Looper
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.Priority
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationResult
-import android.os.Looper
 import kotlin.concurrent.thread
 
 // Palette definition
@@ -104,9 +105,30 @@ private val feelingEmojis = listOf(
     "😊", "😂", "❤️", "😍", "🤔", "😎", "🥳", "😴",
     "😤", "😢", "😱", "🤨", "😌", "🤗", "😳", "🙃"
 )
-private val mockGifs = listOf(
-    "Thinking", "Happy Dance", "Laughing", "Clapping", "Waving", "Thumbs Up",
-    "Fire", "Rocket", "Star", "Heart", "Sunglasses", "Party Hat"
+private data class GifItem(val url: String, val title: String, val id: String)
+
+// Reliable GIF URLs that work well
+private val allGifs = listOf(
+    GifItem("https://media0.giphy.com/media/3o85xIO33l7RlmLY1i/giphy-downsized.gif", "Thumbs Up", "1"),
+    GifItem("https://media0.giphy.com/media/g9GznKK0ZX9zS/giphy-downsized.gif", "Happy Dance", "2"),
+    GifItem("https://media0.giphy.com/media/l0NwPo3jdv8DDcAko/giphy-downsized.gif", "Laughing", "3"),
+    GifItem("https://media0.giphy.com/media/l0HlNaQ9SnLEFagic/giphy-downsized.gif", "Clapping", "4"),
+    GifItem("https://media0.giphy.com/media/3ohzdKfA0K7TT9qEJa/giphy-downsized.gif", "Waving", "5"),
+    GifItem("https://media0.giphy.com/media/10tIjpzIu8fe0/giphy-downsized.gif", "Thinking", "6"),
+    GifItem("https://media0.giphy.com/media/26uf1EUQzrPSAWmQ0/giphy-downsized.gif", "Fire", "7"),
+    GifItem("https://media0.giphy.com/media/7Jp8V2pYvYzUi/giphy-downsized.gif", "Star", "8"),
+    GifItem("https://media0.giphy.com/media/26BoCwvDMRf4HzDOo/giphy-downsized.gif", "Heart", "9"),
+    GifItem("https://media0.giphy.com/media/3oKHWikxKmJiBHS19i/giphy-downsized.gif", "Party", "10"),
+    GifItem("https://media0.giphy.com/media/jUwpNzg9IcyrK/giphy-downsized.gif", "Crying", "11"),
+    GifItem("https://media0.giphy.com/media/l3q2K5jinAlZ9halO/giphy-downsized.gif", "Shocked", "12"),
+    GifItem("https://media0.giphy.com/media/4Z9fSEFAuxpnm/giphy-downsized.gif", "Love", "13"),
+    GifItem("https://media0.giphy.com/media/3o6Zt6KHxJTbXCnSvu/giphy-downsized.gif", "Cool", "14"),
+    GifItem("https://media0.giphy.com/media/b5iP0mxC5g1xVXHJr5/giphy-downsized.gif", "Nope", "15"),
+    GifItem("https://media0.giphy.com/media/rKeJMAq4zsJQA/giphy-downsized.gif", "Celebration", "16"),
+    GifItem("https://media0.giphy.com/media/eMu6kVlr2vAFu/giphy-downsized.gif", "Cool Guy", "17"),
+    GifItem("https://media0.giphy.com/media/d3aYslY45yT6sW8eYM/giphy-downsized.gif", "Excited", "18"),
+    GifItem("https://media0.giphy.com/media/2gtoSIzMyJmg4rTg47/giphy-downsized.gif", "Haha", "19"),
+    GifItem("https://media0.giphy.com/media/xT9IgEx8SbQ0teblQU/giphy-downsized.gif", "Nice", "20"),
 )
 
 @Composable
@@ -343,7 +365,7 @@ internal fun LocationPicker(
         )
     }
 
-    // Set up real-time location updates when permissions granted
+    // Set up real-time location fetching when permissions granted
     DisposableEffect(hasPermission) {
         if (hasPermission) {
             val fusedClient = LocationServices.getFusedLocationProviderClient(context)
@@ -354,22 +376,56 @@ internal fun LocationPicker(
                 .build()
 
             val locationCallback = object : LocationCallback() {
-                override fun onLocationResult(locationResult: LocationResult) {
-                    val location = locationResult.lastLocation
-                    if (location != null) {
-                        isLoading = false
-                        convertLocationToAddress(context, location) { address ->
-                            currentLocation = address
+                override fun onLocationResult(result: LocationResult) {
+                    val location = result.lastLocation ?: return
+                    isLoading = false
+                    
+                    thread {
+                        try {
+                            val geocoder = Geocoder(context)
+                            val lat = location.latitude
+                            val lng = location.longitude
+                            
+                            @Suppress("DEPRECATION")
+                            val addresses = geocoder.getFromLocation(lat, lng, 1)
+                            if (!addresses.isNullOrEmpty()) {
+                                val address = addresses[0]
+                                val locationName = buildString {
+                                    if (address.thoroughfare != null) {
+                                        append(address.thoroughfare)
+                                        if (address.subThoroughfare != null) {
+                                            append(" ")
+                                            append(address.subThoroughfare)
+                                        }
+                                    }
+                                    if (address.locality != null) {
+                                        if (isNotEmpty()) append(", ")
+                                        append(address.locality)
+                                    } else if (address.adminArea != null) {
+                                        if (isNotEmpty()) append(", ")
+                                        append(address.adminArea)
+                                    }
+                                    if (address.countryName != null) {
+                                        if (isNotEmpty()) append(", ")
+                                        append(address.countryName)
+                                    }
+                                }
+                                currentLocation = if (locationName.isNotEmpty()) locationName else "$lat, $lng"
+                            } else {
+                                currentLocation = "$lat, $lng"
+                            }
+                        } catch (e: Exception) {
+                            val lat = location.latitude
+                            val lng = location.longitude
+                            currentLocation = "$lat, $lng"
                         }
                     }
                 }
             }
 
-            // Start requesting real-time location updates
             @Suppress("MissingPermission")
             fusedClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper())
 
-            // Cleanup when composable is disposed
             onDispose {
                 fusedClient.removeLocationUpdates(locationCallback)
             }
@@ -377,6 +433,8 @@ internal fun LocationPicker(
             onDispose { }
         }
     }
+
+
 
     Surface(color = p.bg) {
         Column(
@@ -407,180 +465,139 @@ internal fun LocationPicker(
 
             HorizontalDivider(color = p.border.copy(alpha = 0.5f), thickness = 0.5.dp)
 
-            // Live location section
-            if (isLoading) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 16.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(p.card)
-                        .border(1.dp, p.border, RoundedCornerShape(12.dp))
-                        .padding(16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text("📍", fontSize = 24.sp)
-                        Text("Getting your location...", color = p.textMuted, fontSize = 13.sp)
-                    }
-                }
-            } else if (currentLocation != null && !currentLocation!!.contains("Permission") && !currentLocation!!.contains("denied")) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 16.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(p.primary.copy(alpha = 0.12f))
-                        .border(1.5.dp, p.primary, RoundedCornerShape(12.dp))
-                        .clickable(remember { MutableInteractionSource() }, null) {
-                            onSelect(currentLocation!!)
-                            onClose()
+            // Search box for real-time location search
+            var searchQuery by remember { mutableStateOf("") }
+            val filteredLocations = mockLocations.filter { location ->
+                location.contains(searchQuery, ignoreCase = true)
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(p.card)
+                    .border(1.dp, p.border, RoundedCornerShape(10.dp))
+                    .padding(12.dp),
+            ) {
+                BasicTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    textStyle = TextStyle(color = p.text, fontSize = 14.sp),
+                    modifier = Modifier.fillMaxWidth(),
+                    decorationBox = { inner ->
+                        if (searchQuery.isBlank()) {
+                            Text("Search locations...", color = p.placeholder, fontSize = 14.sp)
                         }
-                        .padding(16.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        inner()
+                    },
+                )
+            }
+
+            // Current location section (if available and search is empty)
+            if (searchQuery.isBlank()) {
+                if (isLoading) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(p.card)
+                            .border(1.dp, p.border, RoundedCornerShape(12.dp))
+                            .padding(16.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text("📍", fontSize = 24.sp)
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("My Location", color = p.primary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                            Text(
-                                currentLocation!!,
-                                color = p.text,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 2
-                            )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text("📍", fontSize = 24.sp)
+                            Text("Getting your location...", color = p.textMuted, fontSize = 13.sp)
                         }
                     }
-                }
-            } else if (currentLocation != null) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 16.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(p.card)
-                        .border(1.dp, p.border, RoundedCornerShape(12.dp))
-                        .padding(16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                } else if (currentLocation != null && !currentLocation!!.contains("Permission") && !currentLocation!!.contains("denied")) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(p.primary.copy(alpha = 0.12f))
+                            .border(1.5.dp, p.primary, RoundedCornerShape(12.dp))
+                            .clickable(remember { MutableInteractionSource() }, null) {
+                                onSelect(currentLocation!!)
+                                onClose()
+                            }
+                            .padding(16.dp),
                     ) {
-                        Text("⚠️", fontSize = 24.sp)
-                        Text(currentLocation!!, color = p.textMuted, fontSize = 13.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                    }
-                }
-            }
-        }
-    }
-}
-
-private fun fetchUserLocation(context: Context, onLocationFetched: (String) -> Unit) {
-    thread {
-        try {
-            val fusedClient = LocationServices.getFusedLocationProviderClient(context)
-            var locationFound = false
-
-            // Request fresh, high-accuracy location
-            val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000)
-                .setMaxUpdateDelayMillis(1500)
-                .setWaitForAccurateLocation(true)
-                .setMinUpdateIntervalMillis(500)
-                .build()
-
-            val locationCallback = object : LocationCallback() {
-                override fun onLocationResult(locationResult: LocationResult) {
-                    val location = locationResult.lastLocation
-                    if (location != null && !locationFound) {
-                        locationFound = true
-                        convertLocationToAddress(context, location, onLocationFetched)
-                        fusedClient.removeLocationUpdates(this)
-                    }
-                }
-            }
-
-            // Start requesting fresh location immediately (skip lastLocation cache)
-            @Suppress("MissingPermission")
-            fusedClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper())
-
-            // Timeout: stop requesting after 30 seconds for GPS lock
-            Thread.sleep(30000)
-            if (!locationFound) {
-                fusedClient.removeLocationUpdates(locationCallback)
-                onLocationFetched("Unable to get location - check GPS and try again")
-            }
-        } catch (e: Exception) {
-            onLocationFetched("Location access denied")
-        }
-    }
-}
-
-private fun convertLocationToAddress(context: Context, location: android.location.Location, onLocationFetched: (String) -> Unit) {
-    thread {
-        try {
-            val geocoder = Geocoder(context)
-            val lat = location.latitude.format(4)
-            val lng = location.longitude.format(4)
-
-            try {
-                @Suppress("DEPRECATION")
-                val addresses = geocoder.getFromLocation(location.latitude, location.longitude, 1)
-                if (!addresses.isNullOrEmpty()) {
-                    val address = addresses[0]
-                    val locationName = buildString {
-                        // Show: Street Address, City, Country
-                        if (address.thoroughfare != null) {
-                            append(address.thoroughfare)
-                            if (address.subThoroughfare != null) {
-                                append(" ")
-                                append(address.subThoroughfare)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Text("📍", fontSize = 24.sp)
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("My Location", color = p.primary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    currentLocation!!,
+                                    color = p.text,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 2
+                                )
                             }
                         }
-                        if (address.locality != null) {
-                            if (isNotEmpty()) append(", ")
-                            append(address.locality)
-                        } else if (address.adminArea != null) {
-                            if (isNotEmpty()) append(", ")
-                            append(address.adminArea)
-                        }
-                        // Always add country for clarity
-                        if (address.countryName != null) {
-                            if (isNotEmpty()) append(", ")
-                            append(address.countryName)
-                        }
                     }
-
-                    if (locationName.isNotEmpty()) {
-                        onLocationFetched(locationName)
-                    } else {
-                        // Fallback: city or coordinates
-                        val fallback = address.locality ?: address.adminArea ?: address.countryName ?:
-                        "$lat, $lng"
-                        onLocationFetched(fallback)
-                    }
-                } else {
-                    // No address found, show coordinates
-                    onLocationFetched("$lat, $lng")
                 }
-            } catch (e: Exception) {
-                // Geocoding error, show coordinates
-                onLocationFetched("$lat, $lng")
+
+                HorizontalDivider(color = p.border.copy(alpha = 0.3f), thickness = 0.5.dp, modifier = Modifier.padding(vertical = 8.dp))
             }
-        } catch (e: Exception) {
-            onLocationFetched("${location.latitude.format(4)}, ${location.longitude.format(4)}")
+
+            // Real-time search results - scrollable list
+            if (filteredLocations.isEmpty() && searchQuery.isNotEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("No locations found", color = p.textMuted, fontSize = 13.sp)
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    lazyItems(filteredLocations) { location ->
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(p.card)
+                                .border(1.dp, p.border, RoundedCornerShape(10.dp))
+                                .clickable(remember { MutableInteractionSource() }, null) {
+                                    onSelect(location)
+                                    onClose()
+                                }
+                                .padding(12.dp),
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("📍", fontSize = 16.sp)
+                                Text(location, color = p.text, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
-private fun Double.format(digits: Int) = "%.${digits}f".format(this)
 
 @Composable
 internal fun GifPicker(
@@ -588,8 +605,17 @@ internal fun GifPicker(
     onSelect: (String) -> Unit,
     onClose: () -> Unit,
 ) {
+    val context = LocalContext.current
     var search by remember { mutableStateOf("") }
-    val filtered = mockGifs.filter { it.contains(search, ignoreCase = true) }
+    
+    // Filter GIFs locally - instant, no network calls
+    val filteredGifs = if (search.isEmpty()) {
+        allGifs
+    } else {
+        allGifs.filter { gif ->
+            gif.title.contains(search, ignoreCase = true)
+        }
+    }
 
     Surface(color = p.bg) {
         Column(modifier = Modifier.fillMaxWidth()) {
@@ -640,30 +666,110 @@ internal fun GifPicker(
                 )
             }
 
-            // GIF grid
-            LazyVerticalStaggeredGrid(
-                columns = StaggeredGridCells.Fixed(2),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalItemSpacing = 12.dp,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                items(if (search.isBlank()) mockGifs else filtered) { gif ->
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(100.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(p.card)
-                            .border(1.dp, p.border, RoundedCornerShape(10.dp))
-                            .clickable(remember { MutableInteractionSource() }, null) {
-                                onSelect(gif)
-                                onClose()
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(gif, color = p.text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            // No results message
+            if (filteredGifs.isEmpty() && search.isNotEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("No GIFs found\nfor \"$search\"", color = p.textMuted, fontSize = 13.sp)
+                }
+            }
+
+            // GIF grid - instant local search
+            if (filteredGifs.isNotEmpty()) {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(0.dp),
+                ) {
+                    items(filteredGifs) { gif ->
+                        var imageLoading by remember { mutableStateOf(false) }
+                        
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(150.dp)
+                                .shadow(
+                                    elevation = 6.dp,
+                                    shape = RoundedCornerShape(12.dp),
+                                    ambientColor = Color.Black.copy(alpha = 0.3f),
+                                    spotColor = Color.Black.copy(alpha = 0.4f)
+                                )
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(p.card)
+                                .border(1.dp, p.border.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                                .clickable(remember { MutableInteractionSource() }, null) {
+                                    onSelect(gif.title)
+                                    onClose()
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            // Loading skeleton placeholder
+                            if (imageLoading) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(150.dp)
+                                        .background(
+                                            color = p.card.copy(alpha = 0.6f)
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("⏳", fontSize = 20.sp)
+                                }
+                            }
+                            
+                            // GIF image with better caching
+                            AsyncImage(
+                                model = ImageRequest.Builder(context)
+                                    .data(gif.url)
+                                    .crossfade(durationMillis = 150)
+                                    .allowHardware(true)
+                                    .build(),
+                                contentDescription = gif.title,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(150.dp)
+                                    .clip(RoundedCornerShape(12.dp)),
+                                onLoading = { imageLoading = true },
+                                onSuccess = { imageLoading = false },
+                                onError = { imageLoading = false }
+                            )
+                            
+                            // Dark overlay for text visibility
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(150.dp)
+                                    .background(Color.Black.copy(alpha = 0.2f))
+                            )
+
+                            // GIF title at bottom
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .align(Alignment.BottomCenter)
+                                    .background(Color.Black.copy(alpha = 0.5f))
+                                    .padding(8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    gif.title,
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1
+                                )
+                            }
+                        }
                     }
                 }
             }

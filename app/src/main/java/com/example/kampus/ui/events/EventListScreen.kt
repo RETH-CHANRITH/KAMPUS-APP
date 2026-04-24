@@ -788,16 +788,6 @@ private fun EventBottomNav(
             ) {
                 Icon(Icons.Outlined.Person, "Profile", tint = C.Gray3, modifier = Modifier.size(24.dp))
             }
-            if (notifCount > 0) {
-                Box(
-                    modifier = Modifier
-                        .size(18.dp).align(Alignment.TopEnd).offset(2.dp, (-2).dp)
-                        .clip(CircleShape).background(C.Red).border(1.5.dp, C.Bg, CircleShape),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("$notifCount", color = C.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                }
-            }
         }
     }
 }

@@ -52,6 +52,11 @@ dependencies {
     implementation("com.google.firebase:firebase-storage")
     implementation("com.google.firebase:firebase-messaging")
 
+    // Supabase (for image storage)
+    implementation("io.github.jan-tennert.supabase:supabase-kt:2.2.2")
+    implementation("io.github.jan-tennert.supabase:storage-kt:2.2.2")
+    implementation("io.ktor:ktor-client-android:2.3.0")
+
     // Google Sign-In (for Firebase Auth with Google)
     implementation("com.google.android.gms:play-services-auth:21.3.0")
     
@@ -89,6 +94,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
     implementation(libs.androidx.compose.runtime)
     implementation(libs.play.services.location)
+    implementation(libs.play.services.contextmanager)
 
     // Test
     testImplementation(libs.junit)

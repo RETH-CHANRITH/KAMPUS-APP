@@ -25,6 +25,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -33,6 +34,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.google.firebase.auth.FirebaseAuth
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 private val ABg = Color(0xFF1A1D2E)
 private val ACard = Color(0xFF252A41)
@@ -43,7 +50,24 @@ private val ABlue = Color(0xFF0D7FFF)
 private val ADanger = Color(0xFFFB2C36)
 
 @Composable
-fun AccountSettingsScreen(onBack: () -> Unit) {
+fun AccountSettingsScreen(
+    onBack: () -> Unit,
+    viewModel: ProfileViewModel = viewModel(),
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    
+    // Get real email from Firebase Auth
+    val realEmail = FirebaseAuth.getInstance().currentUser?.email ?: state.email
+    
+    // Format account creation date
+    val createdDate = FirebaseAuth.getInstance().currentUser?.metadata?.creationTimestamp?.let { timestamp ->
+        val sdf = SimpleDateFormat("MMMM dd, yyyy", Locale.ENGLISH)
+        sdf.format(Date(timestamp))
+    } ?: "N/A"
+    
+    // Get phone from profile state
+    val phone = state.phone.ifEmpty { "Not set" }
+    
     Surface(color = ABg, modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
@@ -75,9 +99,9 @@ fun AccountSettingsScreen(onBack: () -> Unit) {
             }
 
             Section(title = "Account Information") {
-                InfoRow(label = "Email", value = "sarah.johnson@email.com")
-                InfoRow(label = "Phone", value = "+1 234 567 8900")
-                InfoRow(label = "Account Created", value = "January 15, 2024", showDivider = false)
+                InfoRow(label = "Email", value = realEmail)
+                InfoRow(label = "Phone", value = phone)
+                InfoRow(label = "Account Created", value = createdDate, showDivider = false)
             }
 
             Section(title = "Linked Accounts") {

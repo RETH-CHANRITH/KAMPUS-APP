@@ -2,10 +2,16 @@ package com.example.kampus.ui.feed
 
 import android.net.Uri
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.example.kampus.data.repository.PostRepositoryImpl
+import com.example.kampus.utils.ActivityLogger
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -39,12 +45,28 @@ class FeedViewModel : ViewModel() {
     private val _likedIds = MutableStateFlow<Set<Int>>(emptySet())
     val likedIds: StateFlow<Set<Int>> = _likedIds.asStateFlow()
 
+    private val postRepository = PostRepositoryImpl(FirebaseFirestore.getInstance())
+
     // ─────────────────────────────────────────────────────────────────────────
     // Initialization
     // ─────────────────────────────────────────────────────────────────────────
 
     init {
-        loadMockPosts()
+        loadPosts()
+    }
+
+    private fun loadPosts() {
+        viewModelScope.launch {
+            postRepository.getFeedPosts().collect { result ->
+                result.onSuccess { posts ->
+                    _posts.update { posts }
+                    _uiState.update { it.copy(posts = posts, isLoading = false) }
+                }
+                result.onFailure { error ->
+                    _uiState.update { it.copy(isLoading = false, errorMessage = error.message) }
+                }
+            }
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -132,6 +154,14 @@ class FeedViewModel : ViewModel() {
                 listOf(newPost) + currentPosts
             }
 
+            persistPost(newPost)
+
+            ActivityLogger.logAction(
+                type = "create_post",
+                text = "Created a post",
+                metadata = mapOf("postId" to newPost.id),
+            )
+
             clearError()
         } catch (e: Exception) {
             setError("Failed to create post: ${e.message}")
@@ -185,6 +215,14 @@ class FeedViewModel : ViewModel() {
             _posts.update { currentPosts ->
                 listOf(newPost) + currentPosts
             }
+
+            persistPost(newPost)
+
+            ActivityLogger.logAction(
+                type = "create_post",
+                text = "Created a post",
+                metadata = mapOf("postId" to newPost.id),
+            )
 
             clearError()
         } catch (e: Exception) {
@@ -438,6 +476,28 @@ class FeedViewModel : ViewModel() {
     private fun getCurrentTime(): String {
         val dateFormat = SimpleDateFormat("MMM d, yyyy 'at' h:mm a", Locale.getDefault())
         return dateFormat.format(Date())
+    }
+
+    private fun persistPost(post: PostItem) {
+        viewModelScope.launch {
+            val currentUserId = FirebaseAuth.getInstance().currentUser?.uid
+            val payload = mapOf(
+                "id" to post.id,
+                "author" to post.author,
+                "avatar" to post.avatar,
+                "time" to post.time,
+                "content" to post.content,
+                "likes" to post.likes,
+                "comments" to post.comments,
+                "timestamp" to System.currentTimeMillis(),
+                "userId" to (currentUserId ?: ""),
+            )
+
+            val result = postRepository.createPost(payload)
+            result.onFailure { error ->
+                setError("Post saved locally, sync failed: ${error.message}")
+            }
+        }
     }
 
     /**

@@ -618,7 +618,7 @@ fun CreatePostScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     ActionPill(p, "Gallery") { galleryLauncher.launch("*/*") }
-                    ActionPill(p, "GIF") { galleryLauncher.launch("image/gif") }
+                    ActionPill(p, "GIF") { pickerShown = PickerType.GIF }
                     ActionPill(p, "Video") { galleryLauncher.launch("video/*") }
                     ActionPill(p, "Live")
                 }
@@ -626,25 +626,8 @@ fun CreatePostScreen(
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.End,
                 ) {
-                    ActionSmallPill(
-                        p = p,
-                        label = when (visibility) {
-                            PostItem.PostVisibility.PUBLIC -> "Public"
-                            PostItem.PostVisibility.FRIENDS -> "Friends"
-                            PostItem.PostVisibility.PRIVATE -> "Private"
-                        },
-                        selected = true,
-                        onClick = {
-                            visibility = when (visibility) {
-                                PostItem.PostVisibility.PUBLIC -> PostItem.PostVisibility.FRIENDS
-                                PostItem.PostVisibility.FRIENDS -> PostItem.PostVisibility.PRIVATE
-                                PostItem.PostVisibility.PRIVATE -> PostItem.PostVisibility.PUBLIC
-                            }
-                        }
-                    )
-
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(12.dp))

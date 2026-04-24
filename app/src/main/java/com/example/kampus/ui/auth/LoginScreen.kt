@@ -62,9 +62,10 @@ fun LoginScreen(
     onGoogleClick    : () -> Unit = {},
     onAppleClick     : () -> Unit = {},
     onBackClick      : () -> Unit = {},
+    prefilledEmail   : String = "",
     authViewModel    : AuthViewModel = viewModel()
 ) {
-    var email           by remember { mutableStateOf("") }
+    var email           by remember(prefilledEmail) { mutableStateOf(prefilledEmail) }
     var password        by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
     var saveMe          by remember { mutableStateOf(true) }
@@ -104,6 +105,7 @@ fun LoginScreen(
     }
     val isLoading   = authState is AuthState.Loading
     val focusManager = LocalFocusManager.current
+    val lockEmailField = prefilledEmail.isNotBlank()
 
     // Ambient glow animation
     val inf = rememberInfiniteTransition(label = "login_glow")
@@ -126,6 +128,7 @@ fun LoginScreen(
         emailError = when {
             email.isBlank()      -> { ok = false; "Email is required" }
             !email.contains("@") -> { ok = false; "Enter a valid email" }
+            !email.endsWith("@rupp.edu.kh") -> { ok = false; "Only RUPP emails (@rupp.edu.kh) allowed" }
             else -> ""
         }
         passwordError = when {
@@ -259,18 +262,28 @@ fun LoginScreen(
                     .background(Card)
                     .border(1.dp, CardBorder, RoundedCornerShape(24.dp))
                     .padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                PremiumInputField(
-                    value         = email,
-                    onValueChange = { email = it; emailError = ""; authViewModel.resetState() },
-                    label         = "Email Address",
-                    placeholder   = "you@example.com",
-                    icon          = Icons.Outlined.Email,
-                    error         = emailError,
-                    keyboardType  = KeyboardType.Email,
-                    imeAction     = ImeAction.Next
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    PremiumInputField(
+                        value         = email,
+                        onValueChange = { email = it; emailError = ""; authViewModel.resetState() },
+                        label         = "Email Address",
+                        placeholder   = "reth.chanrith.2823@rupp.edu.kh",
+                        icon          = Icons.Outlined.Email,
+                        error         = emailError,
+                        keyboardType  = KeyboardType.Email,
+                        readOnly      = lockEmailField,
+                        imeAction     = ImeAction.Next
+                    )
+                    // RUPP email hint
+                    Text(
+                        text = "🎓 Use your RUPP University email (@rupp.edu.kh)",
+                        fontSize = 12.sp,
+                        color = Gray500,
+                        modifier = Modifier.padding(horizontal = 4.dp)
+                    )
+                }
 
                 PremiumInputField(
                     value            = password,
@@ -423,6 +436,7 @@ fun PremiumInputField(
     onTogglePassword : () -> Unit   = {},
     keyboardType     : KeyboardType = KeyboardType.Text,
     comment          : String       = "",
+    readOnly         : Boolean      = false,
     imeAction        : ImeAction    = ImeAction.Next,
     onDone           : () -> Unit   = {}
 ) {
@@ -477,6 +491,7 @@ fun PremiumInputField(
                 PasswordVisualTransformation() else VisualTransformation.None,
             keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = imeAction),
             keyboardActions = KeyboardActions(onDone = { onDone() }),
+            readOnly        = readOnly,
             singleLine      = true,
             isError         = error.isNotEmpty(),
             shape           = RoundedCornerShape(14.dp),
@@ -684,19 +699,20 @@ fun AuthInputField(
     imeAction        : ImeAction    = ImeAction.Next,
     onDone           : () -> Unit   = {}
 ) = PremiumInputField(
-    value,
-    onValueChange,
-    label,
-    placeholder,
-    icon,
-    error,
-    isPassword,
-    passwordVisible,
-    onTogglePassword,
-    keyboardType,
-    "",
-    imeAction,
-    onDone,
+    value = value,
+    onValueChange = onValueChange,
+    label = label,
+    placeholder = placeholder,
+    icon = icon,
+    error = error,
+    isPassword = isPassword,
+    passwordVisible = passwordVisible,
+    onTogglePassword = onTogglePassword,
+    keyboardType = keyboardType,
+    comment = "",
+    readOnly = false,
+    imeAction = imeAction,
+    onDone = onDone,
 )
 
 @Composable

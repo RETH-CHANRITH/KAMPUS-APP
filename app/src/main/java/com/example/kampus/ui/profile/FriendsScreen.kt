@@ -30,7 +30,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -39,42 +38,35 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage
 
 private val FgBg = Color(0xFF1A1F2E)
 private val FgCard = Color(0xFF252A41)
+private val FgChip = Color(0xFF3A3F54)
 private val FgBlue = Color(0xFF0D7FFF)
 private val FgText = Color.White
 private val FgMuted = Color(0xFF99A1AF)
 private val FgDanger = Color(0xFFFF4458)
 
-private data class FriendItem(
-    val id: Int,
-    val name: String,
-    val handle: String,
-    val mutualFriends: String,
-)
-
 @Composable
-fun FriendsScreen(onBack: () -> Unit) {
+fun FriendsScreen(
+    onBack: () -> Unit,
+    onOpenProfile: (String) -> Unit,
+    onOpenChat: (String) -> Unit,
+    viewModel: FriendsViewModel = viewModel(),
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
     var selectedTab by remember { mutableStateOf(0) }
-    val friends = remember {
-        mutableStateListOf(
-            FriendItem(1, "Sarah Johnson", "@sarahjohnson", "12 mutual friends"),
-            FriendItem(2, "Mike Chen", "@mikechen", "8 mutual friends"),
-            FriendItem(3, "Emma Davis", "@emmadavis", "10 mutual friends"),
-            FriendItem(4, "Alex Martinez", "@alexmartinez", "7 mutual friends"),
-            FriendItem(5, "Luna Smith", "@lunasmith", "9 mutual friends"),
-            FriendItem(6, "David Wilson", "@davidwilson", "6 mutual friends"),
-        )
-    }
-    val followers = remember {
-        mutableStateListOf(
-            FriendItem(101, "Olivia Brown", "@oliviabrown", "5 mutual friends"),
-            FriendItem(102, "James Taylor", "@jamestaylor", "3 mutual friends"),
-        )
+    val totalCount = when (selectedTab) {
+        0 -> state.friends.size
+        1 -> state.followers.size
+        else -> state.following.size
     }
 
     Surface(color = FgBg, modifier = Modifier.fillMaxSize()) {
@@ -86,36 +78,55 @@ fun FriendsScreen(onBack: () -> Unit) {
                 .padding(horizontal = 24.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Header(onBack = onBack)
+            Header(onBack = onBack, totalCount = totalCount)
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 TabButton(
-                    title = "Friends (${friends.size})",
+                    title = "Friends (${state.friends.size})",
                     selected = selectedTab == 0,
                     modifier = Modifier.weight(1f),
                     onClick = { selectedTab = 0 },
                 )
                 TabButton(
-                    title = "Followers (${followers.size})",
+                    title = "Followers (${state.followers.size})",
                     selected = selectedTab == 1,
                     modifier = Modifier.weight(1f),
                     onClick = { selectedTab = 1 },
                 )
+                TabButton(
+                    title = "Following (${state.following.size})",
+                    selected = selectedTab == 2,
+                    modifier = Modifier.weight(1f),
+                    onClick = { selectedTab = 2 },
+                )
             }
 
-            val list = if (selectedTab == 0) friends else followers
+            val list = when (selectedTab) {
+                0 -> state.friends
+                1 -> state.followers
+                else -> state.following
+            }
+            val followingIds = state.following.map { it.userId }.toSet()
             LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
-                items(items = list, key = { it.id }) { item ->
-                    if (selectedTab == 0) {
-                        FriendRow(
+                items(items = list, key = { it.userId }) { item ->
+                    when (selectedTab) {
+                        0 -> FriendRow(
                             item = item,
-                            onUnfriend = { friends.removeAll { it.id == item.id } },
-                            onBlock = { friends.removeAll { it.id == item.id } },
+                            onOpenProfile = { onOpenProfile(item.userId) },
+                            onOpenChat = { onOpenChat(item.userId) },
+                            onUnfollow = { viewModel.unfollow(item.userId) },
+                            onBlock = { viewModel.blockUser(item.userId) },
                         )
-                    } else {
-                        FollowerRow(
+                        1 -> FollowerRow(
                             item = item,
-                            onFollowBack = { followers.removeAll { it.id == item.id } },
+                            onOpenProfile = { onOpenProfile(item.userId) },
+                            isFollowing = item.userId in followingIds,
+                            onFollowBack = { viewModel.followBack(item.userId) },
+                        )
+                        else -> FollowingRow(
+                            item = item,
+                            onOpenProfile = { onOpenProfile(item.userId) },
+                            onUnfollow = { viewModel.unfollow(item.userId) },
                         )
                     }
                 }
@@ -126,7 +137,7 @@ fun FriendsScreen(onBack: () -> Unit) {
 }
 
 @Composable
-private fun Header(onBack: () -> Unit) {
+private fun Header(onBack: () -> Unit, totalCount: Int) {
     Row(
         horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -150,7 +161,12 @@ private fun Header(onBack: () -> Unit) {
                 .background(FgBlue),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Outlined.PersonAdd, contentDescription = null, tint = FgText)
+            Text(
+                text = "$totalCount",
+                color = FgText,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+            )
         }
     }
 }
@@ -180,7 +196,13 @@ private fun TabButton(
 }
 
 @Composable
-private fun FriendRow(item: FriendItem, onUnfriend: () -> Unit, onBlock: () -> Unit) {
+private fun FriendRow(
+    item: FriendItemData,
+    onOpenProfile: () -> Unit,
+    onOpenChat: () -> Unit,
+    onUnfollow: () -> Unit,
+    onBlock: () -> Unit,
+) {
     var showMenu by remember { mutableStateOf(false) }
 
     Row(
@@ -188,33 +210,23 @@ private fun FriendRow(item: FriendItem, onUnfriend: () -> Unit, onBlock: () -> U
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(FgCard)
+            .clickable(onClick = onOpenProfile)
             .padding(horizontal = 16.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Box(
-            modifier = Modifier
-                .size(56.dp)
-                .clip(CircleShape)
-                .background(
-                    Brush.linearGradient(
-                        listOf(Color(0xFF2FA7FF), Color(0xFF7C3AED)),
-                    ),
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(text = item.name.take(1), color = FgText, fontWeight = FontWeight.Bold, fontSize = 22.sp)
-        }
+        FriendAvatar(item = item)
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(text = item.name, color = FgText, fontSize = 18.sp)
             Text(text = item.handle, color = FgMuted, fontSize = 14.sp)
-            Text(text = item.mutualFriends, color = FgBlue, fontSize = 12.sp)
+            Text(text = "${item.mutualFriendsCount} mutual friends", color = FgBlue, fontSize = 12.sp)
         }
         Box(
             modifier = Modifier
                 .size(40.dp)
                 .clip(CircleShape)
-                .background(FgBlue),
+                .background(FgBlue)
+                .clickable(onClick = onOpenChat),
             contentAlignment = Alignment.Center,
         ) {
             Icon(Icons.Outlined.ChatBubbleOutline, contentDescription = null, tint = FgText, modifier = Modifier.size(18.dp))
@@ -232,10 +244,10 @@ private fun FriendRow(item: FriendItem, onUnfriend: () -> Unit, onBlock: () -> U
                 containerColor = Color(0xFF1E2235),
             ) {
                 DropdownMenuItem(
-                    text = { Text(text = "Unfriend", color = Color(0xFFD1D5DC)) },
+                    text = { Text(text = "Unfollow", color = Color(0xFFD1D5DC)) },
                     onClick = {
                         showMenu = false
-                        onUnfriend()
+                        onUnfollow()
                     },
                 )
                 DropdownMenuItem(
@@ -251,16 +263,88 @@ private fun FriendRow(item: FriendItem, onUnfriend: () -> Unit, onBlock: () -> U
 }
 
 @Composable
-private fun FollowerRow(item: FriendItem, onFollowBack: () -> Unit) {
+private fun FollowerRow(
+    item: FriendItemData,
+    onOpenProfile: () -> Unit,
+    isFollowing: Boolean,
+    onFollowBack: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(FgCard)
+            .clickable(onClick = onOpenProfile)
             .padding(horizontal = 16.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        FriendAvatar(item = item)
+
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(text = item.name, color = FgText, fontSize = 18.sp)
+            Text(text = item.handle, color = FgMuted, fontSize = 14.sp)
+            Text(text = "${item.mutualFriendsCount} mutual friends", color = FgBlue, fontSize = 12.sp)
+        }
+
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(14.dp))
+                .background(if (isFollowing) FgChip else FgBlue)
+                .clickable(enabled = !isFollowing, onClick = onFollowBack)
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = if (isFollowing) "Following" else "Follow Back",
+                color = FgText,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+            )
+        }
+    }
+}
+
+@Composable
+private fun FollowingRow(
+    item: FriendItemData,
+    onOpenProfile: () -> Unit,
+    onUnfollow: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(FgCard)
+            .clickable(onClick = onOpenProfile)
+            .padding(horizontal = 16.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        FriendAvatar(item = item)
+
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(text = item.name, color = FgText, fontSize = 18.sp)
+            Text(text = item.handle, color = FgMuted, fontSize = 14.sp)
+            Text(text = "${item.mutualFriendsCount} mutual friends", color = FgBlue, fontSize = 12.sp)
+        }
+
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(14.dp))
+                .background(FgChip)
+                .clickable(onClick = onUnfollow)
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(text = "Unfollow", color = FgText, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        }
+    }
+}
+
+@Composable
+private fun FriendAvatar(item: FriendItemData) {
+    Box(modifier = Modifier.size(56.dp)) {
         Box(
             modifier = Modifier
                 .size(56.dp)
@@ -272,24 +356,25 @@ private fun FollowerRow(item: FriendItem, onFollowBack: () -> Unit) {
                 ),
             contentAlignment = Alignment.Center,
         ) {
-            Text(text = item.name.take(1), color = FgText, fontWeight = FontWeight.Bold, fontSize = 22.sp)
-        }
-
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(text = item.name, color = FgText, fontSize = 18.sp)
-            Text(text = item.handle, color = FgMuted, fontSize = 14.sp)
-            Text(text = item.mutualFriends, color = FgBlue, fontSize = 12.sp)
+            if (item.profileImageUrl.isNotEmpty()) {
+                AsyncImage(
+                    model = item.profileImageUrl,
+                    contentDescription = item.name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize().clip(CircleShape),
+                )
+            } else {
+                val fallback = item.name.trim().take(1).uppercase().ifEmpty { "?" }
+                Text(text = fallback, color = FgText, fontWeight = FontWeight.Bold, fontSize = 24.sp)
+            }
         }
 
         Box(
             modifier = Modifier
-                .clip(RoundedCornerShape(14.dp))
-                .background(FgBlue)
-                .clickable(onClick = onFollowBack)
-                .padding(horizontal = 14.dp, vertical = 8.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(text = "Follow Back", color = FgText, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-        }
+                .align(Alignment.BottomEnd)
+                .size(12.dp)
+                .clip(CircleShape)
+                .background(if (item.isOnline) Color(0xFF39D98A) else Color(0xFF6B7280))
+        )
     }
 }
