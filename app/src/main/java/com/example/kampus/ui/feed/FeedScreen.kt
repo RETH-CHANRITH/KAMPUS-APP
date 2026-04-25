@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -33,6 +34,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import com.example.kampus.ui.components.CampusBottomNavBar
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Palette
@@ -133,9 +135,8 @@ fun HomeScreen(
                     .padding(horizontal = 14.dp, vertical = 10.dp)
                     .navigationBarsPadding(),
             ) {
-                CampusBottomNav(
+                CampusBottomNavBar(
                     selectedIndex  = selectedNav,
-                    // ── FIX: wire navigation callbacks per tab index ──────────
                     onItemSelected = { index ->
                         selectedNav = index
                         when (index) {
@@ -145,9 +146,9 @@ fun HomeScreen(
                             3 -> onChatClick()
                         }
                     },
-                    notifCount     = notifCount,
                     onFabClick     = onCreatePost,
                     onProfileClick = onProfileClick,
+                    isProfileSelected = false,
                 )
             }
         },
@@ -419,7 +420,73 @@ private fun PostCard(post: PostItem, isLiked: Boolean, onLike: () -> Unit) {
             }
         }
 
-        if (post.imageUri != null && post.mediaType == PostItem.MediaType.VIDEO) {
+        // Display multiple media items in a horizontal scrollable gallery
+        if (post.mediaUris.isNotEmpty()) {
+            Spacer(Modifier.height(6.dp))
+            LazyRow(
+                modifier = Modifier
+                    .padding(horizontal = 14.dp)
+                    .fillMaxWidth()
+                    .height(220.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(HNavBg)
+                    .border(1.dp, HBorder, RoundedCornerShape(18.dp)),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(post.mediaUris.size) { index ->
+                    val mediaUri = post.mediaUris[index]
+                    val mediaType = post.mediaTypes.getOrNull(index) ?: PostItem.MediaType.IMAGE
+
+                    if (mediaType == PostItem.MediaType.VIDEO) {
+                        Box(
+                            modifier = Modifier
+                                .width(300.dp)
+                                .height(220.dp)
+                                .fillParentMaxHeight()
+                        ) {
+                            val player = remember(mediaUri) {
+                                ExoPlayer.Builder(context).build().apply {
+                                    setMediaItem(MediaItem.fromUri(mediaUri))
+                                    prepare()
+                                    playWhenReady = false
+                                }
+                            }
+                            DisposableEffect(player) {
+                                onDispose { player.release() }
+                            }
+                            AndroidView(
+                                modifier = Modifier.fillMaxSize(),
+                                factory = { ctx ->
+                                    PlayerView(ctx).apply {
+                                        useController = true
+                                        this.player = player
+                                    }
+                                },
+                                update = { it.player = player },
+                            )
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .width(300.dp)
+                                .height(220.dp)
+                                .fillParentMaxHeight()
+                        ) {
+                            AsyncImage(
+                                model = mediaUri,
+                                contentDescription = "Post media",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop,
+                            )
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+        } else if (isLegacyVideoPost(post)) {
+            // Backward compatibility: single media from old model
+            @Suppress("DEPRECATION")
+            val imageUri = post.imageUri!!
             Spacer(Modifier.height(6.dp))
             Box(
                 modifier = Modifier
@@ -430,9 +497,9 @@ private fun PostCard(post: PostItem, isLiked: Boolean, onLike: () -> Unit) {
                     .background(HNavBg)
                     .border(1.dp, HBorder, RoundedCornerShape(18.dp)),
             ) {
-                val player = remember(post.imageUri) {
+                val player = remember(imageUri) {
                     ExoPlayer.Builder(context).build().apply {
-                        setMediaItem(MediaItem.fromUri(post.imageUri))
+                        setMediaItem(MediaItem.fromUri(imageUri))
                         prepare()
                         playWhenReady = false
                     }
@@ -452,7 +519,10 @@ private fun PostCard(post: PostItem, isLiked: Boolean, onLike: () -> Unit) {
                 )
             }
             Spacer(Modifier.height(10.dp))
-        } else if (post.imageUri != null) {
+        } else if (isLegacyImagePost(post)) {
+            // Backward compatibility: single image from old model
+            @Suppress("DEPRECATION")
+            val imageUri = post.imageUri!!
             Spacer(Modifier.height(6.dp))
             Box(
                 modifier = Modifier
@@ -464,7 +534,7 @@ private fun PostCard(post: PostItem, isLiked: Boolean, onLike: () -> Unit) {
                     .border(1.dp, HBorder, RoundedCornerShape(18.dp)),
             ) {
                 AsyncImage(
-                    model = post.imageUri,
+                    model = imageUri,
                     contentDescription = "Post image",
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -472,7 +542,8 @@ private fun PostCard(post: PostItem, isLiked: Boolean, onLike: () -> Unit) {
             Spacer(Modifier.height(10.dp))
         }
 
-        if (post.imageEmoji != null) {
+        val imageEmoji = getLegacyImageEmoji(post)
+        if (imageEmoji != null) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -482,7 +553,7 @@ private fun PostCard(post: PostItem, isLiked: Boolean, onLike: () -> Unit) {
                     .background(Brush.verticalGradient(listOf(HGray6.copy(0.28f), Color(0xFF050810)))),
             ) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(post.imageEmoji, fontSize = 80.sp)
+                    Text(imageEmoji, fontSize = 80.sp)
                 }
                 Box(
                     modifier = Modifier
@@ -563,139 +634,21 @@ private fun TextAction(icon: ImageVector, label: String, tint: Color, scale: Flo
 // Bottom Nav
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
-private fun CampusBottomNav(
-    selectedIndex  : Int,
-    onItemSelected : (Int) -> Unit,   // ← receives index, caller decides navigation
-    notifCount     : Int,
-    onFabClick     : () -> Unit,
-    onProfileClick : () -> Unit,
-) {
-    Row(
-        modifier              = Modifier.fillMaxWidth(),
-        verticalAlignment     = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        // ── LEFT PILL — nav tabs ──────────────────────────────────────────────
-        Row(
-            modifier = Modifier
-                .weight(1f)
-                .height(64.dp)
-                .clip(RoundedCornerShape(32.dp))
-                .background(HNavBg)
-                .border(1.dp, HBorder, RoundedCornerShape(32.dp))
-                .padding(horizontal = 6.dp),
-            verticalAlignment     = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceEvenly,
-        ) {
-            navItems.forEachIndexed { i, item ->
-                val selected = selectedIndex == i
+// ─────────────────────────────────────────────────────────────────────────────
+// Legacy/Deprecated property helpers (for backward compatibility)
+// ─────────────────────────────────────────────────────────────────────────────
 
-                val tabBg by animateColorAsState(
-                    if (selected) HBlue.copy(alpha = 0.12f) else Color.Transparent,
-                    tween(240), label = "bg$i",
-                )
-                val tabBorder by animateColorAsState(
-                    if (selected) HBlue.copy(alpha = 0.65f) else Color.Transparent,
-                    tween(240), label = "bd$i",
-                )
-                val iconTint by animateColorAsState(
-                    if (selected) HBlue else HGray4,
-                    tween(220), label = "it$i",
-                )
+@Suppress("DEPRECATION")
+private fun isLegacyVideoPost(post: PostItem): Boolean {
+    return post.imageUri != null && post.mediaType == PostItem.MediaType.VIDEO
+}
 
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(tabBg)
-                        .border(1.dp, tabBorder, RoundedCornerShape(24.dp))
-                        .clickable(
-                            remember { MutableInteractionSource() }, null
-                        ) { onItemSelected(i) }   // ← calls parent with index
-                        .padding(
-                            horizontal = if (selected) 14.dp else 10.dp,
-                            vertical   = 9.dp,
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Row(
-                        verticalAlignment     = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    ) {
-                        Icon(
-                            imageVector        = if (selected) item.iconSelected else item.icon,
-                            contentDescription = item.label,
-                            tint               = iconTint,
-                            modifier           = Modifier.size(21.dp),
-                        )
-                        AnimatedVisibility(
-                            visible = selected,
-                            enter   = fadeIn(tween(160)) + expandHorizontally(
-                                animationSpec = tween(200),
-                                expandFrom    = Alignment.Start,
-                            ),
-                            exit    = fadeOut(tween(100)) + shrinkHorizontally(
-                                animationSpec = tween(150),
-                                shrinkTowards = Alignment.Start,
-                            ),
-                        ) {
-                            Text(
-                                item.label,
-                                color      = HBlue,
-                                fontSize   = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines   = 1,
-                            )
-                        }
-                    }
-                }
-            }
-        }
+@Suppress("DEPRECATION")
+private fun isLegacyImagePost(post: PostItem): Boolean {
+    return post.imageUri != null
+}
 
-        // ── FAB ───────────────────────────────────────────────────────────────
-        Box(
-            modifier = Modifier
-                .size(58.dp)
-                .clip(CircleShape)
-                .background(
-                    Brush.linearGradient(
-                        listOf(HBlue, HGlow),
-                        start = androidx.compose.ui.geometry.Offset(0f, 0f),
-                        end   = androidx.compose.ui.geometry.Offset(80f, 80f),
-                    )
-                )
-                .clickable(remember { MutableInteractionSource() }, null, onClick = onFabClick),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(Icons.Default.Add, "Create post", tint = HWhite, modifier = Modifier.size(26.dp))
-        }
-
-        // ── Profile ───────────────────────────────────────────────────────────
-        Box(modifier = Modifier.size(58.dp)) {
-            Box(
-                modifier = Modifier
-                    .size(58.dp)
-                    .clip(CircleShape)
-                    .background(HCard)
-                    .border(1.dp, HBorder, CircleShape)
-                    .clickable(remember { MutableInteractionSource() }, null, onClick = onProfileClick),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Outlined.Person, "Profile", tint = HGray4, modifier = Modifier.size(24.dp))
-            }
-            if (notifCount > 0) {
-                Box(
-                    modifier = Modifier
-                        .size(18.dp)
-                        .align(Alignment.TopEnd)
-                        .offset(2.dp, (-2).dp)
-                        .clip(CircleShape)
-                        .background(HRed)
-                        .border(1.5.dp, HBg, CircleShape),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("$notifCount", color = HWhite, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-    }
+@Suppress("DEPRECATION")
+private fun getLegacyImageEmoji(post: PostItem): String? {
+    return post.imageEmoji
 }

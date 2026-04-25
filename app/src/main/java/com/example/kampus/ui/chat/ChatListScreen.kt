@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.kampus.ui.chat.ChatViewModel
+import com.example.kampus.ui.components.CampusBottomNavBar
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Palette — identical to HomeScreen
@@ -64,10 +65,11 @@ private val navItems = listOf(
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
 fun ChatListScreen(
-    onChatClick    : (Int) -> Unit,
+    onChatClick    : (String) -> Unit,
     onHomeClick    : () -> Unit,
     onGroupsClick  : () -> Unit,
     onEventsClick  : () -> Unit,
+    onCreatePost   : () -> Unit = {},
     onProfileClick : () -> Unit,
     viewModel      : ChatViewModel = viewModel(),
 ) {
@@ -88,7 +90,7 @@ fun ChatListScreen(
                     .padding(horizontal = 14.dp, vertical = 10.dp)
                     .navigationBarsPadding(),
             ) {
-                CampusBottomNav(
+                CampusBottomNavBar(
                     selectedIndex  = 3,          // Chat tab is index 3
                     onItemSelected = { index ->
                         when (index) {
@@ -98,9 +100,9 @@ fun ChatListScreen(
                             3 -> { /* already here */ }
                         }
                     },
-                    notifCount     = notifCount,
-                    onFabClick     = { },
+                    onFabClick     = onCreatePost,
                     onProfileClick = onProfileClick,
+                    isProfileSelected = false,
                 )
             }
         },
@@ -353,145 +355,6 @@ private fun AvatarWithBadge(chat: ChatItem) {
                         .clip(CircleShape)
                         .background(Color(0xFF22C55E)),
                 )
-            }
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Bottom Nav — EXACT copy of CampusBottomNav from HomeScreen
-// ─────────────────────────────────────────────────────────────────────────────
-@Composable
-private fun CampusBottomNav(
-    selectedIndex  : Int,
-    onItemSelected : (Int) -> Unit,
-    notifCount     : Int,
-    onFabClick     : () -> Unit,
-    onProfileClick : () -> Unit,
-) {
-    Row(
-        modifier              = Modifier.fillMaxWidth(),
-        verticalAlignment     = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        // ── LEFT PILL — nav tabs ──────────────────────────────────────────────
-        Row(
-            modifier = Modifier
-                .weight(1f)
-                .height(64.dp)
-                .clip(RoundedCornerShape(32.dp))
-                .background(HNavBg)
-                .border(1.dp, HBorder, RoundedCornerShape(32.dp))
-                .padding(horizontal = 6.dp),
-            verticalAlignment     = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceEvenly,
-        ) {
-            navItems.forEachIndexed { i, item ->
-                val selected = selectedIndex == i
-
-                val tabBg by animateColorAsState(
-                    if (selected) HBlue.copy(alpha = 0.12f) else Color.Transparent,
-                    tween(240), label = "bg$i",
-                )
-                val tabBorder by animateColorAsState(
-                    if (selected) HBlue.copy(alpha = 0.65f) else Color.Transparent,
-                    tween(240), label = "bd$i",
-                )
-                val iconTint by animateColorAsState(
-                    if (selected) HBlue else HGray4,
-                    tween(220), label = "it$i",
-                )
-
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(tabBg)
-                        .border(1.dp, tabBorder, RoundedCornerShape(24.dp))
-                        .clickable(remember { MutableInteractionSource() }, null) { onItemSelected(i) }
-                        .padding(
-                            horizontal = if (selected) 14.dp else 10.dp,
-                            vertical   = 9.dp,
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Row(
-                        verticalAlignment     = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    ) {
-                        Icon(
-                            imageVector        = if (selected) item.iconSelected else item.icon,
-                            contentDescription = item.label,
-                            tint               = iconTint,
-                            modifier           = Modifier.size(21.dp),
-                        )
-                        AnimatedVisibility(
-                            visible = selected,
-                            enter   = fadeIn(tween(160)) + expandHorizontally(
-                                animationSpec = tween(200),
-                                expandFrom    = Alignment.Start,
-                            ),
-                            exit    = fadeOut(tween(100)) + shrinkHorizontally(
-                                animationSpec = tween(150),
-                                shrinkTowards = Alignment.Start,
-                            ),
-                        ) {
-                            Text(
-                                item.label,
-                                color      = HBlue,
-                                fontSize   = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines   = 1,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // ── FAB ───────────────────────────────────────────────────────────────
-        Box(
-            modifier = Modifier
-                .size(58.dp)
-                .clip(CircleShape)
-                .background(
-                    Brush.linearGradient(
-                        listOf(HBlue, HGlow),
-                        start = Offset(0f, 0f),
-                        end   = Offset(80f, 80f),
-                    )
-                )
-                .clickable(remember { MutableInteractionSource() }, null, onClick = onFabClick),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(Icons.Default.Add, "New", tint = HWhite, modifier = Modifier.size(26.dp))
-        }
-
-        // ── Profile ───────────────────────────────────────────────────────────
-        Box(modifier = Modifier.size(58.dp)) {
-            Box(
-                modifier = Modifier
-                    .size(58.dp)
-                    .clip(CircleShape)
-                    .background(HCard)
-                    .border(1.dp, HBorder, CircleShape)
-                    .clickable(remember { MutableInteractionSource() }, null, onClick = onProfileClick),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Outlined.Person, "Profile", tint = HGray4, modifier = Modifier.size(24.dp))
-            }
-            if (notifCount > 0) {
-                Box(
-                    modifier = Modifier
-                        .size(18.dp)
-                        .align(Alignment.TopEnd)
-                        .offset(2.dp, (-2).dp)
-                        .clip(CircleShape)
-                        .background(HRed)
-                        .border(1.5.dp, HBg, CircleShape),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("$notifCount", color = HWhite, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                }
             }
         }
     }

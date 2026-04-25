@@ -3,7 +3,7 @@ package com.example.kampus
 import android.app.Application
 import com.example.kampus.di.SupabaseModule
 
-class KampusApp : Application() {
+class KampusApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         

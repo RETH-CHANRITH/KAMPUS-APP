@@ -2,6 +2,7 @@ package com.example.kampus.navigation
 
 import android.annotation.SuppressLint
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
@@ -9,6 +10,7 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import androidx.navigation.navDeepLink
 import com.example.kampus.ui.onboarding.OnboardingScreen
 import com.example.kampus.ui.splash.SplashScreen
 import com.example.kampus.ui.auth.ForgotPasswordScreen
@@ -43,13 +45,16 @@ import com.example.kampus.ui.profile.HelpSupportScreen
 import com.example.kampus.ui.profile.NotificationSettingsScreen
 import com.example.kampus.ui.profile.PrivacySecurityScreen
 import com.example.kampus.ui.profile.ProfileScreen
+import com.example.kampus.ui.profile.PublicProfileScreen
 import com.example.kampus.ui.profile.SettingsScreen
+import com.example.kampus.ui.post.PostDetailScreen
 import com.google.firebase.auth.FirebaseAuth
 
 object Routes {
     const val SPLASH          = "splash"
     const val ONBOARDING      = "onboarding"
     const val LOGIN           = "login"
+    const val LOGIN_WITH_EMAIL = "login?email={email}"
     const val REGISTER        = "register"
     const val FORGOT_PASSWORD = "forgot_password"
     const val OTP             = "otp/{method}/{contact}"
@@ -58,6 +63,7 @@ object Routes {
 
     // Feed
     const val POST_CREATE     = "post_create"
+    const val POST_DETAIL     = "post_detail/{postId}"
 
     // Groups
     const val GROUP_LIST   = "group_list"
@@ -72,9 +78,11 @@ object Routes {
     // Chat
     const val CHAT_LIST   = "chat_list"
     const val CHAT_SCREEN = "chat_screen/{chatId}"
+    const val CHAT_WITH_USER = "chat_with_user/{userId}"
 
     // Profile
     const val PROFILE      = "profile"
+    const val PROFILE_PUBLIC = "profile_public/{userId}"
     const val FRIEND_REQUESTS = "friend_requests"
     const val FRIENDS = "friends"
     const val DISCOVER_PEOPLE = "discover_people"
@@ -90,7 +98,11 @@ object Routes {
 
     fun groupDetail(groupId: Int) = "group_detail/$groupId"
     fun eventDetail(eventId: Int) = "event_detail/$eventId"
-    fun chatScreen(chatId: Int)   = "chat_screen/$chatId"
+    fun postDetail(postId: Int) = "post_detail/$postId"
+    fun profilePublic(userId: String) = "profile_public/$userId"
+    fun chatScreen(chatId: String)   = "chat_screen/$chatId"
+    fun chatWithUser(userId: String) = "chat_with_user/$userId"
+    fun loginWithEmail(email: String) = "login?email=${email.encodeUrl()}"
 
     fun otp(method: String, contact: String) =
         "otp/$method/${contact.encodeUrl()}"
@@ -140,7 +152,20 @@ fun NavGraph(navController: NavHostController) {
         }
 
         // ── Login ──────────────────────────────────────────────────────────────
-        composable(Routes.LOGIN) {
+        composable(
+            route = Routes.LOGIN_WITH_EMAIL,
+            arguments = listOf(
+                navArgument("email") {
+                    type = NavType.StringType
+                    defaultValue = ""
+                    nullable = false
+                }
+            )
+        ) { back ->
+            val prefilledEmail = java.net.URLDecoder.decode(
+                back.arguments?.getString("email") ?: "",
+                "UTF-8"
+            )
             LoginScreen(
                 onLoginSuccess   = {
                     navController.navigate(Routes.HOME) {
@@ -151,14 +176,20 @@ fun NavGraph(navController: NavHostController) {
                 onForgotPassword = { navController.navigate(Routes.FORGOT_PASSWORD) },
                 onGoogleClick    = { },
                 onAppleClick     = { },
-                onBackClick      = { navController.popBackStack() }
+                onBackClick      = { navController.popBackStack() },
+                prefilledEmail   = prefilledEmail,
             )
         }
 
         // ── Register ───────────────────────────────────────────────────────────
         composable(Routes.REGISTER) {
             RegisterScreen(
-                onRegisterSuccess = { },
+                onRegisterSuccess = { email ->
+                    FirebaseAuth.getInstance().signOut()
+                    navController.navigate(Routes.loginWithEmail(email)) {
+                        popUpTo(Routes.REGISTER) { inclusive = true }
+                    }
+                },
                 onLoginClick      = {
                     navController.navigate(Routes.LOGIN) {
                         popUpTo(Routes.LOGIN) { inclusive = true }
@@ -235,21 +266,31 @@ fun NavGraph(navController: NavHostController) {
             val feedViewModel: FeedViewModel = viewModel(homeEntry)
             CreatePostScreen(
                 onClose = { navController.popBackStack() },
-                onPost = { text, mediaUri, mediaType, visibility, allowComments, taggedPeople, feelingEmoji, location ->
+                onPost = { text, mediaUris, mediaTypes, visibility, allowComments, taggedPeople, feelingEmoji, location ->
                     feedViewModel.addPost(
                         text = text,
-                        imageUri = mediaUri,
-                        mediaType = mediaType,
-                        feeling = null,
-                        location = location,
+                        mediaUris = mediaUris,
+                        mediaTypes = mediaTypes,
                         visibility = visibility,
                         allowComments = allowComments,
-                        tags = emptyList(),
                         taggedPeople = taggedPeople,
                         feelingEmoji = feelingEmoji,
+                        location = location,
                     )
                     navController.popBackStack()
                 },
+            )
+        }
+
+        // ── Post Detail ───────────────────────────────────────────────────────
+        composable(
+            route = Routes.POST_DETAIL,
+            arguments = listOf(navArgument("postId") { type = NavType.IntType }),
+        ) { back ->
+            val postId = back.arguments?.getInt("postId") ?: return@composable
+            PostDetailScreen(
+                postId = postId,
+                onBack = { navController.popBackStack() },
             )
         }
 
@@ -267,7 +308,7 @@ fun NavGraph(navController: NavHostController) {
                 },
                 onEventsClick  = { navController.navigate(Routes.EVENT_LIST) },
                 onChatClick    = { navController.navigate(Routes.CHAT_LIST) },
-                onFabClick     = { },
+                onFabClick     = { navController.navigate(Routes.POST_CREATE) },
                 onProfileClick = { navController.navigate(Routes.PROFILE) },
             )
         }
@@ -312,7 +353,7 @@ fun NavGraph(navController: NavHostController) {
                 },
                 onGroupsClick  = { navController.navigate(Routes.GROUP_LIST) },
                 onChatClick    = { navController.navigate(Routes.CHAT_LIST) },
-                onFabClick     = { navController.navigate(Routes.EVENT_CREATE) },
+                onFabClick     = { navController.navigate(Routes.POST_CREATE) },
                 onProfileClick = { navController.navigate(Routes.PROFILE) },
             )
         }
@@ -369,7 +410,51 @@ fun NavGraph(navController: NavHostController) {
                 },
                 onGroupsClick  = { navController.navigate(Routes.GROUP_LIST) },
                 onEventsClick  = { navController.navigate(Routes.EVENT_LIST) },
+                onCreatePost   = { navController.navigate(Routes.POST_CREATE) },
                 onProfileClick = { navController.navigate(Routes.PROFILE) },
+            )
+        }
+
+        // ── Public Profile (Share Link Target) ───────────────────────────────
+        composable(
+            route = Routes.PROFILE_PUBLIC,
+            arguments = listOf(navArgument("userId") { type = NavType.StringType }),
+            deepLinks = listOf(
+                navDeepLink { uriPattern = "https://kampus.app/profile/{userId}" },
+                navDeepLink { uriPattern = "kampus://profile/{userId}" },
+            ),
+        ) { back ->
+            val userId = back.arguments?.getString("userId") ?: return@composable
+            PublicProfileScreen(
+                userId = userId,
+                onBack = { navController.popBackStack() },
+                onOpenActivity = { activity ->
+                    when (activity.type) {
+                        "create_event", "interested_event" -> {
+                            val eventId = activity.eventId
+                            if (eventId != null) {
+                                navController.navigate(Routes.eventDetail(eventId))
+                            } else {
+                                navController.navigate(Routes.EVENT_LIST)
+                            }
+                        }
+
+                        "create_post" -> {
+                            val postId = activity.postId
+                            if (postId != null) {
+                                navController.navigate(Routes.postDetail(postId))
+                            } else {
+                                navController.navigate(Routes.HOME) {
+                                    popUpTo(Routes.HOME) { inclusive = false }
+                                }
+                            }
+                        }
+
+                        else -> {
+                            navController.navigate(Routes.profilePublic(userId))
+                        }
+                    }
+                },
             )
         }
 
@@ -391,9 +476,33 @@ fun NavGraph(navController: NavHostController) {
                 onEventsClick = { navController.navigate(Routes.EVENT_LIST) },
                 onChatClick = { navController.navigate(Routes.CHAT_LIST) },
                 onCreatePost = { navController.navigate(Routes.POST_CREATE) },
-                onLogout = {
-                    navController.navigate(Routes.LOGIN) {
-                        popUpTo(Routes.HOME) { inclusive = true }
+                onOpenActivity = { activity ->
+                    when (activity.type) {
+                        "create_event", "interested_event" -> {
+                            val eventId = activity.eventId
+                            if (eventId != null) {
+                                navController.navigate(Routes.eventDetail(eventId))
+                            } else {
+                                navController.navigate(Routes.EVENT_LIST)
+                            }
+                        }
+
+                        "create_post" -> {
+                            val postId = activity.postId
+                            if (postId != null) {
+                                navController.navigate(Routes.postDetail(postId))
+                            } else {
+                                navController.navigate(Routes.HOME) {
+                                    popUpTo(Routes.HOME) { inclusive = false }
+                                }
+                            }
+                        }
+
+                        else -> {
+                            navController.navigate(Routes.PROFILE) {
+                                popUpTo(Routes.PROFILE) { inclusive = false }
+                            }
+                        }
                     }
                 },
             )
@@ -406,7 +515,34 @@ fun NavGraph(navController: NavHostController) {
 
         // ── Friends ───────────────────────────────────────────────────────────
         composable(Routes.FRIENDS) {
-            FriendsScreen(onBack = { navController.popBackStack() })
+            FriendsScreen(
+                onBack = { navController.popBackStack() },
+                onOpenProfile = { userId ->
+                    navController.navigate(Routes.profilePublic(userId))
+                },
+                onOpenChat = { userId ->
+                    navController.navigate(Routes.chatWithUser(userId))
+                },
+            )
+        }
+
+        // ── Open/Create Direct Chat By User ────────────────────────────────
+        composable(
+            route = Routes.CHAT_WITH_USER,
+            arguments = listOf(navArgument("userId") { type = NavType.StringType }),
+        ) { back ->
+            val userId = back.arguments?.getString("userId") ?: return@composable
+            val vm: ChatViewModel = viewModel()
+            LaunchedEffect(userId) {
+                val chatId = vm.getOrCreateDirectChatWithUser(userId)
+                if (chatId != null) {
+                    navController.navigate(Routes.chatScreen(chatId)) {
+                        popUpTo(Routes.CHAT_WITH_USER) { inclusive = true }
+                    }
+                } else {
+                    navController.popBackStack()
+                }
+            }
         }
 
         // ── Discover People ───────────────────────────────────────────────────
@@ -425,6 +561,13 @@ fun NavGraph(navController: NavHostController) {
                 onOpenBlockedUsers = { navController.navigate(Routes.BLOCKED_USERS_SETTINGS) },
                 onOpenHelpSupport = { navController.navigate(Routes.HELP_SUPPORT_SETTINGS) },
                 onOpenAbout = { navController.navigate(Routes.ABOUT_SETTINGS) },
+                onLogout = {
+                    FirebaseAuth.getInstance().signOut()
+                    navController.navigate(Routes.LOGIN) {
+                        popUpTo(0) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                },
             )
         }
 
@@ -486,11 +629,10 @@ fun NavGraph(navController: NavHostController) {
         // ── Chat Screen ────────────────────────────────────────────────────────
         composable(
             route     = Routes.CHAT_SCREEN,
-            arguments = listOf(navArgument("chatId") { type = NavType.IntType }),
+            arguments = listOf(navArgument("chatId") { type = NavType.StringType }),
         ) { back ->
-            val chatId    = back.arguments?.getInt("chatId") ?: return@composable
-            val listEntry = remember(back) { navController.getBackStackEntry(Routes.CHAT_LIST) }
-            val vm: ChatViewModel = viewModel(listEntry)
+            val chatId    = back.arguments?.getString("chatId") ?: return@composable
+            val vm: ChatViewModel = viewModel()
             ChatScreen(
                 chatId    = chatId,
                 onBack    = { navController.popBackStack() },

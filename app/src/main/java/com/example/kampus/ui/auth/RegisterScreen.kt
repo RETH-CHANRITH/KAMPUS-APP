@@ -39,7 +39,7 @@ private val RegErrorRed   = Color(0xFFFF4D6A)
 
 @Composable
 fun RegisterScreen(
-    onRegisterSuccess : () -> Unit = {},
+    onRegisterSuccess : (String) -> Unit = {},
     onLoginClick      : () -> Unit = {},
     onGoogleClick     : () -> Unit = {},
     onAppleClick      : () -> Unit = {},
@@ -71,7 +71,7 @@ fun RegisterScreen(
     )
 
     LaunchedEffect(authState) {
-        if (authState is AuthState.Success) onRegisterSuccess()
+        if (authState is AuthState.Success) onRegisterSuccess(email.trim())
     }
 
     fun validate(): Boolean {
@@ -80,6 +80,7 @@ fun RegisterScreen(
         emailError = when {
             email.isBlank()      -> { ok = false; "Email is required" }
             !email.contains("@") -> { ok = false; "Enter a valid email" }
+            !email.endsWith("@rupp.edu.kh") -> { ok = false; "Only RUPP emails (@rupp.edu.kh) allowed" }
             else -> ""
         }
         passwordError = when {
@@ -220,16 +221,25 @@ fun RegisterScreen(
                 )
 
                 // Email
-                PremiumInputField(
-                    value         = email,
-                    onValueChange = { email = it; emailError = ""; authViewModel.resetState() },
-                    label         = "Email Address",
-                    placeholder   = "you@example.com",
-                    icon          = Icons.Outlined.Email,
-                    error         = emailError,
-                    keyboardType  = KeyboardType.Email,
-                    imeAction     = ImeAction.Next
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    PremiumInputField(
+                        value         = email,
+                        onValueChange = { email = it; emailError = ""; authViewModel.resetState() },
+                        label         = "Email Address",
+                        placeholder   = "reth.chanrith.2823@rupp.edu.kh",
+                        icon          = Icons.Outlined.Email,
+                        error         = emailError,
+                        keyboardType  = KeyboardType.Email,
+                        imeAction     = ImeAction.Next
+                    )
+                    // RUPP email hint
+                    Text(
+                        text = "🎓 Use your RUPP University email (@rupp.edu.kh)",
+                        fontSize = 12.sp,
+                        color = RegGray500,
+                        modifier = Modifier.padding(horizontal = 4.dp)
+                    )
+                }
 
                 // Password + strength bar
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

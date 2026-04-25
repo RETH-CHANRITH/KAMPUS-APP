@@ -1,7 +1,7 @@
 package com.example.kampus.ui.chat
 
 data class ChatItem(
-    val id: Int,
+    val id: String,
     val name: String,
     val lastMessage: String,
     val timestamp: String,

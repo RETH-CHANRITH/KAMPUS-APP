@@ -38,9 +38,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage
 
 private val FrBg = Color(0xFF1A1F2E)
 private val FrCard = Color(0xFF252A41)
@@ -50,29 +54,16 @@ private val FrWhite = Color(0xFFFFFFFF)
 private val FrGray = Color(0xFF99A1AF)
 private val FrMuted = Color(0xFF6A7282)
 
-private data class FriendRequestItem(
-    val name: String,
-    val handle: String,
-    val followers: String,
-    val mutual: String,
-)
-
 @Composable
-fun FriendRequestsScreen(onBack: () -> Unit) {
+fun FriendRequestsScreen(
+    onBack: () -> Unit,
+    viewModel: ProfileViewModel = viewModel(),
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
     var selectedTab by remember { mutableStateOf(0) }
-    val incoming = remember {
-        listOf(
-            FriendRequestItem("Jessica Lee", "@jessicalee", "2.4K Followers", "12 mutual friends"),
-            FriendRequestItem("Marcus Johnson", "@marcusj", "1.8K Followers", "8 mutual friends"),
-            FriendRequestItem("Sophia Chen", "@sophiachen", "3.2K Followers", "15 mutual friends"),
-        )
-    }
-    val outgoing = remember {
-        listOf(
-            FriendRequestItem("Avery Cole", "@averycole", "970 Followers", "4 mutual friends"),
-            FriendRequestItem("Noah Lim", "@noahlim", "1.2K Followers", "6 mutual friends"),
-        )
-    }
+
+    val incoming = state.friendRequests
+    val outgoing = state.outgoingFriendRequests
 
     Surface(color = FrBg, modifier = Modifier.fillMaxSize()) {
         Column(
@@ -101,11 +92,27 @@ fun FriendRequestsScreen(onBack: () -> Unit) {
             }
 
             val list = if (selectedTab == 0) incoming else outgoing
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
-                items(list) { request ->
-                    RequestCard(item = request, isIncoming = selectedTab == 0)
+            if (list.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = if (selectedTab == 0) "No incoming requests" else "No outgoing requests",
+                        color = FrGray,
+                        fontSize = 16.sp,
+                    )
                 }
-                item { Spacer(modifier = Modifier.height(12.dp)) }
+            } else {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
+                    items(list, key = { it.id }) { request ->
+                        RequestCard(
+                            item = request,
+                            isIncoming = selectedTab == 0,
+                            onAccept = { viewModel.acceptFriendRequest(request.id) },
+                            onReject = { viewModel.rejectFriendRequest(request.id) },
+                            onCancel = { viewModel.cancelFriendRequest(request.id) },
+                        )
+                    }
+                    item { Spacer(modifier = Modifier.height(12.dp)) }
+                }
             }
         }
     }
@@ -157,7 +164,19 @@ private fun TabChip(
 }
 
 @Composable
-private fun RequestCard(item: FriendRequestItem, isIncoming: Boolean) {
+private fun RequestCard(
+    item: com.example.kampus.domain.model.FriendRequest,
+    isIncoming: Boolean,
+    onAccept: () -> Unit,
+    onReject: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val name = if (isIncoming) item.fromUserName else item.toUserName
+    val handle = if (isIncoming) item.fromUserHandle else item.toUserHandle
+    val mutualLabel = "${if (isIncoming) item.fromUserAvatar else item.toUserAvatar} mutual friends"
+    val avatarUrl = if (isIncoming) item.fromUserProfileImageUrl else item.toUserProfileImageUrl
+    val requestLabel = if (isIncoming) "Incoming request" else "Sent request"
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -167,36 +186,22 @@ private fun RequestCard(item: FriendRequestItem, isIncoming: Boolean) {
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-            Box(
-                modifier = Modifier
-                    .size(64.dp)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.linearGradient(
-                            listOf(Color(0xFF2FA7FF), Color(0xFF7C3AED)),
-                        ),
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = item.name.take(1),
-                    color = FrWhite,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
+            RequestAvatar(
+                name = name,
+                avatarUrl = avatarUrl,
+            )
             Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.weight(1f)) {
-                Text(text = item.name, color = FrWhite, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                Text(text = item.handle, color = FrGray, fontSize = 14.sp)
-                Text(text = item.followers, color = FrMuted, fontSize = 12.sp)
-                Text(text = item.mutual, color = FrBlue, fontSize = 12.sp)
+                Text(text = name.ifBlank { "Unknown user" }, color = FrWhite, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                Text(text = handle.ifBlank { "@unknown" }, color = FrGray, fontSize = 14.sp)
+                Text(text = requestLabel, color = FrMuted, fontSize = 12.sp)
+                Text(text = mutualLabel, color = FrBlue, fontSize = 12.sp)
             }
         }
 
         if (isIncoming) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 Button(
-                    onClick = {},
+                    onClick = onAccept,
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = FrBlue, contentColor = FrWhite),
                     modifier = Modifier.weight(1f),
@@ -206,7 +211,7 @@ private fun RequestCard(item: FriendRequestItem, isIncoming: Boolean) {
                     Text(text = "Accept", fontWeight = FontWeight.Medium)
                 }
                 Button(
-                    onClick = {},
+                    onClick = onReject,
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = FrChip, contentColor = FrWhite),
                     modifier = Modifier.weight(1f),
@@ -227,13 +232,47 @@ private fun RequestCard(item: FriendRequestItem, isIncoming: Boolean) {
             }
         } else {
             Button(
-                onClick = {},
+                onClick = onCancel,
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = FrChip, contentColor = FrWhite),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(text = "Cancel Request", fontWeight = FontWeight.Medium)
             }
+        }
+    }
+}
+
+@Composable
+private fun RequestAvatar(
+    name: String,
+    avatarUrl: String,
+) {
+    Box(
+        modifier = Modifier
+            .size(64.dp)
+            .clip(CircleShape)
+            .background(
+                Brush.linearGradient(
+                    listOf(Color(0xFF2FA7FF), Color(0xFF7C3AED)),
+                ),
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (avatarUrl.isNotBlank()) {
+            AsyncImage(
+                model = avatarUrl,
+                contentDescription = name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().clip(CircleShape),
+            )
+        } else {
+            Text(
+                text = name.trim().take(1).uppercase().ifBlank { "?" },
+                color = FrWhite,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+            )
         }
     }
 }

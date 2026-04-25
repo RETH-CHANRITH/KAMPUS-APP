@@ -44,7 +44,7 @@ private val IconButton      = Color(0xFF1A2540)
 
 @Composable
 fun ChatScreen(
-    chatId    : Int,
+    chatId    : String,
     onBack    : () -> Unit,
     viewModel : ChatViewModel = viewModel(),
 ) {
@@ -101,11 +101,7 @@ fun ChatScreen(
             onTextChange  = viewModel::onInputChange,
             onSend        = {
                 viewModel.sendMessage()
-                scope.launch {
-                    listState.animateScrollToItem(
-                        (state.messages.size).coerceAtLeast(0)
-                    )
-                }
+                // LaunchedEffect above already handles scrolling to bottom
             },
         )
     }

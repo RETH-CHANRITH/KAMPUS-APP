@@ -3,9 +3,9 @@ package com.example.kampus.ui.auth
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.ViewModel
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.firestore.FirebaseFirestore
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,6 +21,7 @@ sealed class SessionState {
 class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
     private val auth: FirebaseAuth = FirebaseAuth.getInstance()
+    private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance()
 
     private val _session = MutableStateFlow<SessionState>(SessionState.Unknown)
     val session: StateFlow<SessionState> = _session.asStateFlow()
@@ -42,7 +43,23 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             auth.signInWithEmailAndPassword(email, password)
                 .addOnSuccessListener {
                     refreshSession()
-                    _authState.value = AuthState.Success("Login successful!")
+                    val uid = auth.currentUser?.uid
+                    if (uid == null) {
+                        _authState.value = AuthState.Error("Login failed: missing user session")
+                        return@addOnSuccessListener
+                    }
+
+                    ensureUserProfile(
+                        userId = uid,
+                        email = auth.currentUser?.email ?: email,
+                        displayName = auth.currentUser?.displayName,
+                    ) { ok, err ->
+                        _authState.value = if (ok) {
+                            AuthState.Success("Login successful!")
+                        } else {
+                            AuthState.Error(err ?: "Login failed while syncing profile")
+                        }
+                    }
                 }
                 .addOnFailureListener { e ->
                     _authState.value = AuthState.Error(e.message ?: "Login failed")
@@ -56,7 +73,23 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             auth.createUserWithEmailAndPassword(email, password)
                 .addOnSuccessListener {
                     refreshSession()
-                    _authState.value = AuthState.Success("Registration successful!")
+                    val uid = auth.currentUser?.uid
+                    if (uid == null) {
+                        _authState.value = AuthState.Error("Registration failed: missing user session")
+                        return@addOnSuccessListener
+                    }
+
+                    ensureUserProfile(
+                        userId = uid,
+                        email = email,
+                        displayName = name,
+                    ) { ok, err ->
+                        _authState.value = if (ok) {
+                            AuthState.Success("Registration successful!")
+                        } else {
+                            AuthState.Error(err ?: "Registration failed while creating profile")
+                        }
+                    }
                 }
                 .addOnFailureListener { e ->
                     _authState.value = AuthState.Error(e.message ?: "Registration failed")
@@ -71,7 +104,23 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             auth.signInWithCredential(credential)
                 .addOnSuccessListener {
                     refreshSession()
-                    _authState.value = AuthState.Success("Google login successful!")
+                    val uid = auth.currentUser?.uid
+                    if (uid == null) {
+                        _authState.value = AuthState.Error("Google login failed: missing user session")
+                        return@addOnSuccessListener
+                    }
+
+                    ensureUserProfile(
+                        userId = uid,
+                        email = auth.currentUser?.email,
+                        displayName = auth.currentUser?.displayName,
+                    ) { ok, err ->
+                        _authState.value = if (ok) {
+                            AuthState.Success("Google login successful!")
+                        } else {
+                            AuthState.Error(err ?: "Google login failed while syncing profile")
+                        }
+                    }
                 }
                 .addOnFailureListener { e ->
                     _authState.value = AuthState.Error(e.message ?: "Google login failed")
@@ -103,5 +152,75 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
     fun resetState() {
         _authState.value = AuthState.Idle
+    }
+
+    private fun ensureUserProfile(
+        userId: String,
+        email: String?,
+        displayName: String?,
+        onComplete: (Boolean, String?) -> Unit,
+    ) {
+        val safeEmail = email.orEmpty()
+        val computedName = when {
+            !displayName.isNullOrBlank() -> displayName
+            safeEmail.contains("@") -> safeEmail.substringBefore("@").replace(".", " ")
+            else -> "User"
+        }.trim().ifBlank { "User" }
+
+        val computedHandle = "@" + computedName
+            .lowercase()
+            .replace(Regex("\\s+"), "")
+            .replace(Regex("[^a-z0-9_@]"), "")
+            .ifBlank { "user" }
+
+        val userRef = firestore.collection("users").document(userId)
+        userRef.get()
+            .addOnSuccessListener { existing ->
+                if (existing.exists()) {
+                    val updates = mutableMapOf<String, Any>()
+                    if ((existing.getString("displayName") ?: "").isBlank()) updates["displayName"] = computedName
+                    if ((existing.getString("handle") ?: "").isBlank()) updates["handle"] = computedHandle
+                    if ((existing.getString("email") ?: "").isBlank() && safeEmail.isNotBlank()) updates["email"] = safeEmail
+                    updates["updatedAt"] = System.currentTimeMillis()
+
+                    if (updates.size == 1 && updates.containsKey("updatedAt")) {
+                        onComplete(true, null)
+                    } else {
+                        userRef.update(updates)
+                            .addOnSuccessListener { onComplete(true, null) }
+                            .addOnFailureListener { e -> onComplete(false, e.message) }
+                    }
+                } else {
+                    val profile = mapOf(
+                        "id" to userId,
+                        "displayName" to computedName,
+                        "handle" to computedHandle,
+                        "bio" to "",
+                        "email" to safeEmail,
+                        "phone" to "",
+                        "faculty" to "",
+                        "year" to "",
+                        "location" to "",
+                        "avatarEmoji" to "🎓",
+                        "profileImageUrl" to "",
+                        "coverImageUrl" to "",
+                        "isOnline" to true,
+                        "isVerified" to false,
+                        "stats" to mapOf(
+                            "posts" to 0L,
+                            "followers" to 0L,
+                            "following" to 0L,
+                            "friendRequests" to 0L,
+                        ),
+                        "createdAt" to System.currentTimeMillis(),
+                        "updatedAt" to System.currentTimeMillis(),
+                    )
+
+                    userRef.set(profile)
+                        .addOnSuccessListener { onComplete(true, null) }
+                        .addOnFailureListener { e -> onComplete(false, e.message) }
+                }
+            }
+            .addOnFailureListener { e -> onComplete(false, e.message) }
     }
 }

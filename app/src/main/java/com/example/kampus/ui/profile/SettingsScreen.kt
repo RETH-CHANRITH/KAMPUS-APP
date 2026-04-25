@@ -20,9 +20,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Palette
@@ -69,6 +69,7 @@ fun SettingsScreen(
     onOpenBlockedUsers: () -> Unit,
     onOpenHelpSupport: () -> Unit,
     onOpenAbout: () -> Unit,
+    onLogout: () -> Unit,
     viewModel: ProfileViewModel = viewModel(),
 ) {
     val menuItems = listOf(
@@ -78,8 +79,8 @@ fun SettingsScreen(
         SettingsMenuItem("Appearance", Icons.Outlined.Palette, Color(0xFF9C27B0).copy(alpha = 0.13f), onClick = onOpenAppearance),
         SettingsMenuItem("Language & Region", Icons.Outlined.Language, Color(0xFF00BCD4).copy(alpha = 0.13f), onClick = {}),
         SettingsMenuItem("Blocked Users", Icons.Outlined.VisibilityOff, Color(0xFFF44336).copy(alpha = 0.13f), onClick = onOpenBlockedUsers),
-        SettingsMenuItem("Help & Support", Icons.Outlined.HelpOutline, Color(0xFF4CAF50).copy(alpha = 0.13f), onClick = onOpenHelpSupport),
-        SettingsMenuItem("About", Icons.Outlined.HelpOutline, Color(0xFF607D8B).copy(alpha = 0.13f), onClick = onOpenAbout),
+        SettingsMenuItem("Help & Support", Icons.AutoMirrored.Outlined.HelpOutline, Color(0xFF4CAF50).copy(alpha = 0.13f), onClick = onOpenHelpSupport),
+        SettingsMenuItem("About", Icons.AutoMirrored.Outlined.HelpOutline, Color(0xFF607D8B).copy(alpha = 0.13f), onClick = onOpenAbout),
     )
 
     Surface(color = SBg) {
@@ -117,6 +118,7 @@ fun SettingsScreen(
                         .clip(RoundedCornerShape(14.dp))
                         .background(SCard)
                         .border(1.dp, SBorder, RoundedCornerShape(14.dp))
+                        .clickable(onClick = onLogout)
                         .padding(vertical = 12.dp),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,
