@@ -71,6 +71,10 @@ data class EventItem(
     val organizerTime : String,
     val isFeatured   : Boolean = false,
     val isInterested : Boolean = false,
+    val ownerId      : String = "",
+    val createdAt    : Long? = null,
+    val imageUrl     : String? = null,
+    val isPinned     : Boolean = false,
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -9,9 +9,11 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
 
-class EventRepositoryImpl(private val firestore: FirebaseFirestore) {
+class EventRepositoryImpl(
+    private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance(),
+) : com.example.kampus.domain.repository.IEventRepository {
 
-    fun getEvents(): Flow<Result<List<EventItem>>> = callbackFlow {
+    override fun getEvents(): Flow<Result<List<EventItem>>> = callbackFlow {
         val listener = firestore.collection("events")
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
@@ -45,7 +47,15 @@ class EventRepositoryImpl(private val firestore: FirebaseFirestore) {
                             description = doc.getString("description") ?: "",
                             organizer = doc.getString("organizer") ?: "Unknown",
                             organizerEmoji = doc.getString("organizerEmoji") ?: "👤",
-                            organizerTime = doc.getString("organizerTime") ?: "now"
+                            organizerTime = doc.getString("organizerTime") ?: "now",
+                            ownerId = doc.getString("ownerId") ?: doc.getString("authorId") ?: "",
+                            createdAt = when (val value = doc.get("createdAt")) {
+                                is Number -> value.toLong()
+                                is com.google.firebase.Timestamp -> value.toDate().time
+                                else -> null
+                            },
+                            imageUrl = doc.getString("imageUrl") ?: doc.getString("coverImageUrl"),
+                            isPinned = doc.getBoolean("isPinned") ?: false,
                         )
                     } catch (e: Exception) {
                         null
@@ -79,7 +89,7 @@ class EventRepositoryImpl(private val firestore: FirebaseFirestore) {
         Result.failure(e)
     }
 
-    fun getEventById(eventId: String): Flow<Result<EventItem?>> = callbackFlow {
+    override fun getEventById(eventId: String): Flow<Result<EventItem?>> = callbackFlow {
         val listener = firestore.collection("events").document(eventId)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
@@ -113,7 +123,15 @@ class EventRepositoryImpl(private val firestore: FirebaseFirestore) {
                             description = snapshot.getString("description") ?: "",
                             organizer = snapshot.getString("organizer") ?: "Unknown",
                             organizerEmoji = snapshot.getString("organizerEmoji") ?: "👤",
-                            organizerTime = snapshot.getString("organizerTime") ?: "now"
+                            organizerTime = snapshot.getString("organizerTime") ?: "now",
+                            ownerId = snapshot.getString("ownerId") ?: snapshot.getString("authorId") ?: "",
+                            createdAt = when (val value = snapshot.get("createdAt")) {
+                                is Number -> value.toLong()
+                                is com.google.firebase.Timestamp -> value.toDate().time
+                                else -> null
+                            },
+                            imageUrl = snapshot.getString("imageUrl") ?: snapshot.getString("coverImageUrl"),
+                            isPinned = snapshot.getBoolean("isPinned") ?: false,
                         )
                     } catch (e: Exception) {
                         null

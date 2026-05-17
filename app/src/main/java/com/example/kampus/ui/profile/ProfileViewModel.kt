@@ -645,7 +645,7 @@ class ProfileViewModel(
 								type = "create_event",
 								text = "Created event: ${event.title.ifBlank { "Untitled event" }}",
 								createdAt = createdAt,
-								sourceId = event.id,
+											sourceId = event.id.toString(),
 								previewTitle = event.title.ifBlank { "Untitled event" },
 								previewSubtitle = event.location.orEmpty().ifBlank { "Event" },
 								previewImageUrl = event.imageUrl.orEmpty(),

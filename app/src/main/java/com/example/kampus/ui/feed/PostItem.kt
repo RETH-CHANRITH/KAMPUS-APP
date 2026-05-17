@@ -5,6 +5,7 @@ import android.net.Uri
 data class PostItem(
     val id: Int,
     val author: String,
+    val authorId: String = "",
     val avatar: String,
     val time: String,
     val content: String,
@@ -32,6 +33,7 @@ data class PostItem(
     val allowComments: Boolean = true,
     val taggedPeople: List<String> = emptyList(),
     val feelingEmoji: String? = null,
+    val isPinned: Boolean = false,
 ) {
     enum class PostVisibility { PUBLIC, FRIENDS, PRIVATE }
     enum class MediaType { IMAGE, VIDEO }

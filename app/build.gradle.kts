@@ -57,6 +57,16 @@ dependencies {
     implementation("io.github.jan-tennert.supabase:storage-kt:2.2.2")
     implementation("io.ktor:ktor-client-android:2.3.0")
 
+    // Android APIs used by current screens
+    implementation("androidx.camera:camera-core:1.4.1")
+    implementation("androidx.camera:camera-camera2:1.4.1")
+    implementation("androidx.camera:camera-lifecycle:1.4.1")
+    implementation("androidx.camera:camera-view:1.4.1")
+    implementation("androidx.datastore:datastore-preferences:1.1.7")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    implementation("io.github.webrtc-sdk:android:125.6422.07")
+
     // Google Sign-In (for Firebase Auth with Google)
     implementation("com.google.android.gms:play-services-auth:21.3.0")
     

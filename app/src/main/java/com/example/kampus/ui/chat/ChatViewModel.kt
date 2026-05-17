@@ -2,17 +2,22 @@ package com.example.kampus.ui.chat
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.kampus.data.repository.CallStatus
 import com.example.kampus.data.repository.ChatRepositoryImpl
 import com.example.kampus.data.repository.Message as RepositoryMessage
 import com.example.kampus.ui.chat.ChatItem
 import com.example.kampus.ui.chat.Message
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 data class ChatListUiState(
     val chats: List<ChatItem> = emptyList(),
@@ -24,6 +29,8 @@ data class ChatUiState(
     val inputText: String = "",
     val contactName: String = "",
     val isOnline: Boolean = false,
+    val contactAvatarEmoji: String = "👤",
+    val contactProfileImageUrl: String = "",
 )
 
 class ChatViewModel : ViewModel() {
@@ -75,6 +82,7 @@ class ChatViewModel : ViewModel() {
                 messages = emptyList(),
                 contactName = chat?.name ?: "",
                 isOnline = chat?.isOnline ?: false,
+                contactAvatarEmoji = chat?.avatarInitials ?: "👤",
             )
         }
 
@@ -87,6 +95,7 @@ class ChatViewModel : ViewModel() {
                                 state.copy(
                                     contactName = chatItem.name,
                                     isOnline = chatItem.isOnline,
+                                    contactAvatarEmoji = chatItem.avatarInitials,
                                 )
                             }
                         }
@@ -118,6 +127,111 @@ class ChatViewModel : ViewModel() {
     suspend fun getOrCreateDirectChatWithUser(otherUserId: String): String? {
         val currentUserId = auth.currentUser?.uid ?: return null
         return chatRepository.getOrCreateDirectChat(currentUserId, otherUserId).getOrNull()
+    }
+
+    fun observeCallStatus(chatId: String, callId: String): Flow<Result<CallStatus>> = callbackFlow {
+        val listener = FirebaseFirestore.getInstance()
+            .collection("chats")
+            .document(chatId)
+            .collection("calls")
+            .document(callId)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    trySend(Result.failure(error))
+                    return@addSnapshotListener
+                }
+
+                if (snapshot == null || !snapshot.exists()) {
+                    trySend(Result.success(CallStatus.RINGING))
+                    return@addSnapshotListener
+                }
+
+                val status = when (snapshot.getString("status")?.uppercase()) {
+                    "ACCEPTED" -> CallStatus.ACCEPTED
+                    "DECLINED" -> CallStatus.DECLINED
+                    "MISSED" -> CallStatus.MISSED
+                    "ENDED" -> CallStatus.ENDED
+                    else -> CallStatus.RINGING
+                }
+                trySend(Result.success(status))
+            }
+
+        awaitClose { listener.remove() }
+    }
+
+    fun endCall(chatId: String, callId: String) {
+        viewModelScope.launch {
+            runCatching {
+                FirebaseFirestore.getInstance()
+                    .collection("chats")
+                    .document(chatId)
+                    .collection("calls")
+                    .document(callId)
+                    .update("status", CallStatus.ENDED.name)
+                    .await()
+            }
+        }
+    }
+
+    suspend fun createStory(
+        note: String,
+        imageUri: String? = null,
+        overlayText: String = "",
+        overlayX: Float = 0f,
+        overlayY: Float = 0f,
+        overlayColor: Long = 0L,
+        privacy: String = "friends",
+        storyType: String = "note",
+    ): Result<String> = try {
+        val userId = auth.currentUser?.uid ?: return Result.failure(IllegalStateException("User not signed in"))
+        val storyData = mutableMapOf<String, Any>(
+            "userId" to userId,
+            "note" to note,
+            "overlayText" to overlayText,
+            "overlayX" to overlayX,
+            "overlayY" to overlayY,
+            "overlayColor" to overlayColor,
+            "privacy" to privacy,
+            "storyType" to storyType,
+            "createdAt" to System.currentTimeMillis(),
+        )
+        if (!imageUri.isNullOrBlank()) {
+            storyData["imageUri"] = imageUri
+        }
+        val ref = FirebaseFirestore.getInstance()
+            .collection("stories")
+            .add(storyData)
+            .await()
+        Result.success(ref.id)
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    suspend fun saveStoryDraft(
+        note: String,
+        overlayText: String = "",
+        overlayX: Float = 0f,
+        overlayY: Float = 0f,
+        overlayColor: Long = 0L,
+    ): Result<Unit> = try {
+        val userId = auth.currentUser?.uid ?: return Result.failure(IllegalStateException("User not signed in"))
+        FirebaseFirestore.getInstance()
+            .collection("storyDrafts")
+            .document(userId)
+            .set(
+                mapOf(
+                    "note" to note,
+                    "overlayText" to overlayText,
+                    "overlayX" to overlayX,
+                    "overlayY" to overlayY,
+                    "overlayColor" to overlayColor,
+                    "updatedAt" to System.currentTimeMillis(),
+                ),
+            )
+            .await()
+        Result.success(Unit)
+    } catch (e: Exception) {
+        Result.failure(e)
     }
 
     fun onInputChange(text: String) {

@@ -24,6 +24,7 @@ class PostRepositoryImpl(private val firestore: FirebaseFirestore) {
                         PostItem(
                             id = doc.id.hashCode(),
                             author = doc.getString("author") ?: "Unknown",
+                            authorId = doc.getString("authorId") ?: "",
                             avatar = doc.getString("avatar") ?: "👤",
                             time = doc.getString("time") ?: "now",
                             content = doc.getString("content") ?: "",
@@ -31,7 +32,8 @@ class PostRepositoryImpl(private val firestore: FirebaseFirestore) {
                             mediaTypes = emptyList(),
                             mediaEmojis = emptyList(),
                             likes = (doc.get("likes") as? Number)?.toInt() ?: 0,
-                            comments = (doc.get("comments") as? Number)?.toInt() ?: 0
+                            comments = (doc.get("comments") as? Number)?.toInt() ?: 0,
+                            isPinned = doc.getBoolean("isPinned") ?: false
                         )
                     } catch (e: Exception) {
                         null
@@ -78,6 +80,7 @@ class PostRepositoryImpl(private val firestore: FirebaseFirestore) {
                         PostItem(
                             id = snapshot.id.hashCode(),
                             author = snapshot.getString("author") ?: "Unknown",
+                            authorId = snapshot.getString("authorId") ?: "",
                             avatar = snapshot.getString("avatar") ?: "👤",
                             time = snapshot.getString("time") ?: "now",
                             content = snapshot.getString("content") ?: "",
@@ -85,7 +88,8 @@ class PostRepositoryImpl(private val firestore: FirebaseFirestore) {
                             mediaTypes = emptyList(),
                             mediaEmojis = emptyList(),
                             likes = (snapshot.get("likes") as? Number)?.toInt() ?: 0,
-                            comments = (snapshot.get("comments") as? Number)?.toInt() ?: 0
+                            comments = (snapshot.get("comments") as? Number)?.toInt() ?: 0,
+                            isPinned = snapshot.getBoolean("isPinned") ?: false
                         )
                     } catch (e: Exception) {
                         null
