@@ -1,0 +1,295 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ============ HELPER FUNCTIONS ============
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function hasRequiredFields(requiredFields) {
+      return request.resource.data.keys().hasAll(requiredFields);
+    }
+
+    function isChatParticipant(chatId) {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/chats/$(chatId)).data.participants is list &&
+        get(/databases/$(database)/documents/chats/$(chatId)).data.participants.hasAny([request.auth.uid]);
+    }
+
+    // ============ USERS ============
+    match /users/{userId} {
+      allow read: if isSignedIn();
+
+      allow create, update: if isOwner(userId) &&
+        hasRequiredFields(['id', 'displayName', 'email']) &&
+        request.resource.data.id == userId;
+
+      allow delete: if false;
+
+      match /fcmTokens/{token} {
+        allow read: if isOwner(userId);
+        allow write: if isOwner(userId);
+      }
+
+      match /presence/{presenceDoc} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /drafts/{draftDoc} {
+        allow read, write: if isOwner(userId);
+      }
+      
+      match /followers/{followerId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() &&
+          request.resource.data.userId == request.auth.uid &&
+          request.resource.data.userId == followerId &&
+          request.resource.data.createdAt is number;
+        allow delete: if isSignedIn() &&
+          (request.auth.uid == resource.data.userId || isOwner(userId));
+      }
+
+      match /following/{followingId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() &&
+          request.resource.data.userId == request.auth.uid &&
+          request.resource.data.userId == followingId &&
+          request.resource.data.createdAt is number;
+        allow delete: if isSignedIn() &&
+          (request.auth.uid == resource.data.userId || isOwner(userId));
+      }
+
+      match /friendRequests/{requestId} {
+        allow read: if isOwner(userId);
+        allow create: if isSignedIn() &&
+          request.resource.data.fromUserId == request.auth.uid &&
+          request.resource.data.toUserId == userId &&
+          hasRequiredFields(['fromUserId','toUserId','createdAt']);
+        allow delete: if isOwner(userId) || resource.data.fromUserId == request.auth.uid;
+      }
+
+      match /outgoingFriendRequests/{requestId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /notifications/{notificationId} {
+        allow read: if isOwner(userId);
+        allow create: if isSignedIn() &&
+          request.resource.data.actorUserId == request.auth.uid &&
+          request.resource.data.toUserId == userId &&
+          hasRequiredFields(['actorUserId','toUserId','type','createdAt']);
+        allow update, delete: if isOwner(userId);
+      }
+
+      match /blocks/{blockedUserId} {
+        allow read: if isOwner(userId);
+        allow create, write: if isOwner(userId) &&
+          hasRequiredFields(['blockedAt']) &&
+          request.resource.data.blockedAt is number;
+        allow delete: if isOwner(userId);
+      }
+
+      match /activities/{activityId} {
+        allow read: if isSignedIn();
+        allow create: if isOwner(userId) &&
+          hasRequiredFields(['type', 'text', 'createdAt']);
+        allow update, delete: if isOwner(userId);
+      }
+    }
+
+    // ============ CHATS ============
+    match /chats/{chatId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn() &&
+        hasRequiredFields(['participants', 'lastMessage', 'lastMessageTime']) &&
+        request.resource.data.participants is list &&
+        request.resource.data.participants.size() == 2 &&
+        request.auth.uid in request.resource.data.participants;
+
+      // Chat participants can update: lastMessage, timestamps, preview fields, typing, pin, unread, mute, archive
+      allow update: if isSignedIn() && resource.data.participants.hasAny([request.auth.uid]) && (
+        // Either the client included the participants array unchanged
+        request.resource.data.participants == resource.data.participants
+        // Or the client is only updating allowed preview/typing/pin/mute/archive fields
+        || request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'lastMessage','lastMessageSenderName','lastMessageSenderId','lastMessageTime',
+          'timestamp','typingUserIds','typingUpdatedAt','unreadCount','unreadCounts','isPinned','pinnedAt',
+          'isMuted','isArchived'
+        ])
+      );
+
+      allow delete: if false;
+
+      // -------- MESSAGES --------
+      match /messages/{messageId} {
+        allow read: if isChatParticipant(chatId);
+
+        // Create: sender must match auth, chat must exist, message must have encrypted payload
+        allow create: if isSignedIn() && 
+          exists(/databases/$(database)/documents/chats/$(chatId)) &&
+          request.auth.uid == request.resource.data.senderId &&
+          request.resource.data.clientMessageId is string &&
+          request.resource.data.clientMessageId.size() > 0;
+
+        // Update cases:
+        // 1) read receipts (participants)
+        // 2) delete-for-me marker via deletedForUsers array (participants)
+        // 3) edit message content by original sender
+        // 4) reactions and hidden text (by any participant)
+        allow update: if isChatParticipant(chatId) && (
+          (
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead', 'status'])
+          )
+          ||
+          (
+            resource.data.messageType == 'call_invite' &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'callStatus', 'acceptedAt', 'declinedAt', 'missedAt', 'endedAt', 'updatedAt', 'expiresAt'
+            ])
+          )
+          ||
+          (
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deletedForUsers', 'updatedAt'])
+          )
+          ||
+          (
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions', 'hiddenTextFor', 'updatedAt'])
+          )
+          ||
+          (
+            resource.data.senderId == request.auth.uid &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'content', 'text', 'isEncrypted',
+              'encryptedPayload', 'iv',
+              'encryptedKeyForSender', 'encryptedKeyForRecipient',
+              'encryptedKeyForSenderSha1', 'encryptedKeyForRecipientSha1',
+              'editedAt', 'editedBy', 'updatedAt'
+            ])
+          )
+        );
+        // Delete: allow participants to delete legacy messages without senderId,
+        // otherwise only sender can delete their own message.
+        allow delete: if isChatParticipant(chatId) &&
+          (!('senderId' in resource.data) || resource.data.senderId == request.auth.uid);
+      }
+    }
+
+    // ============ PRESENCE ============
+    match /presence/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isOwner(userId);
+    }
+
+    // ============ PUBLIC KEYS ============
+    match /publicKeys/{userId} {
+      allow read: if isSignedIn();
+
+      allow create, update: if isOwner(userId) &&
+        hasRequiredFields(['publicKey', 'uploadedAt']) &&
+        request.resource.data.publicKey is string &&
+        request.resource.data.publicKey.size() > 100;
+
+      allow delete: if false;
+    }
+
+    // ============ STORIES ============
+    match /stories/{storyId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn() &&
+        request.auth.uid == request.resource.data.ownerId &&
+        hasRequiredFields(['ownerId', 'note', 'privacy', 'createdAt', 'expiresAt']);
+
+      allow update: if false;
+      allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+
+      match /views/{viewerId} {
+        allow read: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+        allow create, update: if isSignedIn() && viewerId == request.auth.uid;
+        allow delete: if false;
+      }
+    }
+
+    // ============ POSTS ============
+    match /posts/{postId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn() &&
+        request.auth.uid == request.resource.data.authorId &&
+        hasRequiredFields(['authorId', 'content', 'timestamp', 'privacy']);
+
+      allow update, delete: if isSignedIn() && resource.data.authorId == request.auth.uid;
+    }
+
+    // ============ EVENTS ============
+    match /events/{eventId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.auth.uid == request.resource.data.ownerId;
+      allow update: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+    }
+
+    // ============ EVENT ENGAGEMENT ==========
+    match /event_engagements/{eventId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if false;
+
+      match /members/{userId} {
+        allow read: if isSignedIn();
+        allow create, update, delete: if isOwner(userId);
+      }
+
+      match /comments/{commentId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() &&
+          request.resource.data.authorId == request.auth.uid &&
+          hasRequiredFields(['authorId', 'authorName', 'authorEmoji', 'text', 'createdAt']) &&
+          request.resource.data.text is string &&
+          request.resource.data.text.size() > 0 &&
+          request.resource.data.createdAt is number;
+        allow update: if isSignedIn() && (
+          resource.data.authorId == request.auth.uid ||
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likedBy', 'likesCount', 'updatedAt'])
+        );
+        allow delete: if isSignedIn() && resource.data.authorId == request.auth.uid;
+      }
+    }
+
+    // ============ GROUPS ============
+    match /groups/{groupId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+      allow delete: if false;
+    }
+
+    // ============ FRIENDS ============
+    match /friends/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isOwner(userId);
+
+      match /friends/{friendId} {
+        allow read, write, delete: if isOwner(userId);
+      }
+    }
+
+    // ============ BLOCKED USERS ============
+    match /blockedUsers/{userId} {
+      match /users/{blockedUserId} {
+        allow read, write, delete: if isOwner(userId);
+      }
+    }
+
+    // ============ DENY EVERYTHING ELSE ============
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
