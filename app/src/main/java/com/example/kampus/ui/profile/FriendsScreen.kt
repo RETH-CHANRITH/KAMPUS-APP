@@ -1,6 +1,7 @@
 package com.example.kampus.ui.profile
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -45,13 +46,17 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import com.example.kampus.ui.localization.UiStrings
+import com.example.kampus.ui.localization.rememberUiStrings
+import com.example.kampus.ui.theme.ThemeController
 
-private val FgBg = Color(0xFF1A1F2E)
-private val FgCard = Color(0xFF252A41)
-private val FgChip = Color(0xFF3A3F54)
-private val FgBlue = Color(0xFF0D7FFF)
-private val FgText = Color.White
-private val FgMuted = Color(0xFF99A1AF)
+private val FgIsDark get() = ThemeController.isDark
+private val FgBg get() = if (FgIsDark) Color(0xFF1A1D2E) else Color(0xFFF3F4F8)
+private val FgCard get() = if (FgIsDark) Color(0xFF252A41) else Color(0xFFFFFFFF)
+private val FgChip get() = if (FgIsDark) Color(0xFF3A3F54) else Color(0xFFE5E7EB)
+private val FgBlue get() = Color(0xFF0D7FFF)
+private val FgText get() = if (FgIsDark) Color.White else Color(0xFF111827)
+private val FgMuted get() = if (FgIsDark) Color(0xFF99A1AF) else Color(0xFF6B7280)
 private val FgDanger = Color(0xFFFF4458)
 
 @Composable
@@ -62,6 +67,7 @@ fun FriendsScreen(
     viewModel: FriendsViewModel = viewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val strings = rememberUiStrings()
     var selectedTab by remember { mutableStateOf(0) }
     val totalCount = when (selectedTab) {
         0 -> state.friends.size
@@ -78,23 +84,23 @@ fun FriendsScreen(
                 .padding(horizontal = 24.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Header(onBack = onBack, totalCount = totalCount)
+            Header(onBack = onBack, totalCount = totalCount, strings = strings)
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 TabButton(
-                    title = "Friends (${state.friends.size})",
+                    title = "${strings.friendsLabel} (${state.friends.size})",
                     selected = selectedTab == 0,
                     modifier = Modifier.weight(1f),
                     onClick = { selectedTab = 0 },
                 )
                 TabButton(
-                    title = "Followers (${state.followers.size})",
+                    title = "${strings.followersLabel} (${state.followers.size})",
                     selected = selectedTab == 1,
                     modifier = Modifier.weight(1f),
                     onClick = { selectedTab = 1 },
                 )
                 TabButton(
-                    title = "Following (${state.following.size})",
+                    title = "${strings.followingLabel} (${state.following.size})",
                     selected = selectedTab == 2,
                     modifier = Modifier.weight(1f),
                     onClick = { selectedTab = 2 },
@@ -112,6 +118,7 @@ fun FriendsScreen(
                     when (selectedTab) {
                         0 -> FriendRow(
                             item = item,
+                            strings = strings,
                             onOpenProfile = { onOpenProfile(item.userId) },
                             onOpenChat = { onOpenChat(item.userId) },
                             onUnfollow = { viewModel.unfollow(item.userId) },
@@ -119,12 +126,14 @@ fun FriendsScreen(
                         )
                         1 -> FollowerRow(
                             item = item,
+                            strings = strings,
                             onOpenProfile = { onOpenProfile(item.userId) },
                             isFollowing = item.userId in followingIds,
                             onFollowBack = { viewModel.followBack(item.userId) },
                         )
                         else -> FollowingRow(
                             item = item,
+                            strings = strings,
                             onOpenProfile = { onOpenProfile(item.userId) },
                             onUnfollow = { viewModel.unfollow(item.userId) },
                         )
@@ -137,7 +146,7 @@ fun FriendsScreen(
 }
 
 @Composable
-private fun Header(onBack: () -> Unit, totalCount: Int) {
+private fun Header(onBack: () -> Unit, totalCount: Int, strings: UiStrings) {
     Row(
         horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -147,13 +156,14 @@ private fun Header(onBack: () -> Unit, totalCount: Int) {
             modifier = Modifier
                 .size(40.dp)
                 .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.1f))
+                .background(if (FgIsDark) Color.White.copy(alpha = 0.1f) else FgCard)
+                .border(1.dp, if (FgIsDark) Color.White.copy(alpha = 0.16f) else Color(0xFFD1D5DB), CircleShape)
                 .clickable(onClick = onBack),
             contentAlignment = Alignment.Center,
         ) {
             Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = null, tint = FgText)
         }
-        Text(text = "Friends", color = FgText, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        Text(text = strings.friendsLabel, color = FgText, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
         Box(
             modifier = Modifier
                 .size(40.dp)
@@ -198,6 +208,7 @@ private fun TabButton(
 @Composable
 private fun FriendRow(
     item: FriendItemData,
+    strings: UiStrings,
     onOpenProfile: () -> Unit,
     onOpenChat: () -> Unit,
     onUnfollow: () -> Unit,
@@ -210,6 +221,7 @@ private fun FriendRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(FgCard)
+            .border(1.dp, if (FgIsDark) Color.Transparent else Color(0xFFD1D5DB), RoundedCornerShape(16.dp))
             .clickable(onClick = onOpenProfile)
             .padding(horizontal = 16.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -219,7 +231,7 @@ private fun FriendRow(
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(text = item.name, color = FgText, fontSize = 18.sp)
             Text(text = item.handle, color = FgMuted, fontSize = 14.sp)
-            Text(text = "${item.mutualFriendsCount} mutual friends", color = FgBlue, fontSize = 12.sp)
+            Text(text = "${item.mutualFriendsCount} ${strings.mutualFriendsLabel}", color = FgBlue, fontSize = 12.sp)
         }
         Box(
             modifier = Modifier
@@ -244,14 +256,14 @@ private fun FriendRow(
                 containerColor = Color(0xFF1E2235),
             ) {
                 DropdownMenuItem(
-                    text = { Text(text = "Unfollow", color = Color(0xFFD1D5DC)) },
+                    text = { Text(text = strings.unfollow, color = Color(0xFFD1D5DC)) },
                     onClick = {
                         showMenu = false
                         onUnfollow()
                     },
                 )
                 DropdownMenuItem(
-                    text = { Text(text = "Block", color = FgDanger) },
+                    text = { Text(text = strings.block, color = FgDanger) },
                     onClick = {
                         showMenu = false
                         onBlock()
@@ -265,6 +277,7 @@ private fun FriendRow(
 @Composable
 private fun FollowerRow(
     item: FriendItemData,
+    strings: UiStrings,
     onOpenProfile: () -> Unit,
     isFollowing: Boolean,
     onFollowBack: () -> Unit,
@@ -274,6 +287,7 @@ private fun FollowerRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(FgCard)
+            .border(1.dp, if (FgIsDark) Color.Transparent else Color(0xFFD1D5DB), RoundedCornerShape(16.dp))
             .clickable(onClick = onOpenProfile)
             .padding(horizontal = 16.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -284,7 +298,7 @@ private fun FollowerRow(
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(text = item.name, color = FgText, fontSize = 18.sp)
             Text(text = item.handle, color = FgMuted, fontSize = 14.sp)
-            Text(text = "${item.mutualFriendsCount} mutual friends", color = FgBlue, fontSize = 12.sp)
+            Text(text = "${item.mutualFriendsCount} ${strings.mutualFriendsLabel}", color = FgBlue, fontSize = 12.sp)
         }
 
         Box(
@@ -296,7 +310,7 @@ private fun FollowerRow(
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = if (isFollowing) "Following" else "Follow Back",
+                text = if (isFollowing) strings.followingStatus else strings.followBack,
                 color = FgText,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,
@@ -308,6 +322,7 @@ private fun FollowerRow(
 @Composable
 private fun FollowingRow(
     item: FriendItemData,
+    strings: UiStrings,
     onOpenProfile: () -> Unit,
     onUnfollow: () -> Unit,
 ) {
@@ -316,6 +331,7 @@ private fun FollowingRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(FgCard)
+            .border(1.dp, if (FgIsDark) Color.Transparent else Color(0xFFD1D5DB), RoundedCornerShape(16.dp))
             .clickable(onClick = onOpenProfile)
             .padding(horizontal = 16.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -326,7 +342,7 @@ private fun FollowingRow(
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(text = item.name, color = FgText, fontSize = 18.sp)
             Text(text = item.handle, color = FgMuted, fontSize = 14.sp)
-            Text(text = "${item.mutualFriendsCount} mutual friends", color = FgBlue, fontSize = 12.sp)
+            Text(text = "${item.mutualFriendsCount} ${strings.mutualFriendsLabel}", color = FgBlue, fontSize = 12.sp)
         }
 
         Box(
@@ -337,7 +353,7 @@ private fun FollowingRow(
                 .padding(horizontal = 14.dp, vertical = 8.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Text(text = "Unfollow", color = FgText, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text(text = strings.unfollow, color = FgText, fontSize = 14.sp, fontWeight = FontWeight.Medium)
         }
     }
 }

@@ -25,10 +25,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,26 +32,26 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.kampus.ui.localization.rememberUiStrings
 
-private val NSBg = Color(0xFF1A1D2E)
-private val NSCard = Color(0xFF252A41)
-private val NSBorder = Color(0xFF364153)
-private val NSWhite = Color(0xFFFFFFFF)
-private val NSSubtle = Color(0xFF99A1AF)
-private val NSBlue = Color(0xFF0D7FFF)
+private val NSBg get() = ProfileColors.Bg
+private val NSCard get() = ProfileColors.Card
+private val NSBorder get() = ProfileColors.Border
+private val NSWhite get() = ProfileColors.White
+private val NSSubtle get() = ProfileColors.Subtle
+private val NSBlue get() = ProfileColors.Blue
+private val NSSwitchOffTrack get() = if (ProfileColors.Bg == Color(0xFFF3F4F8)) Color(0xFFD1D5DB) else Color(0xFF4A5565)
 
 @Composable
-fun NotificationSettingsScreen(onBack: () -> Unit) {
-    var pushEnabled by remember { mutableStateOf(true) }
-    var likesEnabled by remember { mutableStateOf(true) }
-    var commentsEnabled by remember { mutableStateOf(true) }
-    var followersEnabled by remember { mutableStateOf(true) }
-    var mentionsEnabled by remember { mutableStateOf(true) }
-    var directMessagesEnabled by remember { mutableStateOf(true) }
-    var groupActivityEnabled by remember { mutableStateOf(false) }
-    var emailEnabled by remember { mutableStateOf(true) }
-    var weeklyDigestEnabled by remember { mutableStateOf(false) }
-    var smsEnabled by remember { mutableStateOf(false) }
+fun NotificationSettingsScreen(
+    onBack: () -> Unit,
+    viewModel: ProfileViewModel = viewModel(),
+) {
+    val strings = rememberUiStrings()
+    val state = viewModel.uiState.collectAsStateWithLifecycle().value
+    val settings = state.notificationSettings
 
     Surface(color = NSBg, modifier = Modifier.fillMaxSize()) {
         Column(
@@ -81,80 +77,80 @@ fun NotificationSettingsScreen(onBack: () -> Unit) {
                         .clickable(onClick = onBack),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back", tint = NSWhite)
+                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = strings.back, tint = NSWhite)
                 }
-                Text("Notifications", color = NSWhite, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text(strings.notificationsTitle, color = NSWhite, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 Box(Modifier.size(40.dp))
             }
 
-            NotificationSection(title = "Push Notifications") {
+            NotificationSection(title = strings.pushNotifications) {
                 NotificationToggleRow(
-                    title = "Push Notifications",
+                    title = strings.pushNotifications,
                     subtitle = "Enable all push notifications",
-                    checked = pushEnabled,
-                    onCheckedChange = { pushEnabled = it },
+                    checked = settings.pushNotifications,
+                    onCheckedChange = { viewModel.setPushNotificationsEnabled(it) },
                 )
                 NotificationToggleRow(
                     title = "Likes",
                     subtitle = "When someone likes your post",
-                    checked = likesEnabled,
-                    onCheckedChange = { likesEnabled = it },
+                    checked = settings.likes,
+                    onCheckedChange = { viewModel.setNotificationToggle("likes", it) },
                 )
                 NotificationToggleRow(
                     title = "Comments",
                     subtitle = "When someone comments on your post",
-                    checked = commentsEnabled,
-                    onCheckedChange = { commentsEnabled = it },
+                    checked = settings.comments,
+                    onCheckedChange = { viewModel.setNotificationToggle("comments", it) },
                 )
                 NotificationToggleRow(
                     title = "New Followers",
                     subtitle = "When someone follows you",
-                    checked = followersEnabled,
-                    onCheckedChange = { followersEnabled = it },
+                    checked = settings.newFollowers,
+                    onCheckedChange = { viewModel.setNotificationToggle("newFollowers", it) },
                 )
                 NotificationToggleRow(
                     title = "Mentions",
                     subtitle = "When someone mentions you",
-                    checked = mentionsEnabled,
-                    onCheckedChange = { mentionsEnabled = it },
+                    checked = settings.mentions,
+                    onCheckedChange = { viewModel.setNotificationToggle("mentions", it) },
                 )
                 NotificationToggleRow(
                     title = "Direct Messages",
                     subtitle = "When you receive a new message",
-                    checked = directMessagesEnabled,
-                    onCheckedChange = { directMessagesEnabled = it },
+                    checked = settings.directMessages,
+                    onCheckedChange = { viewModel.setNotificationToggle("directMessages", it) },
                 )
                 NotificationToggleRow(
                     title = "Group Activity",
                     subtitle = "Updates from groups you're in",
-                    checked = groupActivityEnabled,
-                    onCheckedChange = { groupActivityEnabled = it },
+                    checked = settings.groupActivity,
+                    onCheckedChange = { viewModel.setNotificationToggle("groupActivity", it) },
                     showDivider = false,
                 )
             }
 
-            NotificationSection(title = "Email Notifications") {
+            NotificationSection(title = strings.emailNotifications) {
                 NotificationToggleRow(
-                    title = "Email Notifications",
+                    title = strings.emailNotifications,
                     subtitle = "Receive email notifications",
-                    checked = emailEnabled,
-                    onCheckedChange = { emailEnabled = it },
+                    checked = settings.emailNotifications,
+                    onCheckedChange = { viewModel.setEmailNotificationsEnabled(it) },
                 )
                 NotificationToggleRow(
                     title = "Weekly Digest",
                     subtitle = "Get a weekly summary email",
-                    checked = weeklyDigestEnabled,
-                    onCheckedChange = { weeklyDigestEnabled = it },
+                    checked = settings.weeklyDigest,
+                    onCheckedChange = { viewModel.setNotificationToggle("weeklyDigest", it) },
                     showDivider = false,
                 )
             }
 
-            NotificationSection(title = "SMS Notifications") {
+            NotificationSection(title = strings.smsNotifications) {
                 NotificationToggleRow(
-                    title = "SMS Notifications",
+                    title = strings.smsNotifications,
                     subtitle = "Receive important updates via SMS",
-                    checked = smsEnabled,
-                    onCheckedChange = { smsEnabled = it },
+                    checked = settings.smsNotifications,
+                    onCheckedChange = { viewModel.setNotificationToggle("smsNotifications", it) },
                     showDivider = false,
                 )
             }
@@ -207,7 +203,7 @@ private fun NotificationToggleRow(
                     checkedThumbColor = NSWhite,
                     checkedTrackColor = NSBlue,
                     uncheckedThumbColor = NSWhite,
-                    uncheckedTrackColor = Color(0xFF4A5565),
+                    uncheckedTrackColor = NSSwitchOffTrack,
                 ),
             )
         }

@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -30,6 +32,7 @@ import com.example.kampus.ui.groups.CreateGroupScreen
 import com.example.kampus.ui.groups.GroupDetailScreen
 import com.example.kampus.ui.groups.GroupListScreen
 import com.example.kampus.ui.groups.GroupViewModel
+import com.example.kampus.ui.notifications.NotificationScreen
 import com.example.kampus.ui.events.EventDetailScreen
 import com.example.kampus.ui.events.EventListScreen
 import com.example.kampus.ui.events.EventViewModel
@@ -39,6 +42,7 @@ import com.example.kampus.ui.profile.AppearanceSettingsScreen
 import com.example.kampus.ui.profile.BlockedUsersScreen
 import com.example.kampus.ui.profile.EditProfileScreen
 import com.example.kampus.ui.profile.DiscoverPeopleScreen
+import com.example.kampus.ui.profile.LanguageRegionScreen
 import com.example.kampus.ui.profile.FriendRequestsScreen
 import com.example.kampus.ui.profile.FriendsScreen
 import com.example.kampus.ui.profile.HelpSupportScreen
@@ -49,6 +53,7 @@ import com.example.kampus.ui.profile.PublicProfileScreen
 import com.example.kampus.ui.profile.SettingsScreen
 import com.example.kampus.ui.post.PostDetailScreen
 import com.google.firebase.auth.FirebaseAuth
+import kotlinx.coroutines.launch
 
 object Routes {
     const val SPLASH          = "splash"
@@ -60,6 +65,7 @@ object Routes {
     const val OTP             = "otp/{method}/{contact}"
     const val RESET_PASSWORD  = "reset_password"
     const val HOME            = "home"
+    const val NOTIFICATIONS   = "notifications"
 
     // Feed
     const val POST_CREATE     = "post_create"
@@ -72,13 +78,15 @@ object Routes {
 
     // Events
     const val EVENT_LIST   = "event_list"
-    const val EVENT_DETAIL = "event_detail/{eventId}"
+    const val EVENT_DETAIL = "event_detail/{eventId}?openComposer={openComposer}"
     const val EVENT_CREATE = "event_create"
 
     // Chat
     const val CHAT_LIST   = "chat_list"
     const val CHAT_SCREEN = "chat_screen/{chatId}"
     const val CHAT_WITH_USER = "chat_with_user/{userId}"
+    const val CALL_SCREEN = "call_screen/{chatId}/{callType}?callId={callId}"
+    const val INCOMING_CALL_SCREEN = "incoming_call/{chatId}/{callType}?callId={callId}"
 
     // Profile
     const val PROFILE      = "profile"
@@ -94,14 +102,19 @@ object Routes {
     const val BLOCKED_USERS_SETTINGS = "blocked_users_settings"
     const val HELP_SUPPORT_SETTINGS = "help_support_settings"
     const val ABOUT_SETTINGS = "about_settings"
+    const val LANGUAGE_REGION_SETTINGS = "language_region_settings"
     const val PROFILE_EDIT = "profile_edit"
 
     fun groupDetail(groupId: Int) = "group_detail/$groupId"
-    fun eventDetail(eventId: Int) = "event_detail/$eventId"
+    fun eventDetail(eventId: Int, openComposer: Boolean = false) = "event_detail/$eventId?openComposer=$openComposer"
     fun postDetail(postId: Int) = "post_detail/$postId"
     fun profilePublic(userId: String) = "profile_public/$userId"
     fun chatScreen(chatId: String)   = "chat_screen/$chatId"
     fun chatWithUser(userId: String) = "chat_with_user/$userId"
+    fun callScreen(chatId: String, callType: String, callId: String = "") =
+        "call_screen/$chatId/$callType?callId=$callId"
+    fun incomingCallScreen(chatId: String, callType: String, callId: String = "") =
+        "incoming_call/$chatId/$callType?callId=$callId"
     fun loginWithEmail(email: String) = "login?email=${email.encodeUrl()}"
 
     fun otp(method: String, contact: String) =
@@ -114,6 +127,22 @@ object Routes {
 @SuppressLint("StateFlowValueCalledInComposition", "UnrememberedGetBackStackEntry")
 @Composable
 fun NavGraph(navController: NavHostController) {
+    val globalChatViewModel: ChatViewModel = viewModel()
+    val incomingCall = globalChatViewModel.incomingCallState.collectAsStateWithLifecycle()
+
+    LaunchedEffect(Unit) {
+        globalChatViewModel.startIncomingCallListener()
+    }
+
+    LaunchedEffect(incomingCall.value?.callId) {
+        val invite = incomingCall.value ?: return@LaunchedEffect
+        val currentRoute = navController.currentBackStackEntry?.destination?.route.orEmpty()
+
+        if (!currentRoute.startsWith("incoming_call")) {
+            navController.navigate(Routes.incomingCallScreen(invite.chatId, invite.callType, invite.callId))
+        }
+    }
+
     NavHost(navController = navController, startDestination = Routes.SPLASH) {
 
         // ── Splash ─────────────────────────────────────────────────────────────
@@ -252,12 +281,16 @@ fun NavGraph(navController: NavHostController) {
             HomeScreen(
                 onCreatePost   = { navController.navigate(Routes.POST_CREATE) },
                 onProfileClick = { navController.navigate(Routes.PROFILE) },
-                onNotifClick   = { },
+                onNotifClick   = { navController.navigate(Routes.NOTIFICATIONS) },
                 onSearchClick  = { },
                 onGroupsClick  = { navController.navigate(Routes.GROUP_LIST) },
                 onEventsClick  = { navController.navigate(Routes.EVENT_LIST) },
                 onChatClick    = { navController.navigate(Routes.CHAT_LIST) },
             )
+        }
+
+        composable(Routes.NOTIFICATIONS) {
+            NotificationScreen(onBack = { navController.popBackStack() })
         }
 
         // ── Create Post ───────────────────────────────────────────────────────
@@ -345,6 +378,7 @@ fun NavGraph(navController: NavHostController) {
             EventListScreen(
                 viewModel      = vm,
                 onEventClick   = { navController.navigate(Routes.eventDetail(it.id)) },
+                onCommentOpen  = { navController.navigate(Routes.eventDetail(it.id, true)) },
                 onCreateClick  = { navController.navigate(Routes.EVENT_CREATE) },
                 onHomeClick    = {
                     navController.navigate(Routes.HOME) {
@@ -361,9 +395,13 @@ fun NavGraph(navController: NavHostController) {
         // ── Event Detail ───────────────────────────────────────────────────────
         composable(
             route     = Routes.EVENT_DETAIL,
-            arguments = listOf(navArgument("eventId") { type = NavType.IntType })
+            arguments = listOf(
+                navArgument("eventId") { type = NavType.IntType },
+                navArgument("openComposer") { type = NavType.BoolType; defaultValue = false }
+            )
         ) { back ->
             val eventId   = back.arguments?.getInt("eventId") ?: return@composable
+            val openComposer = back.arguments?.getBoolean("openComposer") ?: false
             val listEntry = remember(back) { navController.getBackStackEntry(Routes.EVENT_LIST) }
             val vm: EventViewModel = viewModel(listEntry)
             val state = vm.uiState.value
@@ -373,10 +411,12 @@ fun NavGraph(navController: NavHostController) {
                 isInterested = event.id in state.interestedIds,
                 isLiked      = event.id in state.likedIds,
                 isSaved      = event.id in state.savedIds,
-                onInterested = { vm.toggleInterested(event.id) },
-                onLike       = { vm.toggleLike(event.id) },
-                onSave       = { vm.toggleSave(event.id) },
+                onInterested = { vm.toggleInterested(event) },
+                onLike       = { vm.toggleLike(event) },
+                onSave       = { vm.toggleSave(event) },
                 onBack       = { navController.popBackStack() },
+                viewModel    = vm,
+                openComposer = openComposer,
             )
         }
 
@@ -387,10 +427,7 @@ fun NavGraph(navController: NavHostController) {
             }
             val vm: EventViewModel = viewModel(listEntry)
             val handleBack: () -> Unit    = { navController.popBackStack() }
-            val handlePublish: (NewEventData) -> Unit = { data ->
-                vm.addEvent(data)
-                navController.popBackStack()
-            }
+            val handlePublish: suspend (NewEventData) -> Result<String> = { data -> vm.createEvent(data) }
             CreateEventScreen(
                 onBack    = handleBack,
                 onPublish = handlePublish,
@@ -399,9 +436,8 @@ fun NavGraph(navController: NavHostController) {
 
         // ── Chat List ──────────────────────────────────────────────────────────
         composable(Routes.CHAT_LIST) {
-            val vm: ChatViewModel = viewModel()
             ChatListScreen(
-                viewModel      = vm,
+                viewModel      = globalChatViewModel,
                 onChatClick    = { chatId -> navController.navigate(Routes.chatScreen(chatId)) },
                 onHomeClick    = {
                     navController.navigate(Routes.HOME) {
@@ -410,8 +446,8 @@ fun NavGraph(navController: NavHostController) {
                 },
                 onGroupsClick  = { navController.navigate(Routes.GROUP_LIST) },
                 onEventsClick  = { navController.navigate(Routes.EVENT_LIST) },
-                onCreatePost   = { navController.navigate(Routes.POST_CREATE) },
                 onProfileClick = { navController.navigate(Routes.PROFILE) },
+                onCreatePost   = { navController.navigate(Routes.POST_CREATE) },
             )
         }
 
@@ -510,7 +546,12 @@ fun NavGraph(navController: NavHostController) {
 
         // ── Friend Requests ───────────────────────────────────────────────────
         composable(Routes.FRIEND_REQUESTS) {
-            FriendRequestsScreen(onBack = { navController.popBackStack() })
+            FriendRequestsScreen(
+                onBack = { navController.popBackStack() },
+                onOpenProfile = { userId ->
+                    navController.navigate(Routes.profilePublic(userId))
+                },
+            )
         }
 
         // ── Friends ───────────────────────────────────────────────────────────
@@ -547,17 +588,24 @@ fun NavGraph(navController: NavHostController) {
 
         // ── Discover People ───────────────────────────────────────────────────
         composable(Routes.DISCOVER_PEOPLE) {
-            DiscoverPeopleScreen(onBack = { navController.popBackStack() })
+            DiscoverPeopleScreen(
+                onBack = { navController.popBackStack() },
+                onOpenProfile = { userId ->
+                    navController.navigate(Routes.profilePublic(userId))
+                },
+            )
         }
 
         // ── Settings ──────────────────────────────────────────────────────────
         composable(Routes.SETTINGS) {
             SettingsScreen(
                 onBack = { navController.popBackStack() },
+                onEditProfile = { navController.navigate(Routes.PROFILE_EDIT) },
                 onOpenAccountSettings = { navController.navigate(Routes.ACCOUNT_SETTINGS) },
                 onOpenNotificationSettings = { navController.navigate(Routes.NOTIFICATION_SETTINGS) },
                 onOpenPrivacySecurity = { navController.navigate(Routes.PRIVACY_SECURITY_SETTINGS) },
                 onOpenAppearance = { navController.navigate(Routes.APPEARANCE_SETTINGS) },
+                onOpenLanguageRegion = { navController.navigate(Routes.LANGUAGE_REGION_SETTINGS) },
                 onOpenBlockedUsers = { navController.navigate(Routes.BLOCKED_USERS_SETTINGS) },
                 onOpenHelpSupport = { navController.navigate(Routes.HELP_SUPPORT_SETTINGS) },
                 onOpenAbout = { navController.navigate(Routes.ABOUT_SETTINGS) },
@@ -584,6 +632,11 @@ fun NavGraph(navController: NavHostController) {
         // ── Appearance Settings ───────────────────────────────────────────────
         composable(Routes.APPEARANCE_SETTINGS) {
             AppearanceSettingsScreen(onBack = { navController.popBackStack() })
+        }
+
+        // ── Language & Region ───────────────────────────────────────────────
+        composable(Routes.LANGUAGE_REGION_SETTINGS) {
+            LanguageRegionScreen(onBack = { navController.popBackStack() })
         }
 
         // ── Blocked Users ─────────────────────────────────────────────────────
@@ -615,7 +668,17 @@ fun NavGraph(navController: NavHostController) {
 
         // ── Privacy & Security ───────────────────────────────────────────────
         composable(Routes.PRIVACY_SECURITY_SETTINGS) {
-            PrivacySecurityScreen(onBack = { navController.popBackStack() })
+            PrivacySecurityScreen(
+                onBack = { navController.popBackStack() },
+                // Closest existing flow for password/account actions.
+                onChangePassword = { navController.navigate(Routes.ACCOUNT_SETTINGS) },
+                // Reuse in-app activity feed screen until dedicated login-history screen exists.
+                onLoginActivity = { navController.navigate(Routes.NOTIFICATIONS) },
+                // Route data export to support flow for now.
+                onDownloadData = { navController.navigate(Routes.HELP_SUPPORT_SETTINGS) },
+                // Route history management to account settings for now.
+                onSearchHistory = { navController.navigate(Routes.ACCOUNT_SETTINGS) },
+            )
         }
 
         // ── Edit Profile ──────────────────────────────────────────────────────
@@ -632,11 +695,77 @@ fun NavGraph(navController: NavHostController) {
             arguments = listOf(navArgument("chatId") { type = NavType.StringType }),
         ) { back ->
             val chatId    = back.arguments?.getString("chatId") ?: return@composable
-            val vm: ChatViewModel = viewModel()
             ChatScreen(
                 chatId    = chatId,
                 onBack    = { navController.popBackStack() },
-                viewModel = vm,
+                onOpenProfile = { userId -> navController.navigate(Routes.profilePublic(userId)) },
+                onVoiceCallClick = {
+                    globalChatViewModel.startOutgoingCall(chatId, "voice") { callId ->
+                        navController.navigate(Routes.callScreen(chatId, "voice", callId))
+                    }
+                },
+                onVideoCallClick = {
+                    globalChatViewModel.startOutgoingCall(chatId, "video") { callId ->
+                        navController.navigate(Routes.callScreen(chatId, "video", callId))
+                    }
+                },
+                onDiagnosticsClick = { globalChatViewModel.requestDiagnostics() },
+                onRotateKeysClick = { globalChatViewModel.rotateKeysForCurrentChat() },
+                chatViewModel = globalChatViewModel,
+            )
+        }
+
+        // ── Call Screens ─────────────────────────────────────────────────────
+        composable(
+            route = Routes.CALL_SCREEN,
+            arguments = listOf(
+                navArgument("chatId") { type = NavType.StringType },
+                navArgument("callType") { type = NavType.StringType },
+                navArgument("callId") { type = NavType.StringType; defaultValue = "" },
+            ),
+        ) { back ->
+            val chatId = back.arguments?.getString("chatId") ?: return@composable
+            val callType = back.arguments?.getString("callType") ?: "voice"
+            val callId = back.arguments?.getString("callId") ?: ""
+            com.example.kampus.ui.chat.CallScreen(
+                chatId = chatId,
+                callType = callType,
+                callId = callId,
+                onBack = { navController.popBackStack() },
+                viewModel = globalChatViewModel,
+            )
+        }
+
+        composable(
+            route = Routes.INCOMING_CALL_SCREEN,
+            arguments = listOf(
+                navArgument("chatId") { type = NavType.StringType },
+                navArgument("callType") { type = NavType.StringType },
+                navArgument("callId") { type = NavType.StringType; defaultValue = "" },
+            ),
+            deepLinks = listOf(
+                navDeepLink { uriPattern = "kampus://incoming_call/{chatId}/{callType}?callId={callId}" },
+            ),
+        ) { back ->
+            val chatId = back.arguments?.getString("chatId") ?: return@composable
+            val callType = back.arguments?.getString("callType") ?: "voice"
+            val callId = back.arguments?.getString("callId") ?: ""
+            com.example.kampus.ui.chat.IncomingCallScreen(
+                chatId = chatId,
+                callType = callType,
+                onAccept = {
+                    globalChatViewModel.acceptIncomingCall(chatId, callId)
+                    globalChatViewModel.consumeIncomingCall()
+                    navController.navigate(Routes.callScreen(chatId, callType, callId)) {
+                        popUpTo(Routes.INCOMING_CALL_SCREEN) { inclusive = true }
+                    }
+                },
+                onDecline = {
+                    globalChatViewModel.declineIncomingCall(chatId, callId)
+                    globalChatViewModel.consumeIncomingCall()
+                    navController.popBackStack()
+                },
+                viewModel = globalChatViewModel,
             )
         }
 

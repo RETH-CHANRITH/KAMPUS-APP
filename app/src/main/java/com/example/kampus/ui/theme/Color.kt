@@ -22,14 +22,14 @@ val AccentGold = Color(0xFFFFD54F)
 
 val BlueFocus = Color(0xFF5A8CFF)
 
-val TextPrimary = Color(0xFFFFFFFF)
-val TextSecondary = Color.White.copy(alpha = 0.52f)
-val TextTertiary = Color.White.copy(alpha = 0.32f)
+val TextPrimary: Color get() = if (ThemeController.isDark) Color(0xFFFFFFFF) else Color(0xFF111827)
+val TextSecondary: Color get() = if (ThemeController.isDark) Color.White.copy(alpha = 0.52f) else Color(0xFF111827).copy(alpha = 0.60f)
+val TextTertiary: Color get() = if (ThemeController.isDark) Color.White.copy(alpha = 0.32f) else Color(0xFF111827).copy(alpha = 0.45f)
 
 val SuccessGreen = Color(0xFF4CAF50)
 val ErrorRed = Color(0xFFFF5252)
-val Background = Color(0xFF121417)
-val InputFill = Color(0xFF2A2D34)
+val Background: Color get() = if (ThemeController.isDark) Color(0xFF121417) else Color(0xFFF3F4F8)
+val InputFill: Color get() = if (ThemeController.isDark) Color(0xFF2A2D34) else Color(0xFFE5E7EB)
 val Primary = Color(0xFF3B82F6)
 
 val SocialButtonBg = Color(0xFF1E2229)

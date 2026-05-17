@@ -34,8 +34,9 @@ data class PostItem(
     val taggedPeople: List<String> = emptyList(),
     val feelingEmoji: String? = null,
     val isPinned: Boolean = false,
+    val authorId: String = "",
 ) {
-    enum class PostVisibility { PUBLIC, FRIENDS, PRIVATE }
+    enum class PostVisibility { PUBLIC, FRIENDS, FOLLOWERS, UNIVERSITY, PRIVATE }
     enum class MediaType { IMAGE, VIDEO }
 
     /**

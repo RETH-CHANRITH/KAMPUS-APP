@@ -8,8 +8,8 @@ import com.example.kampus.domain.model.FriendRequestStatus
 import com.example.kampus.domain.repository.IUserRepository
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import android.util.Log
 import com.google.firebase.firestore.DocumentReference
-import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -20,6 +20,10 @@ class UserRepositoryImpl(
     private val firestore: FirebaseFirestore,
     private val auth: FirebaseAuth
 ) : IUserRepository {
+
+    companion object {
+        private const val TAG = "UserRepositoryImpl"
+    }
 
     override fun getCurrentUserProfile(): Flow<Result<User>> = callbackFlow {
         val currentUserId = auth.currentUser?.uid ?: run {
@@ -83,22 +87,52 @@ class UserRepositoryImpl(
     }
 
     override fun getFriends(userId: String): Flow<Result<List<Friend>>> = callbackFlow {
-        val listener = firestore.collection("users").document(userId)
-            .collection("friends")
+        var latestFollowerDocs: List<com.google.firebase.firestore.DocumentSnapshot>? = null
+        var latestFollowingDocs: List<com.google.firebase.firestore.DocumentSnapshot>? = null
+
+        fun emitMutualFriends() {
+            val followerDocs = latestFollowerDocs ?: return
+            val followingDocs = latestFollowingDocs ?: return
+
+            val followerIds = followerDocs.map { doc -> doc.getString("userId") ?: doc.id }.toSet()
+            val followingIds = followingDocs.map { doc -> doc.getString("userId") ?: doc.id }.toSet()
+            val mutualIds = followerIds intersect followingIds
+
+            val friends = mutualIds.mapNotNull { mutualId ->
+                val source = followerDocs.firstOrNull { (it.getString("userId") ?: it.id) == mutualId }
+                    ?: followingDocs.firstOrNull { (it.getString("userId") ?: it.id) == mutualId }
+                source?.toFriend()?.copy(isMutual = true)
+            }.distinctBy { it.userId }
+
+            trySend(Result.success(friends))
+        }
+
+        val followersListener = firestore.collection("users").document(userId)
+            .collection("followers")
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     trySend(Result.failure(error))
                     return@addSnapshotListener
                 }
-                
-                val friends = snapshot?.documents?.mapNotNull { doc ->
-                    doc.toFriend()
-                }?.distinctBy { it.userId } ?: emptyList()
-                
-                trySend(Result.success(friends))
+                latestFollowerDocs = snapshot?.documents ?: emptyList()
+                emitMutualFriends()
+            }
+
+        val followingListener = firestore.collection("users").document(userId)
+            .collection("following")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    trySend(Result.failure(error))
+                    return@addSnapshotListener
+                }
+                latestFollowingDocs = snapshot?.documents ?: emptyList()
+                emitMutualFriends()
             }
         
-        awaitClose { listener.remove() }
+        awaitClose {
+            followersListener.remove()
+            followingListener.remove()
+        }
     }
 
     override fun getFriendsCount(userId: String): Flow<Result<Int>> = callbackFlow {
@@ -191,7 +225,6 @@ class UserRepositoryImpl(
         val listener = firestore.collection("users").document(userId)
             .collection("friendRequests")
             .whereEqualTo("status", "PENDING")
-            .orderBy("createdAt", Query.Direction.DESCENDING)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     trySend(Result.failure(error))
@@ -209,24 +242,69 @@ class UserRepositoryImpl(
     }
 
     override fun getOutgoingFriendRequests(userId: String): Flow<Result<List<FriendRequest>>> = callbackFlow {
-        val listener = firestore.collection("users").document(userId)
+        var latestOutgoingDocs: List<com.google.firebase.firestore.DocumentSnapshot>? = null
+        var latestIncomingDocs: List<com.google.firebase.firestore.DocumentSnapshot>? = null
+        var latestFollowerDocs: List<com.google.firebase.firestore.DocumentSnapshot>? = null
+
+        fun emitCombined() {
+            val outgoingDocs = latestOutgoingDocs ?: return
+            val incomingDocs = latestIncomingDocs ?: return
+            val followerDocs = latestFollowerDocs ?: return
+
+            val outgoingRequests = outgoingDocs.mapNotNull { it.toFriendRequest() }
+            val mirroredIncoming = incomingDocs.mapNotNull { it.toOutgoingMirrorFriendRequest() }
+            val mirroredFollowers = followerDocs.mapNotNull { it.toOutgoingFromFollowerFriendRequest(userId) }
+
+            val requests = (outgoingRequests + mirroredIncoming + mirroredFollowers)
+                .distinctBy { it.toUserId }
+
+            trySend(Result.success(requests))
+        }
+
+        val outgoingListener = firestore.collection("users").document(userId)
             .collection("outgoingFriendRequests")
-            .whereEqualTo("status", "PENDING")
-            .orderBy("createdAt", Query.Direction.DESCENDING)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     trySend(Result.failure(error))
                     return@addSnapshotListener
                 }
 
-                val requests = snapshot?.documents?.mapNotNull { doc ->
-                    doc.toFriendRequest()
-                }?.distinctBy { it.toUserId } ?: emptyList()
-
-                trySend(Result.success(requests))
+                latestOutgoingDocs = snapshot?.documents ?: emptyList()
+                emitCombined()
             }
 
-        awaitClose { listener.remove() }
+        // Mirror incoming requests into outgoing view so both sides can see relationship history
+        // without requiring cross-user or collection-group permissions.
+        val incomingListener = firestore.collection("users").document(userId)
+            .collection("friendRequests")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    trySend(Result.failure(error))
+                    return@addSnapshotListener
+                }
+
+                latestIncomingDocs = snapshot?.documents ?: emptyList()
+                emitCombined()
+            }
+
+        // Fallback for accounts that already have follower relationships but no request docs.
+        val followersListener = firestore.collection("users").document(userId)
+            .collection("followers")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    trySend(Result.failure(error))
+                    return@addSnapshotListener
+                }
+
+                latestFollowerDocs = snapshot?.documents ?: emptyList()
+                emitCombined()
+            }
+
+        awaitClose {
+            outgoingListener.remove()
+            incomingListener.remove()
+            followersListener.remove()
+        }
     }
 
     override fun getFriendRequestsCount(userId: String): Flow<Result<Int>> = callbackFlow {
@@ -309,29 +387,6 @@ class UserRepositoryImpl(
             "createdAt" to com.google.firebase.Timestamp.now(),
         )
 
-        // Follow behavior: immediately reflect relationship in followers/following collections.
-        val followerDataForTarget = mapOf(
-            "userId" to fromUserId,
-            "displayName" to (fromUser.getString("displayName") ?: ""),
-            "handle" to (fromUser.getString("handle") ?: ""),
-            "avatarEmoji" to (fromUser.getString("avatarEmoji") ?: "👤"),
-            "profileImageUrl" to (fromUser.getString("profileImageUrl") ?: ""),
-            "isOnline" to (fromUser.getBoolean("isOnline") ?: false),
-            "isMutual" to false,
-            "addedAt" to com.google.firebase.Timestamp.now(),
-        )
-
-        val followingDataForSource = mapOf(
-            "userId" to toUserId,
-            "displayName" to (toUser.getString("displayName") ?: ""),
-            "handle" to (toUser.getString("handle") ?: ""),
-            "avatarEmoji" to (toUser.getString("avatarEmoji") ?: "👤"),
-            "profileImageUrl" to (toUser.getString("profileImageUrl") ?: ""),
-            "isOnline" to (toUser.getBoolean("isOnline") ?: false),
-            "isMutual" to false,
-            "addedAt" to com.google.firebase.Timestamp.now(),
-        )
-
         val batch = firestore.batch()
         batch.set(
             firestore.collection("users").document(toUserId)
@@ -342,16 +397,6 @@ class UserRepositoryImpl(
             firestore.collection("users").document(fromUserId)
                 .collection("outgoingFriendRequests").document(requestId),
             requestData,
-        )
-        batch.set(
-            firestore.collection("users").document(toUserId)
-                .collection("followers").document(fromUserId),
-            followerDataForTarget,
-        )
-        batch.set(
-            firestore.collection("users").document(fromUserId)
-                .collection("following").document(toUserId),
-            followingDataForSource,
         )
         batch.commit().await()
         
@@ -375,34 +420,10 @@ class UserRepositoryImpl(
         val incomingDoc = incomingRef.get().await()
         val fromUserId = incomingDoc.getString("fromUserId") ?: throw Exception("Friend request not found")
 
-        val currentUserDoc = firestore.collection("users").document(currentUserId).get().await()
-        val fromUserDoc = firestore.collection("users").document(fromUserId).get().await()
-
-        val currentUserFriendData = mapOf(
-            "userId" to currentUserId,
-            "displayName" to (currentUserDoc.getString("displayName") ?: ""),
-            "handle" to (currentUserDoc.getString("handle") ?: ""),
-            "avatarEmoji" to (currentUserDoc.getString("avatarEmoji") ?: "👤"),
-            "profileImageUrl" to (currentUserDoc.getString("profileImageUrl") ?: ""),
-            "isOnline" to (currentUserDoc.getBoolean("isOnline") ?: false),
-            "isMutual" to true,
-            "addedAt" to com.google.firebase.Timestamp.now(),
-        )
-
-        val fromUserFriendData = mapOf(
-            "userId" to fromUserId,
-            "displayName" to (fromUserDoc.getString("displayName") ?: ""),
-            "handle" to (fromUserDoc.getString("handle") ?: ""),
-            "avatarEmoji" to (fromUserDoc.getString("avatarEmoji") ?: "👤"),
-            "profileImageUrl" to (fromUserDoc.getString("profileImageUrl") ?: ""),
-            "isOnline" to (fromUserDoc.getBoolean("isOnline") ?: false),
-            "isMutual" to true,
-            "addedAt" to com.google.firebase.Timestamp.now(),
-        )
 
         val batch = firestore.batch()
 
-        // Delete all incoming requests from this user (respects ownership rules).
+        // Mark all pending incoming requests from this sender as accepted.
         val allIncomingFromSender = firestore.collection("users").document(currentUserId)
             .collection("friendRequests")
             .whereEqualTo("fromUserId", fromUserId)
@@ -414,7 +435,7 @@ class UserRepositoryImpl(
             batch.delete(doc.reference)
         }
 
-        // Delete any local outgoing requests to this user.
+        // Mark any local outgoing requests to this user as accepted too.
         val allOutgoingToSender = firestore.collection("users").document(currentUserId)
             .collection("outgoingFriendRequests")
             .whereEqualTo("toUserId", fromUserId)
@@ -426,18 +447,95 @@ class UserRepositoryImpl(
             batch.delete(doc.reference)
         }
 
-        batch.set(
-            firestore.collection("users").document(currentUserId)
-                .collection("friends").document(fromUserId),
-            fromUserFriendData,
-        )
-        batch.set(
-            firestore.collection("users").document(fromUserId)
-                .collection("friends").document(currentUserId),
-            currentUserFriendData,
-        )
-
         batch.commit().await()
+
+        // Instagram-style accept: sender becomes a follower of the current user,
+        // and the sender's following list points to the current user.
+        runCatching {
+            firestore.collection("users").document(currentUserId)
+                .collection("followers").document(fromUserId)
+                .set(
+                    mapOf(
+                        "userId" to fromUserId,
+                        "displayName" to (incomingDoc.getString("fromUserName") ?: ""),
+                        "handle" to (incomingDoc.getString("fromUserHandle") ?: ""),
+                        "avatarEmoji" to (incomingDoc.getString("fromUserAvatar") ?: "👤"),
+                        "profileImageUrl" to (incomingDoc.getString("fromUserProfileImageUrl") ?: ""),
+                        "isOnline" to false,
+                        "isMutual" to false,
+                        "addedAt" to com.google.firebase.Timestamp.now(),
+                    ),
+                )
+                .await()
+        }.onFailure { e ->
+            Log.w(TAG, "acceptFriendRequest: followers write skipped due rules: ${e.message}")
+        }
+
+        runCatching {
+            firestore.collection("users").document(fromUserId)
+                .collection("following").document(currentUserId)
+                .set(
+                    mapOf(
+                        "userId" to currentUserId,
+                        "displayName" to (incomingDoc.getString("toUserName") ?: ""),
+                        "handle" to (incomingDoc.getString("toUserHandle") ?: ""),
+                        "avatarEmoji" to (incomingDoc.getString("toUserAvatar") ?: "👤"),
+                        "profileImageUrl" to (incomingDoc.getString("toUserProfileImageUrl") ?: ""),
+                        "isOnline" to false,
+                        "isMutual" to false,
+                        "addedAt" to com.google.firebase.Timestamp.now(),
+                    ),
+                )
+                .await()
+        }.onFailure { e ->
+            Log.w(TAG, "acceptFriendRequest: following write skipped due rules: ${e.message}")
+        }
+
+        runCatching {
+            firestore.collection("users").document(currentUserId)
+                .collection("outgoingFriendRequests")
+                .document(requestId)
+                .set(
+                    mapOf(
+                        "id" to requestId,
+                        "fromUserId" to fromUserId,
+                        "fromUserName" to (incomingDoc.getString("fromUserName") ?: ""),
+                        "fromUserHandle" to (incomingDoc.getString("fromUserHandle") ?: ""),
+                        "fromUserAvatar" to (incomingDoc.getString("fromUserAvatar") ?: "👤"),
+                        "fromUserProfileImageUrl" to (incomingDoc.getString("fromUserProfileImageUrl") ?: ""),
+                        "toUserId" to currentUserId,
+                        "toUserName" to (incomingDoc.getString("toUserName") ?: ""),
+                        "toUserHandle" to (incomingDoc.getString("toUserHandle") ?: ""),
+                        "toUserAvatar" to (incomingDoc.getString("toUserAvatar") ?: "👤"),
+                        "toUserProfileImageUrl" to (incomingDoc.getString("toUserProfileImageUrl") ?: ""),
+                        "status" to "ACCEPTED",
+                        "createdAt" to com.google.firebase.Timestamp.now(),
+                    ),
+                )
+                .await()
+        }.onFailure { e ->
+            Log.w(TAG, "acceptFriendRequest: outgoing history write skipped due rules: ${e.message}")
+        }
+
+        // Best effort: sync sender's outgoing copy so their Outgoing tab updates in real time.
+        runCatching {
+            val senderOutgoing = firestore.collection("users").document(fromUserId)
+                .collection("outgoingFriendRequests")
+                .whereEqualTo("toUserId", currentUserId)
+                .whereEqualTo("status", "PENDING")
+                .get()
+                .await()
+
+            val syncBatch = firestore.batch()
+            senderOutgoing.documents.forEach { doc ->
+                syncBatch.set(doc.reference, mapOf("status" to "ACCEPTED"), SetOptions.merge())
+            }
+            if (!senderOutgoing.isEmpty) {
+                syncBatch.commit().await()
+            }
+        }.onFailure { e ->
+            Log.w(TAG, "acceptFriendRequest: sender outgoing sync skipped due rules: ${e.message}")
+        }
         
         Result.success(Unit)
     } catch (e: Exception) {
@@ -446,13 +544,85 @@ class UserRepositoryImpl(
 
     override suspend fun rejectFriendRequest(requestId: String): Result<Unit> = try {
         val currentUserId = auth.currentUser?.uid ?: throw Exception("User not authenticated")
-        
+
         val incomingRef = firestore.collection("users").document(currentUserId)
             .collection("friendRequests")
             .document(requestId)
 
-        // Delete the incoming request (respects ownership rules).
-        incomingRef.delete().await()
+        val incomingDoc = incomingRef.get().await()
+        val fromUserId = incomingDoc.getString("fromUserId") ?: throw Exception("Friend request not found")
+
+        val batch = firestore.batch()
+
+        val incomingRequests = firestore.collection("users").document(currentUserId)
+            .collection("friendRequests")
+            .whereEqualTo("fromUserId", fromUserId)
+            .whereEqualTo("status", "PENDING")
+            .get()
+            .await()
+
+        for (doc in incomingRequests.documents) {
+            batch.delete(doc.reference)
+        }
+
+        val outgoingRequests = firestore.collection("users").document(currentUserId)
+            .collection("outgoingFriendRequests")
+            .whereEqualTo("toUserId", fromUserId)
+            .whereEqualTo("status", "PENDING")
+            .get()
+            .await()
+
+        for (doc in outgoingRequests.documents) {
+            batch.delete(doc.reference)
+        }
+
+        batch.commit().await()
+
+        runCatching {
+            firestore.collection("users").document(currentUserId)
+                .collection("outgoingFriendRequests")
+                .document(requestId)
+                .set(
+                    mapOf(
+                        "id" to requestId,
+                        "fromUserId" to fromUserId,
+                        "fromUserName" to (incomingDoc.getString("fromUserName") ?: ""),
+                        "fromUserHandle" to (incomingDoc.getString("fromUserHandle") ?: ""),
+                        "fromUserAvatar" to (incomingDoc.getString("fromUserAvatar") ?: "👤"),
+                        "fromUserProfileImageUrl" to (incomingDoc.getString("fromUserProfileImageUrl") ?: ""),
+                        "toUserId" to currentUserId,
+                        "toUserName" to (incomingDoc.getString("toUserName") ?: ""),
+                        "toUserHandle" to (incomingDoc.getString("toUserHandle") ?: ""),
+                        "toUserAvatar" to (incomingDoc.getString("toUserAvatar") ?: "👤"),
+                        "toUserProfileImageUrl" to (incomingDoc.getString("toUserProfileImageUrl") ?: ""),
+                        "status" to "REJECTED",
+                        "createdAt" to com.google.firebase.Timestamp.now(),
+                    ),
+                )
+                .await()
+        }.onFailure { e ->
+            Log.w(TAG, "rejectFriendRequest: outgoing history write skipped due rules: ${e.message}")
+        }
+
+        // Best effort: clear sender's outgoing copy so their Outgoing tab does not keep stale pending rows.
+        runCatching {
+            val senderOutgoingRequests = firestore.collection("users").document(fromUserId)
+                .collection("outgoingFriendRequests")
+                .whereEqualTo("toUserId", currentUserId)
+                .whereEqualTo("status", "PENDING")
+                .get()
+                .await()
+
+            val syncBatch = firestore.batch()
+            senderOutgoingRequests.documents.forEach { doc ->
+                syncBatch.delete(doc.reference)
+            }
+            if (!senderOutgoingRequests.isEmpty) {
+                syncBatch.commit().await()
+            }
+        }.onFailure { e ->
+            Log.w(TAG, "rejectFriendRequest: sender outgoing sync skipped due rules: ${e.message}")
+        }
         
         Result.success(Unit)
     } catch (e: Exception) {
@@ -476,17 +646,35 @@ class UserRepositoryImpl(
 
     override suspend fun removeFriend(userId: String, friendId: String): Result<Unit> = try {
         firestore.collection("users").document(userId)
-            .collection("friends")
+            .collection("following")
             .document(friendId)
             .delete()
             .await()
         
-        // Also remove from friend's list
-        firestore.collection("users").document(friendId)
-            .collection("friends")
-            .document(userId)
-            .delete()
-            .await()
+        // Also remove from the other user's followers list.
+        runCatching {
+            firestore.collection("users").document(friendId)
+                .collection("followers")
+                .document(userId)
+                .delete()
+                .await()
+        }
+
+        // Legacy cleanup if any old friends docs still exist.
+        runCatching {
+            firestore.collection("users").document(userId)
+                .collection("friends")
+                .document(friendId)
+                .delete()
+                .await()
+        }
+        runCatching {
+            firestore.collection("users").document(friendId)
+                .collection("friends")
+                .document(userId)
+                .delete()
+                .await()
+        }
         
         Result.success(Unit)
     } catch (e: Exception) {
@@ -575,14 +763,18 @@ class UserRepositoryImpl(
     }
 
     override fun observeUserOnlineStatus(userId: String): Flow<Result<Boolean>> = callbackFlow {
-        val listener = firestore.collection("users").document(userId)
+        val listener = firestore.collection("presence").document(userId)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     trySend(Result.failure(error))
                     return@addSnapshotListener
                 }
                 
-                val isOnline = snapshot?.getBoolean("isOnline") ?: false
+                val isOnline = snapshot?.getBoolean("isOnline")
+                    ?: snapshot?.getBoolean("active")
+                    ?: snapshot?.getBoolean("connected")
+                    ?: snapshot?.getBoolean("present")
+                    ?: false
                 trySend(Result.success(isOnline))
             }
         
@@ -592,7 +784,7 @@ class UserRepositoryImpl(
     // Helper extensions
     private fun com.google.firebase.firestore.DocumentSnapshot.toUser(): User {
         // Parse nested stats map correctly
-        val statsMap = this.get("stats") as? Map<String, Any>
+        val statsMap = this.get("stats") as? Map<*, *>
         val stats = UserStats(
             posts = (statsMap?.get("posts") as? Number)?.toInt() ?: 0,
             followers = (statsMap?.get("followers") as? Number)?.toInt() ?: 0,
@@ -622,7 +814,7 @@ class UserRepositoryImpl(
     private fun com.google.firebase.firestore.DocumentSnapshot.toFriend(): Friend? {
         return try {
             Friend(
-                userId = this.id,
+                userId = this.getString("userId") ?: this.id,
                 displayName = this.getString("displayName") ?: "",
                 handle = this.getString("handle") ?: "",
                 avatarEmoji = this.getString("avatarEmoji") ?: "👤",
@@ -655,6 +847,56 @@ class UserRepositoryImpl(
                     "BLOCKED" -> FriendRequestStatus.BLOCKED
                     else -> FriendRequestStatus.PENDING
                 },
+            )
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun com.google.firebase.firestore.DocumentSnapshot.toOutgoingMirrorFriendRequest(): FriendRequest? {
+        return try {
+            val parsedStatus = when (this.getString("status")) {
+                "ACCEPTED" -> FriendRequestStatus.ACCEPTED
+                "REJECTED" -> FriendRequestStatus.REJECTED
+                "BLOCKED" -> FriendRequestStatus.BLOCKED
+                else -> FriendRequestStatus.PENDING
+            }
+
+            FriendRequest(
+                id = "mirror_${this.id}",
+                fromUserId = this.getString("toUserId") ?: "",
+                fromUserName = this.getString("toUserName") ?: "",
+                fromUserHandle = this.getString("toUserHandle") ?: "",
+                fromUserAvatar = this.getString("toUserAvatar") ?: "👤",
+                fromUserProfileImageUrl = this.getString("toUserProfileImageUrl") ?: "",
+                toUserId = this.getString("fromUserId") ?: "",
+                toUserName = this.getString("fromUserName") ?: "",
+                toUserHandle = this.getString("fromUserHandle") ?: "",
+                toUserAvatar = this.getString("fromUserAvatar") ?: "👤",
+                toUserProfileImageUrl = this.getString("fromUserProfileImageUrl") ?: "",
+                status = parsedStatus,
+            )
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun com.google.firebase.firestore.DocumentSnapshot.toOutgoingFromFollowerFriendRequest(currentUserId: String): FriendRequest? {
+        return try {
+            val followerId = this.getString("userId") ?: this.id
+            FriendRequest(
+                id = "follower_$followerId",
+                fromUserId = currentUserId,
+                fromUserName = "",
+                fromUserHandle = "",
+                fromUserAvatar = "👤",
+                fromUserProfileImageUrl = "",
+                toUserId = followerId,
+                toUserName = this.getString("displayName") ?: "",
+                toUserHandle = this.getString("handle") ?: "",
+                toUserAvatar = this.getString("avatarEmoji") ?: "👤",
+                toUserProfileImageUrl = this.getString("profileImageUrl") ?: "",
+                status = FriendRequestStatus.ACCEPTED,
             )
         } catch (e: Exception) {
             null

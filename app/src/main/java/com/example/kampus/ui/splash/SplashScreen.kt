@@ -266,8 +266,9 @@ fun SplashScreen(
             Spacer(Modifier.height(14.dp))
 
             // ── Tagline ────────────────────────────────────────────────────────
+            val strings = com.example.kampus.ui.localization.rememberUiStrings()
             Text(
-                text       = "Mini Social Media\nfor Campus Students",
+                text       = strings.appTagline,
                 color      = TextGray,
                 fontSize   = 16.sp,
                 fontWeight = FontWeight.Normal,

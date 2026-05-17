@@ -1,5 +1,6 @@
 @file:Suppress("SpellCheckingInspection")
 package com.example.kampus.ui.feed
+import android.content.Intent
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -17,6 +18,14 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -28,28 +37,36 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import kotlinx.coroutines.launch
 import com.example.kampus.ui.components.CampusBottomNavBar
+import com.example.kampus.ui.feed.MenuItemLarge
+import com.example.kampus.ui.theme.ThemeController
+import com.example.kampus.utils.ActivityLogger
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Palette
 // ─────────────────────────────────────────────────────────────────────────────
-private val HBg     = Color(0xFF080B11)
-private val HCard   = Color(0xFF0F1520)
-private val HBorder = Color(0xFF1A2333)
-private val HBlue   = Color(0xFF3B82F6)
-private val HGlow   = Color(0xFF2563EB)
-private val HWhite  = Color(0xFFFFFFFF)
-private val HGray2  = Color(0xFFE5E7EB)
-private val HGray4  = Color(0xFF9CA3AF)
-private val HGray6  = Color(0xFF374151)
-private val HRed    = Color(0xFFEF4444)
-private val HNavBg  = Color(0xFF0C1018)
+private val UiIsDark get() = ThemeController.isDark
+private val HBg get() = if (UiIsDark) Color(0xFF080B11) else Color(0xFFF3F4F8)
+private val HCard get() = if (UiIsDark) Color(0xFF0F1520) else Color(0xFFFFFFFF)
+private val HBorder get() = if (UiIsDark) Color(0xFF1A2333) else Color(0xFFD1D5DB)
+private val HBlue get() = ThemeController.accent.color
+private val HGlow get() = HBlue.copy(alpha = if (UiIsDark) 0.75f else 0.55f)
+private val HWhite get() = if (UiIsDark) Color(0xFFFFFFFF) else Color(0xFF111827)
+private val HGray2 get() = if (UiIsDark) Color(0xFFE5E7EB) else Color(0xFF374151)
+private val HGray4 get() = if (UiIsDark) Color(0xFF9CA3AF) else Color(0xFF6B7280)
+private val HGray6 get() = if (UiIsDark) Color(0xFF374151) else Color(0xFF9CA3AF)
+private val HRed get() = Color(0xFFEF4444)
+private val HNavBg get() = if (UiIsDark) Color(0xFF0C1018) else Color(0xFFF3F4F8)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Models
@@ -101,15 +118,24 @@ fun HomeScreen(
     onChatClick    : () -> Unit = {},   // ← ADDED (for future use)
 ) {
     val vm: FeedViewModel = viewModel()
-    val posts by vm.posts.collectAsState()
+    val context = LocalContext.current
+    val uiState by vm.uiState.collectAsStateWithLifecycle()
     val likedPosts by vm.likedIds.collectAsState()
+    val posts = uiState.posts
 
     var selectedNav by remember { mutableIntStateOf(0) }
     var notifCount  by remember { mutableIntStateOf(3) }
     val listState   = rememberLazyListState()
 
+    val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
+    var pendingDeletePost by remember { mutableStateOf<PostItem?>(null) }
+    var confirmDeleteVisible by rememberSaveable { mutableStateOf(false) }
+    var recentlyDeletedPost by remember { mutableStateOf<PostItem?>(null) }
+
     Scaffold(
         containerColor = HBg,
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             Surface(
                 color          = HBg,
@@ -160,6 +186,19 @@ fun HomeScreen(
                 .padding(innerPadding),
             contentPadding = PaddingValues(bottom = 8.dp),
         ) {
+            if (uiState.isLoading && posts.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 24.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator(color = HBlue)
+                    }
+                }
+            }
+
             item {
                 Spacer(Modifier.height(8.dp))
                 StoriesRow()
@@ -177,10 +216,97 @@ fun HomeScreen(
                     onLike  = {
                         vm.toggleLike(post.id)
                     },
+                    onShare = {
+                        ActivityLogger.logAction(
+                            type = "share_post",
+                            text = "Shared post by ${post.author}",
+                            metadata = mapOf("postId" to post.id.toString(), "author" to post.author),
+                        )
+                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_SUBJECT, "${post.author} on Kampus")
+                            putExtra(Intent.EXTRA_TEXT, "${post.author}: ${post.content}")
+                        }
+                        context.startActivity(Intent.createChooser(shareIntent, "Share post"))
+                    },
+                    
+                    onMenuAction = { targetPost, action ->
+                        when (action) {
+                            "pin" -> {
+                                vm.pinPostBackend(targetPost.id, true)
+                                coroutineScope.launch { snackbarHostState.showSnackbar("Post pinned") }
+                            }
+                            "unpin" -> {
+                                vm.pinPostBackend(targetPost.id, false)
+                                coroutineScope.launch { snackbarHostState.showSnackbar("Post unpinned") }
+                            }
+                            "trash" -> {
+                                // Ask for confirmation before deleting
+                                pendingDeletePost = targetPost
+                                confirmDeleteVisible = true
+                            }
+                            "edit" -> {
+                                ActivityLogger.logAction(type = "edit_post", text = "Edit requested for ${targetPost.id}")
+                            }
+                            "privacy_public" -> {
+                                vm.updatePostVisibility(targetPost.id, PostItem.PostVisibility.PUBLIC)
+                                coroutineScope.launch { snackbarHostState.showSnackbar("Privacy set to Public") }
+                            }
+                            "privacy_friends" -> {
+                                vm.updatePostVisibility(targetPost.id, PostItem.PostVisibility.FRIENDS)
+                                coroutineScope.launch { snackbarHostState.showSnackbar("Privacy set to Friends") }
+                            }
+                            "privacy_private" -> {
+                                vm.updatePostVisibility(targetPost.id, PostItem.PostVisibility.PRIVATE)
+                                coroutineScope.launch { snackbarHostState.showSnackbar("Privacy set to Only Me") }
+                            }
+                            "privacy" -> {
+                                vm.updatePostVisibility(targetPost.id, targetPost.visibility)
+                                coroutineScope.launch { snackbarHostState.showSnackbar("Privacy updated") }
+                            }
+                            "hide_profile" -> {
+                                vm.hideFromProfileBackend(targetPost.id)
+                                coroutineScope.launch { snackbarHostState.showSnackbar("Hidden from profile") }
+                            }
+                            else -> {
+                                ActivityLogger.logAction(type = "post_menu_action", text = "$action for ${targetPost.id}")
+                            }
+                        }
+                    },
                 )
                 Spacer(Modifier.height(6.dp))
             }
         }
+    }
+
+    // Confirmation dialog for destructive action
+    if (confirmDeleteVisible && pendingDeletePost != null) {
+        val target = pendingDeletePost!!
+        AlertDialog(
+            onDismissRequest = { confirmDeleteVisible = false; pendingDeletePost = null },
+            title = { Text("Move to trash", color = HWhite) },
+            text = { Text("Items in your trash are deleted after 30 days.", color = HGray4) },
+            confirmButton = {
+                TextButton(onClick = {
+                    // perform delete
+                    recentlyDeletedPost = target
+                    vm.deletePost(target.id)
+                    vm.hideFromProfileBackend(target.id)
+                    coroutineScope.launch {
+                        val res = snackbarHostState.showSnackbar("Post moved to trash", actionLabel = "UNDO")
+                        if (res == SnackbarResult.ActionPerformed) {
+                            recentlyDeletedPost?.let { vm.restorePost(it) }
+                            recentlyDeletedPost = null
+                        }
+                    }
+                    confirmDeleteVisible = false
+                    pendingDeletePost = null
+                }) { Text("Move to trash") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDeleteVisible = false; pendingDeletePost = null }) { Text("Cancel") }
+            }
+        )
     }
 }
 
@@ -239,7 +365,7 @@ private fun TopBar(
                     .clip(CircleShape)
                     .background(HCard)
                     .border(1.dp, HBorder, CircleShape)
-                    .clickable(remember { MutableInteractionSource() }, null, onClick = onSearchClick),
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onSearchClick),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(Icons.Outlined.Search, "Search", tint = HGray4, modifier = Modifier.size(20.dp))
@@ -256,7 +382,7 @@ private fun TopBar(
                             if (notifCount > 0) HBlue.copy(0.45f) else HBorder,
                             CircleShape,
                         )
-                        .clickable(remember { MutableInteractionSource() }, null, onClick = onNotifClick),
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onNotifClick),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
@@ -303,7 +429,7 @@ private fun StoryBubble(story: StoryItem) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
-        modifier            = Modifier.clickable(remember { MutableInteractionSource() }, null) {},
+        modifier            = Modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
     ) {
         Box(modifier = Modifier.size(66.dp)) {
             Box(
@@ -343,21 +469,21 @@ private fun StoryBubble(story: StoryItem) {
                 }
             }
         }
-        Text(
-            story.name,
-            color      = if (story.hasNew) HGray2 else HGray4,
-            fontSize   = 11.sp,
-            fontWeight = if (story.hasNew) FontWeight.SemiBold else FontWeight.Normal,
-            maxLines   = 1,
-        )
-    }
-}
 
-// ─────────────────────────────────────────────────────────────────────────────
+    }
+    }
+    // ─────────────────────────────────────────────────────────────────────────────
 // Post Card
 // ─────────────────────────────────────────────────────────────────────────────
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PostCard(post: PostItem, isLiked: Boolean, onLike: () -> Unit) {
+private fun PostCard(
+    post: PostItem,
+    isLiked: Boolean,
+    onLike: () -> Unit,
+    onShare: () -> Unit,
+    onMenuAction: (PostItem, String) -> Unit = { _, _ -> },
+) {
     val context = LocalContext.current
     val likeScale by animateFloatAsState(
         if (isLiked) 1.35f else 1f,
@@ -409,14 +535,141 @@ private fun PostCard(post: PostItem, isLiked: Boolean, onLike: () -> Unit) {
                     Text(post.time, color = HGray4, fontSize = 12.sp)
                 }
             }
+            var showMenu by rememberSaveable { mutableStateOf(false) }
+            val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            val coroutineScope = rememberCoroutineScope()
+
+            // Helper function to close menu properly
+            fun closeMenu() {
+                coroutineScope.launch { sheetState.hide() }
+                showMenu = false
+            }
+
             Box(
                 modifier = Modifier
                     .size(34.dp)
                     .clip(CircleShape)
-                    .clickable(remember { MutableInteractionSource() }, null) {},
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                        showMenu = true
+                        coroutineScope.launch { sheetState.show() }
+                    },
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(Icons.Default.MoreVert, "More", tint = HGray4, modifier = Modifier.size(18.dp))
+
+                if (showMenu) {
+                    ModalBottomSheet(
+                        onDismissRequest = { closeMenu() },
+                        sheetState = sheetState,
+                    ) {
+                        Column(modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color.Transparent)
+                        ) {
+                            // Drag handle
+                            Box(modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp, bottom = 6.dp), contentAlignment = Alignment.Center) {
+                                Box(modifier = Modifier
+                                    .width(36.dp)
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(HBorder.copy(alpha = 0.35f))
+                                )
+                            }
+
+                            // Top group (main post actions)
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = HCard,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(vertical = 10.dp)) {
+                                    Text("Post options", color = HWhite, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 18.dp, top = 6.dp, end = 18.dp, bottom = 2.dp))
+                                    Text("Choose what to do with this post.", color = HGray4, fontSize = 13.sp, modifier = Modifier.padding(start = 18.dp, end = 18.dp, bottom = 8.dp))
+
+                                    MenuItemLarge(icon = Icons.Outlined.OpenInNew, label = "Open post", tint = HBlue) {
+                                        onMenuAction(post, "open")
+                                        closeMenu()
+                                    }
+                                    MenuItemLarge(icon = Icons.Outlined.ContentCopy, label = "Copy post text", tint = HGray2) {
+                                        onMenuAction(post, "copy")
+                                        closeMenu()
+                                    }
+
+                                    Divider(color = HBorder.copy(alpha = 0.5f))
+
+                                    MenuItemLarge(icon = Icons.Default.BookmarkAdd, label = if (post.isPinned) "Unpin post" else "Pin post", tint = HBlue, subtitle = "Keep this post at the top") {
+                                        onMenuAction(post, if (post.isPinned) "unpin" else "pin")
+                                        closeMenu()
+                                    }
+                                    MenuItemLarge(icon = Icons.Default.Edit, label = "Edit post", tint = HGray2, subtitle = "Update the content or media") {
+                                        onMenuAction(post, "edit")
+                                        closeMenu()
+                                    }
+                                    MenuItemLarge(icon = Icons.Default.Lock, label = "Privacy settings", tint = HGray2, subtitle = "Choose who can see this post") {
+                                        onMenuAction(post, "privacy")
+                                        closeMenu()
+                                    }
+                                }
+                            }
+
+                            Spacer(Modifier.height(10.dp))
+
+                            // Privacy presets
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = HCard,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(vertical = 10.dp)) {
+                                    MenuItemLarge(icon = Icons.Outlined.Public, label = "Public", tint = Color(0xFF4CAF50), subtitle = "Anyone can see this post") {
+                                        onMenuAction(post, "privacy_public")
+                                        closeMenu()
+                                    }
+                                    Divider(color = HBorder.copy(alpha = 0.5f))
+                                    MenuItemLarge(icon = Icons.Outlined.Group, label = "Friends", tint = HBlue, subtitle = "Only your friends can see it") {
+                                        onMenuAction(post, "privacy_friends")
+                                        closeMenu()
+                                    }
+                                    Divider(color = HBorder.copy(alpha = 0.5f))
+                                    MenuItemLarge(icon = Icons.Outlined.Lock, label = "Only me", tint = HGray2, subtitle = "Visible only to you") {
+                                        onMenuAction(post, "privacy_private")
+                                        closeMenu()
+                                    }
+                                }
+                            }
+
+                            Spacer(Modifier.height(10.dp))
+
+                            // Destructive action
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = HCard,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(vertical = 10.dp)) {
+                                    MenuItemLarge(icon = Icons.Default.PersonOff, label = "Hide from profile", tint = HGray2, subtitle = "Remove it from your profile only") {
+                                        onMenuAction(post, "hide_profile")
+                                        closeMenu()
+                                    }
+                                    Divider(color = HBorder.copy(alpha = 0.5f))
+                                    MenuItemLarge(icon = Icons.Default.Delete, label = "Delete post", tint = HRed, subtitle = "This removes the post from the feed") {
+                                        onMenuAction(post, "trash")
+                                        closeMenu()
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.height(18.dp))
+                        }
+                    }
+                }
             }
         }
 
@@ -573,7 +826,7 @@ private fun PostCard(post: PostItem, isLiked: Boolean, onLike: () -> Unit) {
                         tint    = likeColor, scale = likeScale, onClick = onLike,
                     )
                     ImageAction(Icons.Outlined.ChatBubbleOutline, "${post.comments}", HWhite.copy(0.8f))
-                    ImageAction(Icons.AutoMirrored.Outlined.Send, "", HWhite.copy(0.8f))
+                    ImageAction(Icons.AutoMirrored.Outlined.Send, "", HWhite.copy(0.8f), onClick = onShare)
                 }
             }
             Spacer(Modifier.height(10.dp))
@@ -596,9 +849,57 @@ private fun PostCard(post: PostItem, isLiked: Boolean, onLike: () -> Unit) {
                     tint    = likeColor, scale = likeScale, onClick = onLike,
                 )
                 TextAction(Icons.Outlined.ChatBubbleOutline, "${post.comments}", HGray4)
-                TextAction(Icons.AutoMirrored.Outlined.Send, "Share", HGray4)
+                TextAction(Icons.AutoMirrored.Outlined.Send, "Share", HGray4, onClick = onShare)
             }
             Spacer(Modifier.height(4.dp))
+        }
+    }
+}
+
+@Composable
+private fun MenuRow(icon: ImageVector, label: String, tint: Color, subtitle: String? = null, onClick: () -> Unit = {}) {
+    Column(modifier = Modifier
+        .fillMaxWidth()
+        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+        .padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Icon(icon, label, tint = tint, modifier = Modifier.size(20.dp))
+            Column {
+                Text(label, color = HWhite, fontWeight = FontWeight.Medium)
+                if (!subtitle.isNullOrEmpty()) {
+                    Text(subtitle, color = HGray4, fontSize = 12.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MenuItemLarge(icon: ImageVector, label: String, tint: Color, subtitle: String? = null, onClick: () -> Unit = {}) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(64.dp)
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(HNavBg)
+                .border(1.dp, HBorder, RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
+        }
+
+        Column(modifier = Modifier.padding(start = 14.dp)) {
+            Text(label, color = HWhite, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            if (!subtitle.isNullOrEmpty()) {
+                Text(subtitle, color = HGray4, fontSize = 13.sp)
+            }
         }
     }
 }
@@ -608,7 +909,7 @@ private fun ImageAction(icon: ImageVector, label: String, tint: Color, scale: Fl
     Row(
         verticalAlignment     = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
-        modifier              = Modifier.clickable(remember { MutableInteractionSource() }, null, onClick = onClick),
+        modifier              = Modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick),
     ) {
         Icon(icon, label, tint = tint, modifier = Modifier.size(22.dp).graphicsLayer { scaleX = scale; scaleY = scale })
         if (label.isNotEmpty()) Text(label, color = tint, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
@@ -620,7 +921,7 @@ private fun TextAction(icon: ImageVector, label: String, tint: Color, scale: Flo
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(8.dp))
-            .clickable(remember { MutableInteractionSource() }, null, onClick = onClick)
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 9.dp),
         verticalAlignment     = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),

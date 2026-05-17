@@ -74,9 +74,11 @@ class FeedViewModel : ViewModel() {
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * Toggle like status for a post
+     * Toggle like status for a post - with real-time Firestore sync
      */
     fun toggleLike(postId: Int) {
+        val post = _posts.value.firstOrNull { it.id == postId }
+
         _likedIds.update { currentLiked ->
             if (postId in currentLiked) {
                 currentLiked - postId
@@ -85,16 +87,41 @@ class FeedViewModel : ViewModel() {
             }
         }
 
+        val isNowLiked = postId in _likedIds.value
+        if (isNowLiked && post != null) {
+            ActivityLogger.logAction(
+                type = "like_post",
+                text = "Liked a post by ${post.author}",
+                metadata = mapOf("postId" to post.id.toString(), "author" to post.author),
+            )
+        }
+
         // Update like count in post
         _posts.update { postList ->
             postList.map { post ->
                 if (post.id == postId) {
-                    val isNowLiked = postId in _likedIds.value
                     val likeDelta = if (isNowLiked) 1 else -1
                     post.copy(likes = (post.likes + likeDelta).coerceAtLeast(0))
                 } else {
                     post
                 }
+            }
+        }
+
+        _uiState.update { state ->
+            state.copy(posts = _posts.value)
+        }
+
+        // Persist like count to Firestore for real-time sync
+        viewModelScope.launch {
+            val updatedLikeCount = _posts.value.firstOrNull { it.id == postId }?.likes ?: 0
+            val result = postRepository.updatePostLikes(postId.toString(), updatedLikeCount)
+            result.onFailure { error ->
+                ActivityLogger.logAction(
+                    type = "like_post_sync_failed",
+                    text = "Failed to sync like for post $postId: ${error.message}",
+                    metadata = mapOf("postId" to postId.toString(), "error" to error.message.toString()),
+                )
             }
         }
     }
@@ -153,6 +180,7 @@ class FeedViewModel : ViewModel() {
             _posts.update { currentPosts ->
                 listOf(newPost) + currentPosts
             }
+            _uiState.update { it.copy(posts = _posts.value) }
 
             persistPost(newPost)
 
@@ -215,6 +243,7 @@ class FeedViewModel : ViewModel() {
             _posts.update { currentPosts ->
                 listOf(newPost) + currentPosts
             }
+            _uiState.update { it.copy(posts = _posts.value) }
 
             persistPost(newPost)
 
@@ -289,15 +318,134 @@ class FeedViewModel : ViewModel() {
     }
 
     /**
-     * Delete a post
+     * Delete a post - removes from local state and persists deletion to Firestore
      */
     fun deletePost(postId: Int) {
+        // Remove from local state immediately for responsive UI
         _posts.update { currentPosts ->
             currentPosts.filterNot { it.id == postId }
         }
+        _uiState.update { it.copy(posts = _posts.value) }
 
         // Remove from liked if applicable
         _likedIds.update { it - postId }
+
+        // Persist deletion to Firestore
+        viewModelScope.launch {
+            val postIdString = postId.toString()
+            val result = postRepository.deletePost(postIdString)
+            result.onSuccess {
+                ActivityLogger.logAction(
+                    type = "delete_post",
+                    text = "Deleted post $postId",
+                    metadata = mapOf("postId" to postIdString),
+                )
+            }
+            result.onFailure { error ->
+                // If deletion fails, log the error but keep it removed from UI
+                ActivityLogger.logAction(
+                    type = "delete_post_failed",
+                    text = "Failed to delete post $postId: ${error.message}",
+                    metadata = mapOf("postId" to postIdString, "error" to error.message.toString()),
+                )
+            }
+        }
+    }
+
+    fun pinPostBackend(postId: Int, isPinned: Boolean = true) {
+        _posts.update { postList ->
+            postList.map { post ->
+                if (post.id == postId) post.copy(isPinned = isPinned) else post
+            }
+        }
+        _uiState.update { it.copy(posts = _posts.value) }
+        
+        ActivityLogger.logAction(
+            type = if (isPinned) "pin_post" else "unpin_post",
+            text = if (isPinned) "Pinned post $postId" else "Unpinned post $postId",
+        )
+        
+        // Persist to Firestore for real-time sync
+        viewModelScope.launch {
+            val result = postRepository.updatePostPin(postId.toString(), isPinned)
+            result.onFailure { error ->
+                ActivityLogger.logAction(
+                    type = "pin_post_sync_failed",
+                    text = "Failed to ${if (isPinned) "pin" else "unpin"} post $postId: ${error.message}",
+                    metadata = mapOf("postId" to postId.toString(), "isPinned" to isPinned.toString()),
+                )
+            }
+        }
+    }
+
+    fun updatePostVisibility(postId: Int, visibility: PostItem.PostVisibility) {
+        _posts.update { postList ->
+            postList.map { post ->
+                if (post.id == postId) post.copy(visibility = visibility) else post
+            }
+        }
+        _uiState.update { it.copy(posts = _posts.value) }
+        
+        ActivityLogger.logAction(
+            type = "edit_privacy",
+            text = "Updated visibility for post $postId to $visibility",
+        )
+        
+        // Persist to Firestore for real-time sync
+        viewModelScope.launch {
+            val result = postRepository.updatePostVisibility(postId.toString(), visibility.toString())
+            result.onFailure { error ->
+                ActivityLogger.logAction(
+                    type = "visibility_update_failed",
+                    text = "Failed to update visibility for post $postId: ${error.message}",
+                    metadata = mapOf("postId" to postId.toString(), "visibility" to visibility.toString()),
+                )
+            }
+        }
+    }
+
+    fun hideFromProfileBackend(postId: Int) {
+        // Update local state to hide from profile
+        _posts.update { postList ->
+            postList.map { post ->
+                if (post.id == postId) post.copy(visibility = PostItem.PostVisibility.PRIVATE) else post
+            }
+        }
+        _uiState.update { it.copy(posts = _posts.value) }
+        
+        ActivityLogger.logAction(
+            type = "hide_from_profile",
+            text = "Hide post $postId from profile",
+        )
+        
+        // Persist to Firestore for real-time sync
+        viewModelScope.launch {
+            val result = postRepository.hidePostFromProfile(postId.toString(), true)
+            result.onFailure { error ->
+                ActivityLogger.logAction(
+                    type = "hide_from_profile_failed",
+                    text = "Failed to hide post $postId from profile: ${error.message}",
+                    metadata = mapOf("postId" to postId.toString(), "error" to error.message.toString()),
+                )
+            }
+        }
+    }
+
+    /**
+     * Restore a deleted post back to the feed
+     */
+    fun restorePost(post: PostItem) {
+        _posts.update { current -> listOf(post) + current.filterNot { it.id == post.id } }
+        _uiState.update { it.copy(posts = _posts.value) }
+        
+        // Persist restoration to Firestore
+        persistPost(post)
+        
+        ActivityLogger.logAction(
+            type = "restore_post",
+            text = "Restored post ${post.id}",
+            metadata = mapOf("postId" to post.id.toString()),
+        )
     }
 
     /**
@@ -313,6 +461,7 @@ class FeedViewModel : ViewModel() {
                 }
             }
         }
+        _uiState.update { it.copy(posts = _posts.value) }
     }
 
     /**
@@ -328,6 +477,7 @@ class FeedViewModel : ViewModel() {
                 }
             }
         }
+        _uiState.update { it.copy(posts = _posts.value) }
     }
 
     /**
@@ -335,18 +485,10 @@ class FeedViewModel : ViewModel() {
      * TODO: Connect to Firebase/backend when ready
      */
     fun refreshFeed() {
-        _uiState.update { it.copy(isLoading = true) }
-
-        try {
-            // TODO: Fetch from Firebase/backend repository
-            // For now, use mock data
-            loadMockPosts()
-            clearError()
-        } catch (e: Exception) {
-            setError("Failed to refresh feed: ${e.message}")
-        } finally {
-            _uiState.update { it.copy(isLoading = false) }
-        }
+        // The feed is already backed by a realtime Firestore listener.
+        // Keep this as a lightweight state reset for callers that still invoke refresh.
+        clearError()
+        _uiState.update { it.copy(isLoading = false, posts = _posts.value) }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -496,6 +638,13 @@ class FeedViewModel : ViewModel() {
             val result = postRepository.createPost(payload)
             result.onFailure { error ->
                 setError("Post saved locally, sync failed: ${error.message}")
+            }
+            result.onSuccess {
+                ActivityLogger.logAction(
+                    type = "post_persisted",
+                    text = "Post ${post.id} synced to Firestore",
+                    metadata = mapOf("postId" to post.id.toString()),
+                )
             }
         }
     }

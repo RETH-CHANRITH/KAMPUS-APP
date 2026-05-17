@@ -2,6 +2,7 @@
 package com.example.kampus.ui.events
 
 import android.annotation.SuppressLint
+import android.content.Intent
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -18,13 +19,18 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage
+import com.example.kampus.ui.theme.ThemeController
 import com.example.kampus.ui.events.EventColors as C
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -32,12 +38,6 @@ import com.example.kampus.ui.events.EventColors as C
 // ─────────────────────────────────────────────────────────────────────────────
 private data class NavItem(val label: String, val icon: ImageVector, val iconSelected: ImageVector)
 
-private val navItems = listOf(
-    NavItem("Home",   Icons.Outlined.Home,          Icons.Filled.Home),
-    NavItem("Groups", Icons.Outlined.Group,         Icons.Filled.Group),
-    NavItem("Events", Icons.Outlined.CalendarMonth, Icons.Filled.CalendarMonth),
-    NavItem("Chat",   Icons.Outlined.ChatBubbleOutline, Icons.Filled.ChatBubble),
-)
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Screen
@@ -46,6 +46,7 @@ private val navItems = listOf(
 @Composable
 fun EventListScreen(
     onEventClick   : (EventItem) -> Unit = {},
+    onCommentOpen  : (EventItem) -> Unit = { onEventClick(it) },
     onCreateClick  : () -> Unit          = {},
     onHomeClick    : () -> Unit          = {},
     onGroupsClick  : () -> Unit          = {},
@@ -55,12 +56,22 @@ fun EventListScreen(
     notifCount     : Int                 = 3,
     viewModel      : EventViewModel      = viewModel(),
 ) {
+    val context       = LocalContext.current
     val state         by viewModel.uiState.collectAsState()
+    val strings       = com.example.kampus.ui.localization.rememberUiStrings()
     var searchQuery   by remember { mutableStateOf("") }
-    var activeFilter  by remember { mutableStateOf("All") }
+    val filterKeys    = listOf("All", "Today", "This Week", "Music", "Tech", "Art", "Campus")
+    val filterLabels  = remember(strings) {
+        listOf(
+            strings.filterAll, strings.filterToday, strings.filterThisWeek,
+            strings.filterMusic, strings.filterTech, strings.filterArt, strings.filterCampus
+        )
+    }
+    var activeFilterIndex by remember { mutableIntStateOf(0) }
+    val activeFilterKey = filterKeys[activeFilterIndex]
 
-    val displayed = remember(activeFilter, searchQuery, state.events) {
-        viewModel.filteredEvents(activeFilter, searchQuery)
+    val displayed = remember(activeFilterKey, searchQuery, state.events) {
+        viewModel.filteredEvents(activeFilterKey, searchQuery)
     }
 
     Scaffold(
@@ -69,17 +80,21 @@ fun EventListScreen(
             EventTopBar(
                 searchQuery    = searchQuery,
                 onSearchChange = { searchQuery = it; viewModel.setSearch(it) },
-                activeFilter   = activeFilter,
-                onFilterSelect = { activeFilter = it; viewModel.setFilter(it) },
+                activeFilterIndex = activeFilterIndex,
+                onFilterSelect = { idx ->
+                    activeFilterIndex = idx
+                    viewModel.setFilter(filterKeys[idx])
+                },
                 onCreateClick  = onCreateClick,
-                filters        = viewModel.filters,
+                filterLabels   = filterLabels,
+                strings        = strings,
             )
         },
         bottomBar = {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Brush.verticalGradient(listOf(Color.Transparent, C.Bg.copy(alpha = 0.98f))))
+                    .background(Brush.verticalGradient(colors = listOf(Color.Transparent, C.Bg.copy(alpha = 0.98f))))
                     .padding(horizontal = 14.dp, vertical = 10.dp)
                     .navigationBarsPadding(),
             ) {
@@ -101,7 +116,7 @@ fun EventListScreen(
         },
     ) { innerPadding ->
         if (displayed.isEmpty()) {
-            EventEmptyState(modifier = Modifier.padding(innerPadding))
+            EventEmptyState(modifier = Modifier.padding(innerPadding), strings = strings)
         } else {
             LazyColumn(
                 modifier       = Modifier.fillMaxSize().padding(innerPadding),
@@ -110,23 +125,34 @@ fun EventListScreen(
             ) {
                 // Featured banner (first featured item)
                 val featured = displayed.firstOrNull { it.isFeatured }
-                if (featured != null && activeFilter == "All" && searchQuery.isEmpty()) {
+                if (featured != null && activeFilterKey == "All" && searchQuery.isEmpty()) {
                     item {
                         FeaturedEventBanner(
                             event        = featured,
                             isInterested = featured.id in state.interestedIds,
                             isLiked      = featured.id in state.likedIds,
                             isSaved      = featured.id in state.savedIds,
-                            onInterested = { viewModel.toggleInterested(featured.id) },
-                            onLike       = { viewModel.toggleLike(featured.id) },
-                            onSave       = { viewModel.toggleSave(featured.id) },
+                            onInterested = { viewModel.toggleInterested(featured) },
+                            onLike       = { viewModel.toggleLike(featured) },
+                            onSave       = { viewModel.toggleSave(featured) },
+                            onComment    = { onCommentOpen(featured) },
+                            onShare      = {
+                                viewModel.shareEvent(featured)
+                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_SUBJECT, featured.title)
+                                    putExtra(Intent.EXTRA_TEXT, "Check out this event on Kampus: ${featured.title}\n${featured.description}")
+                                }
+                                context.startActivity(Intent.createChooser(shareIntent, "Share event"))
+                            },
                             onClick      = { onEventClick(featured) },
+                            strings      = strings,
                         )
                     }
                 }
 
                 // Regular cards
-                val rest = if (activeFilter == "All" && searchQuery.isEmpty() && featured != null)
+                val rest = if (activeFilterKey == "All" && searchQuery.isEmpty() && featured != null)
                     displayed.filter { !it.isFeatured }
                 else displayed
 
@@ -137,10 +163,21 @@ fun EventListScreen(
                         isLiked      = event.id in state.likedIds,
                         isSaved      = event.id in state.savedIds,
                         index        = index,
-                        onInterested = { viewModel.toggleInterested(event.id) },
-                        onLike       = { viewModel.toggleLike(event.id) },
-                        onSave       = { viewModel.toggleSave(event.id) },
+                        onInterested = { viewModel.toggleInterested(event) },
+                        onLike       = { viewModel.toggleLike(event) },
+                        onSave       = { viewModel.toggleSave(event) },
+                        onComment    = { onCommentOpen(event) },
+                        onShare      = {
+                            viewModel.shareEvent(event)
+                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_SUBJECT, event.title)
+                                putExtra(Intent.EXTRA_TEXT, "Check out this event on Kampus: ${event.title}\n${event.description}")
+                            }
+                            context.startActivity(Intent.createChooser(shareIntent, "Share event"))
+                        },
                         onClick      = { onEventClick(event) },
+                        strings      = strings,
                     )
                 }
             }
@@ -153,12 +190,13 @@ fun EventListScreen(
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
 private fun EventTopBar(
-    searchQuery    : String,
-    onSearchChange : (String) -> Unit,
-    activeFilter   : String,
-    onFilterSelect : (String) -> Unit,
-    onCreateClick  : () -> Unit,
-    filters        : List<String>,
+    searchQuery       : String,
+    onSearchChange    : (String) -> Unit,
+    activeFilterIndex : Int,
+    onFilterSelect    : (Int) -> Unit,
+    onCreateClick     : () -> Unit,
+    filterLabels      : List<String>,
+    strings           : com.example.kampus.ui.localization.UiStrings,
 ) {
     Surface(color = C.Bg, shadowElevation = 0.dp) {
         Column(
@@ -182,7 +220,7 @@ private fun EventTopBar(
                         letterSpacing = (-0.8).sp,
                     )
                     Text(
-                        "Discover events near you",
+                        strings.discoverEventsNearYou,
                         color    = C.Gray3,
                         fontSize = 13.sp,
                     )
@@ -191,8 +229,8 @@ private fun EventTopBar(
                     modifier = Modifier
                         .size(42.dp)
                         .clip(CircleShape)
-                        .background(Brush.linearGradient(listOf(C.Blue, C.BlueGlow)))
-                        .clickable(remember { MutableInteractionSource() }, null, onClick = onCreateClick),
+                        .background(Brush.linearGradient(colors = listOf(C.Blue, C.BlueGlow)))
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onCreateClick),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(Icons.Default.Add, "Create Event", tint = C.White, modifier = Modifier.size(20.dp))
@@ -224,7 +262,7 @@ private fun EventTopBar(
                     cursorBrush   = androidx.compose.ui.graphics.SolidColor(C.Blue),
                     decorationBox = { inner ->
                         Box {
-                            if (searchQuery.isEmpty()) Text("Search events, locations…", color = C.Gray4, fontSize = 14.sp)
+                            if (searchQuery.isEmpty()) Text(strings.searchEventsLocations, color = C.Gray4, fontSize = 14.sp)
                             inner()
                         }
                     }
@@ -233,7 +271,7 @@ private fun EventTopBar(
                     Icon(
                         Icons.Default.Close, null, tint = C.Gray4, modifier = Modifier
                             .size(16.dp)
-                            .clickable(remember { MutableInteractionSource() }, null) { onSearchChange("") }
+                            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onSearchChange("") }
                     )
                 }
             }
@@ -245,19 +283,19 @@ private fun EventTopBar(
                 contentPadding        = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(filters) { filter ->
-                    val isActive = activeFilter == filter
+                itemsIndexed(filterLabels) { index, label ->
+                    val isActive = activeFilterIndex == index
                     val bgColor by animateColorAsState(
                         if (isActive) C.Blue else C.Surface,
-                        tween(200), label = "chip_bg_$filter",
+                        tween(200), label = "chip_bg_$index",
                     )
                     val textColor by animateColorAsState(
                         if (isActive) C.White else C.Gray3,
-                        tween(200), label = "chip_text_$filter",
+                        tween(200), label = "chip_text_$index",
                     )
                     val borderColor by animateColorAsState(
                         if (isActive) C.Blue else C.Border,
-                        tween(200), label = "chip_border_$filter",
+                        tween(200), label = "chip_border_$index",
                     )
                     Box(
                         modifier = Modifier
@@ -265,11 +303,11 @@ private fun EventTopBar(
                             .clip(RoundedCornerShape(16.dp))
                             .background(bgColor)
                             .border(1.dp, borderColor, RoundedCornerShape(16.dp))
-                            .clickable(remember { MutableInteractionSource() }, null) { onFilterSelect(filter) }
+                            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onFilterSelect(index) }
                             .padding(horizontal = 14.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(filter, color = textColor, fontSize = 12.sp, fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal)
+                        Text(label, color = textColor, fontSize = 12.sp, fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal)
                     }
                 }
             }
@@ -289,8 +327,47 @@ private fun FeaturedEventBanner(
     onInterested : () -> Unit,
     onLike       : () -> Unit,
     onSave       : () -> Unit,
+    onComment    : () -> Unit,
+    onShare      : () -> Unit,
     onClick      : () -> Unit,
+    strings      : com.example.kampus.ui.localization.UiStrings,
 ) {
+    var organizerName by remember { mutableStateOf(event.organizer) }
+    var organizerAvatar by remember { mutableStateOf("🙋") }
+    val loveScale by animateFloatAsState(
+        targetValue = if (isLiked) 1.06f else 1f,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "featured_love_scale_${event.id}",
+    )
+    val saveScale by animateFloatAsState(
+        targetValue = if (isSaved) 1.06f else 1f,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "featured_save_scale_${event.id}",
+    )
+    val interestedScale by animateFloatAsState(
+        targetValue = if (isInterested) 1.03f else 1f,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "featured_interested_scale_${event.id}",
+    )
+    
+    // Fetch organizer profile from Firestore
+    LaunchedEffect(event.organizer) {
+        if (event.organizer.startsWith("8") || event.organizer.length == 28) {
+            try {
+                val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                db.collection("users").document(event.organizer).get()
+                    .addOnSuccessListener { doc ->
+                        if (doc.exists()) {
+                            organizerName = doc.getString("displayName") ?: "User"
+                            organizerAvatar = doc.getString("avatarEmoji") ?: "🙋"
+                        }
+                    }
+            } catch (e: Exception) {
+                // Fallback
+            }
+        }
+    }
+    
     val interestedColor by animateColorAsState(
         if (isInterested) C.Blue else C.Gray3, tween(200), label = "ic"
     )
@@ -299,22 +376,33 @@ private fun FeaturedEventBanner(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(24.dp))
-            .background(Brush.linearGradient(listOf(event.coverColor1, event.coverColor2)))
-            .clickable(remember { MutableInteractionSource() }, null, onClick = onClick)
+            .background(Brush.linearGradient(colors = listOf(event.coverColor1, event.coverColor2)))
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
     ) {
-        // Background emoji
+        // Background - image if available, otherwise emoji
         Box(
             modifier         = Modifier.fillMaxWidth().height(220.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Text(event.coverEmoji, fontSize = 90.sp)
+            if (event.coverImageUrl.isNotEmpty()) {
+                // Display actual image
+                AsyncImage(
+                    model = event.coverImageUrl,
+                    contentDescription = event.title,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                // Fallback to emoji
+                Text(event.coverEmoji, fontSize = 90.sp)
+            }
             // Bottom fade
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(120.dp)
                     .align(Alignment.BottomCenter)
-                    .background(Brush.verticalGradient(listOf(Color.Transparent, event.coverColor2.copy(alpha = 0.95f))))
+                    .background(Brush.verticalGradient(colors = listOf(Color.Transparent, event.coverColor2.copy(alpha = 0.95f))))
             )
         }
 
@@ -332,7 +420,7 @@ private fun FeaturedEventBanner(
                         .background(C.Blue.copy(alpha = 0.9f))
                         .padding(horizontal = 10.dp, vertical = 4.dp),
                 ) {
-                    Text("⭐ Featured", color = C.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text(strings.featured, color = C.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
 
@@ -347,7 +435,7 @@ private fun FeaturedEventBanner(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 // Organizer
-                OrganizerRow(event)
+                OrganizerRow(organizer = organizerName, organizerEmoji = organizerAvatar, time = event.organizerTime)
 
                 // Title
                 Text(
@@ -360,7 +448,7 @@ private fun FeaturedEventBanner(
                 )
 
                 // Meta
-                EventMetaRow(event)
+                EventMetaRow(event, strings)
 
                 HorizontalDivider(color = C.Border.copy(0.4f), thickness = 0.5.dp)
 
@@ -375,16 +463,20 @@ private fun FeaturedEventBanner(
                             icon  = if (isLiked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
                             label = "${event.likes + if (isLiked) 1 else 0}",
                             tint  = if (isLiked) C.Red else C.Gray3,
+                            modifier = Modifier.graphicsLayer(scaleX = loveScale, scaleY = loveScale),
                             onClick = onLike,
                         )
-                        ActionButton(Icons.Outlined.ChatBubbleOutline, "${event.comments}", C.Gray3)
-                        ActionButton(Icons.Outlined.Share, "${event.shares}", C.Gray3)
+                        ActionButton(Icons.Outlined.ChatBubbleOutline, "${event.comments}", C.Gray3, onClick = onComment)
+                        ActionButton(Icons.Outlined.Share, "${event.shares}", C.Gray3, onClick = onShare)
                     }
                     Icon(
                         if (isSaved) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
                         "Save",
                         tint     = if (isSaved) C.Blue else C.Gray3,
-                        modifier = Modifier.size(20.dp).clickable(remember { MutableInteractionSource() }, null, onClick = onSave),
+                        modifier = Modifier
+                            .size(20.dp)
+                            .graphicsLayer(scaleX = saveScale, scaleY = saveScale)
+                            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onSave),
                     )
                 }
 
@@ -396,12 +488,13 @@ private fun FeaturedEventBanner(
                         .clip(RoundedCornerShape(14.dp))
                         .background(
                             if (isInterested)
-                                Brush.linearGradient(listOf(C.BlueSoft, C.BlueSoft))
+                                Brush.linearGradient(colors = listOf(C.BlueSoft, C.BlueSoft))
                             else
-                                Brush.linearGradient(listOf(C.Blue, C.BlueGlow))
+                                Brush.linearGradient(colors = listOf(C.Blue, C.BlueGlow))
                         )
                         .border(1.dp, if (isInterested) C.Blue else Color.Transparent, RoundedCornerShape(14.dp))
-                        .clickable(remember { MutableInteractionSource() }, null, onClick = onInterested),
+                        .graphicsLayer(scaleX = interestedScale, scaleY = interestedScale)
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onInterested),
                     contentAlignment = Alignment.Center,
                 ) {
                     Row(
@@ -413,7 +506,7 @@ private fun FeaturedEventBanner(
                             null, tint = C.White, modifier = Modifier.size(16.dp)
                         )
                         Text(
-                            if (isInterested) "Interested ✓" else "I'm Interested",
+                            if (isInterested) strings.youreInterested else strings.imInterested,
                             color      = C.White,
                             fontSize   = 14.sp,
                             fontWeight = FontWeight.Bold,
@@ -438,7 +531,10 @@ private fun StaggeredEventCard(
     onInterested : () -> Unit,
     onLike       : () -> Unit,
     onSave       : () -> Unit,
+    onComment    : () -> Unit,
+    onShare      : () -> Unit,
     onClick      : () -> Unit,
+    strings      : com.example.kampus.ui.localization.UiStrings,
 ) {
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
@@ -449,7 +545,7 @@ private fun StaggeredEventCard(
         visible = visible,
         enter   = fadeIn(tween(300)) + slideInVertically(tween(300, easing = EaseOutCubic)) { it / 3 },
     ) {
-        EventCard(event, isInterested, isLiked, isSaved, onInterested, onLike, onSave, onClick)
+        EventCard(event, isInterested, isLiked, isSaved, onInterested, onLike, onSave, onComment, onShare, onClick, strings)
     }
 }
 
@@ -465,15 +561,54 @@ private fun EventCard(
     onInterested : () -> Unit,
     onLike       : () -> Unit,
     onSave       : () -> Unit,
+    onComment    : () -> Unit,
+    onShare      : () -> Unit,
     onClick      : () -> Unit,
+    strings      : com.example.kampus.ui.localization.UiStrings,
 ) {
+    var organizerName by remember { mutableStateOf(event.organizer) }
+    var organizerAvatar by remember { mutableStateOf("🙋") }
+    val loveScale by animateFloatAsState(
+        targetValue = if (isLiked) 1.06f else 1f,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "love_scale_card_${event.id}",
+    )
+    val saveScale by animateFloatAsState(
+        targetValue = if (isSaved) 1.06f else 1f,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "save_scale_card_${event.id}",
+    )
+    val interestedScale by animateFloatAsState(
+        targetValue = if (isInterested) 1.03f else 1f,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "interested_scale_card_${event.id}",
+    )
+    
+    // Fetch organizer profile from Firestore
+    LaunchedEffect(event.organizer) {
+        if (event.organizer.startsWith("8") || event.organizer.length == 28) { // Firebase UID pattern
+            try {
+                val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                db.collection("users").document(event.organizer).get()
+                    .addOnSuccessListener { doc ->
+                        if (doc.exists()) {
+                            organizerName = doc.getString("displayName") ?: "User"
+                            organizerAvatar = doc.getString("avatarEmoji") ?: "🙋"
+                        }
+                    }
+            } catch (e: Exception) {
+                // Fallback to organizer field
+            }
+        }
+    }
+    
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(22.dp))
             .background(C.Card)
             .border(1.dp, C.Border, RoundedCornerShape(22.dp))
-            .clickable(remember { MutableInteractionSource() }, null, onClick = onClick),
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick),
     ) {
         // ── Cover ─────────────────────────────────────────────────────────────
         Box(
@@ -481,10 +616,21 @@ private fun EventCard(
                 .fillMaxWidth()
                 .height(160.dp)
                 .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
-                .background(Brush.linearGradient(listOf(event.coverColor1, event.coverColor2))),
+                .background(Brush.linearGradient(colors = listOf(event.coverColor1, event.coverColor2))),
             contentAlignment = Alignment.Center,
         ) {
-            Text(event.coverEmoji, fontSize = 64.sp)
+            if (event.coverImageUrl.isNotEmpty()) {
+                // Display uploaded image
+                AsyncImage(
+                    model = event.coverImageUrl,
+                    contentDescription = event.title,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                // Fallback to emoji if no image
+                Text(event.coverEmoji, fontSize = 64.sp)
+            }
 
             // Category badge top-left
             Box(modifier = Modifier.align(Alignment.TopStart).padding(12.dp)) {
@@ -499,7 +645,7 @@ private fun EventCard(
                     .size(32.dp)
                     .clip(CircleShape)
                     .background(Color.Black.copy(alpha = 0.35f))
-                    .clickable(remember { MutableInteractionSource() }, null, onClick = onSave),
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onSave),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -523,7 +669,7 @@ private fun EventCard(
             modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 14.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            OrganizerRow(event)
+            OrganizerRow(organizer = organizerName, organizerEmoji = organizerAvatar, time = event.organizerTime)
 
             Text(
                 event.title,
@@ -535,7 +681,7 @@ private fun EventCard(
                 letterSpacing = (-0.3).sp,
             )
 
-            EventMetaRow(event)
+            EventMetaRow(event, strings)
 
             HorizontalDivider(color = C.Border.copy(0.5f), thickness = 0.5.dp)
 
@@ -548,12 +694,13 @@ private fun EventCard(
                 Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     ActionButton(
                         icon    = if (isLiked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-                        label   = "${event.likes + if (isLiked) 1 else 0}",
+                        label   = "${event.likes}",
                         tint    = if (isLiked) C.Red else C.Gray3,
+                        modifier = Modifier.graphicsLayer(scaleX = loveScale, scaleY = loveScale),
                         onClick = onLike,
                     )
-                    ActionButton(Icons.Outlined.ChatBubbleOutline, "${event.comments}", C.Gray3)
-                    ActionButton(Icons.Outlined.Share, "${event.shares}", C.Gray3)
+                    ActionButton(Icons.Outlined.ChatBubbleOutline, "${event.comments}", C.Gray3, onClick = onComment)
+                    ActionButton(Icons.Outlined.Share, "${event.shares}", C.Gray3, onClick = onShare)
                 }
                 // Interested count pill
                 Row(
@@ -566,7 +713,7 @@ private fun EventCard(
                 ) {
                     Icon(Icons.Outlined.People, null, tint = C.Blue, modifier = Modifier.size(12.dp))
                     Text(
-                        "${event.interested + if (isInterested) 1 else 0}",
+                        "${event.interested}",
                         color      = C.Blue,
                         fontSize   = 11.sp,
                         fontWeight = FontWeight.SemiBold,
@@ -582,12 +729,13 @@ private fun EventCard(
                     .clip(RoundedCornerShape(12.dp))
                     .background(
                         if (isInterested)
-                            Brush.linearGradient(listOf(C.BlueSoft, C.BlueSoft))
+                            Brush.linearGradient(colors = listOf(C.BlueSoft, C.BlueSoft))
                         else
-                            Brush.linearGradient(listOf(C.Blue, C.BlueGlow))
+                            Brush.linearGradient(colors = listOf(C.Blue, C.BlueGlow))
                     )
                     .border(1.dp, if (isInterested) C.Blue else Color.Transparent, RoundedCornerShape(12.dp))
-                    .clickable(remember { MutableInteractionSource() }, null, onClick = onInterested),
+                    .graphicsLayer(scaleX = interestedScale, scaleY = interestedScale)
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onInterested),
                 contentAlignment = Alignment.Center,
             ) {
                 Row(
@@ -599,7 +747,7 @@ private fun EventCard(
                         null, tint = C.White, modifier = Modifier.size(15.dp)
                     )
                     Text(
-                        if (isInterested) "Interested ✓" else "I'm Interested",
+                        if (isInterested) strings.youreInterested else strings.imInterested,
                         color      = C.White,
                         fontSize   = 13.sp,
                         fontWeight = FontWeight.Bold,
@@ -636,7 +784,7 @@ private fun CategoryBadge(category: EventCategory) {
 }
 
 @Composable
-private fun OrganizerRow(event: EventItem) {
+private fun OrganizerRow(organizer: String, organizerEmoji: String, time: String) {
     Row(
         verticalAlignment     = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -648,11 +796,11 @@ private fun OrganizerRow(event: EventItem) {
                 .background(Brush.radialGradient(listOf(C.Blue.copy(0.3f), C.Gray5.copy(0.4f)))),
             contentAlignment = Alignment.Center,
         ) {
-            Text(event.organizerEmoji, fontSize = 16.sp)
+            Text(organizerEmoji, fontSize = 16.sp)
         }
         Column {
-            Text(event.organizer, color = C.Gray2, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            Text(event.organizerTime, color = C.Gray4, fontSize = 11.sp)
+            Text(organizer, color = C.Gray2, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(time, color = C.Gray4, fontSize = 11.sp)
         }
         Spacer(Modifier.weight(1f))
         Icon(Icons.Default.MoreVert, null, tint = C.Gray4, modifier = Modifier.size(18.dp))
@@ -660,7 +808,7 @@ private fun OrganizerRow(event: EventItem) {
 }
 
 @Composable
-private fun EventMetaRow(event: EventItem) {
+private fun EventMetaRow(event: EventItem, strings: com.example.kampus.ui.localization.UiStrings) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Icon(Icons.Outlined.CalendarMonth, null, tint = C.Blue, modifier = Modifier.size(13.dp))
@@ -672,17 +820,23 @@ private fun EventMetaRow(event: EventItem) {
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Icon(Icons.Outlined.People, null, tint = C.Blue, modifier = Modifier.size(13.dp))
-            Text("${event.interested} people interested", color = C.Gray3, fontSize = 12.sp)
+            Text("${event.interested} ${strings.peopleInterested}", color = C.Gray3, fontSize = 12.sp)
         }
     }
 }
 
 @Composable
-private fun ActionButton(icon: ImageVector, label: String, tint: Color, onClick: () -> Unit = {}) {
+private fun ActionButton(
+    icon: ImageVector,
+    label: String,
+    tint: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit = {},
+) {
     Row(
         verticalAlignment     = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),
-        modifier              = Modifier.clickable(remember { MutableInteractionSource() }, null, onClick = onClick),
+        modifier              = modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick),
     ) {
         Icon(icon, null, tint = tint, modifier = Modifier.size(17.dp))
         if (label.isNotEmpty()) Text(label, color = tint, fontSize = 12.sp, fontWeight = FontWeight.Medium)
@@ -693,7 +847,7 @@ private fun ActionButton(icon: ImageVector, label: String, tint: Color, onClick:
 //  Empty state
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
-private fun EventEmptyState(modifier: Modifier = Modifier) {
+private fun EventEmptyState(modifier: Modifier = Modifier, strings: com.example.kampus.ui.localization.UiStrings) {
     Box(modifier = modifier.fillMaxSize().padding(top = 80.dp), contentAlignment = Alignment.TopCenter) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Box(
@@ -704,8 +858,8 @@ private fun EventEmptyState(modifier: Modifier = Modifier) {
             ) {
                 Text("🗓️", fontSize = 28.sp)
             }
-            Text("No events found", color = C.Gray3, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            Text("Try a different filter or search", color = C.Gray4, fontSize = 13.sp)
+            Text(strings.noEventsFound2, color = C.Gray3, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(strings.tryDifferentFilterOrSearch2, color = C.Gray4, fontSize = 13.sp)
         }
     }
 }
@@ -721,6 +875,20 @@ private fun EventBottomNav(
     onFabClick     : () -> Unit,
     onProfileClick : () -> Unit,
 ) {
+    val isDark = ThemeController.isDark
+    val profileBg = if (isDark) Color(0xFF0F1520) else Color(0xFFFFFFFF)
+    val profileBorder = if (isDark) Color(0xFF1A2333) else Color(0xFFD1D5DB)
+    val profileTint = if (isDark) C.Gray3 else Color(0xFF6B7280)
+    val strings = com.example.kampus.ui.localization.rememberUiStrings()
+    val navItems = remember(strings) {
+        listOf(
+            NavItem(strings.home,   Icons.Outlined.Home,              Icons.Filled.Home),
+            NavItem(strings.groups, Icons.Outlined.Group,             Icons.Filled.Group),
+            NavItem(strings.events, Icons.Outlined.CalendarMonth,     Icons.Filled.CalendarMonth),
+            NavItem(strings.chat,   Icons.Outlined.ChatBubbleOutline, Icons.Filled.ChatBubble),
+        )
+    }
+
     Row(
         modifier              = Modifier.fillMaxWidth(),
         verticalAlignment     = Alignment.CenterVertically,
@@ -747,7 +915,7 @@ private fun EventBottomNav(
                         .clip(RoundedCornerShape(24.dp))
                         .background(tabBg)
                         .border(1.dp, tabBorder, RoundedCornerShape(24.dp))
-                        .clickable(remember { MutableInteractionSource() }, null) { onItemSelected(i) }
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onItemSelected(i) }
                         .padding(horizontal = if (selected) 14.dp else 10.dp, vertical = 9.dp),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -769,8 +937,8 @@ private fun EventBottomNav(
         Box(
             modifier = Modifier
                 .size(58.dp).clip(CircleShape)
-                .background(Brush.linearGradient(listOf(C.Blue, C.BlueGlow), start = androidx.compose.ui.geometry.Offset(0f, 0f), end = androidx.compose.ui.geometry.Offset(80f, 80f)))
-                .clickable(remember { MutableInteractionSource() }, null, onClick = onFabClick),
+                .background(Brush.linearGradient(colors = listOf(C.Blue, C.BlueGlow), start = androidx.compose.ui.geometry.Offset(0f, 0f), end = androidx.compose.ui.geometry.Offset(80f, 80f)))
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onFabClick),
             contentAlignment = Alignment.Center,
         ) {
             Icon(Icons.Default.Add, "Create", tint = C.White, modifier = Modifier.size(26.dp))
@@ -781,12 +949,12 @@ private fun EventBottomNav(
             Box(
                 modifier = Modifier
                     .size(58.dp).clip(CircleShape)
-                    .background(Color(0xFF0F1520))
-                    .border(1.dp, Color(0xFF1A2333), CircleShape)
-                    .clickable(remember { MutableInteractionSource() }, null, onClick = onProfileClick),
+                    .background(profileBg)
+                    .border(1.dp, profileBorder, CircleShape)
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onProfileClick),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Outlined.Person, "Profile", tint = C.Gray3, modifier = Modifier.size(24.dp))
+                Icon(Icons.Outlined.Person, "Profile", tint = profileTint, modifier = Modifier.size(24.dp))
             }
         }
     }

@@ -45,28 +45,21 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.kampus.ui.theme.ThemeController
 
-private val Bg = Color(0xFF080B11)
-private val Card = Color(0xFF252A41)
-private val Border = Color(0xFF2C3552)
-private val Blue = Color(0xFF0D7FFF)
-private val TextPrimary = Color(0xFFFFFFFF)
-private val TextSecondary = Color(0xFF99A1AF)
-private val NavBg = Color(0x99080B11)  // Semi-transparent (60% opacity)
-
+private val UiIsDark get() = ThemeController.isDark
+private val Bg get() = if (UiIsDark) Color(0xFF080B11) else Color(0xFFF3F4F8)
+private val Card get() = if (UiIsDark) Color(0xFF252A41) else Color(0xFFFFFFFF)
+private val Border get() = if (UiIsDark) Color(0xFF2C3552) else Color(0xFFD1D5DB)
+private val Blue get() = ThemeController.accent.color
+private val TextPrimary get() = if (UiIsDark) Color(0xFFFFFFFF) else Color(0xFF111827)
+private val TextSecondary get() = if (UiIsDark) Color(0xFF99A1AF) else Color(0xFF6B7280)
+private val NavBg get() = if (UiIsDark) Color(0x99080B11) else Color(0xCCFFFFFF)
 private data class NavItem(
 	val label: String,
 	val icon: ImageVector,
 	val iconSelected: ImageVector,
 )
-
-private val navItems = listOf(
-	NavItem("Home", Icons.Outlined.Home, Icons.Filled.Home),
-	NavItem("Groups", Icons.Outlined.Group, Icons.Filled.Group),
-	NavItem("Events", Icons.Outlined.CalendarMonth, Icons.Filled.CalendarMonth),
-	NavItem("Chat", Icons.Outlined.ChatBubbleOutline, Icons.Filled.ChatBubble),
-)
-
 @Composable
 fun CampusBottomNavBar(
 	selectedIndex: Int,
@@ -75,6 +68,15 @@ fun CampusBottomNavBar(
 	onProfileClick: () -> Unit,
 	isProfileSelected: Boolean = false,
 ) {
+	val strings = com.example.kampus.ui.localization.rememberUiStrings()
+	val navItems = remember(strings) {
+		listOf(
+			NavItem(strings.home, Icons.Outlined.Home, Icons.Filled.Home),
+			NavItem(strings.groups, Icons.Outlined.Group, Icons.Filled.Group),
+			NavItem(strings.events, Icons.Outlined.CalendarMonth, Icons.Filled.CalendarMonth),
+			NavItem(strings.chat, Icons.Outlined.ChatBubbleOutline, Icons.Filled.ChatBubble),
+		)
+	}
 	Row(
 		modifier = Modifier.fillMaxWidth(),
 		verticalAlignment = Alignment.CenterVertically,
@@ -112,7 +114,7 @@ fun CampusBottomNavBar(
 						.clip(RoundedCornerShape(24.dp))
 						.background(tabBg)
 						.border(1.dp, tabBorder, RoundedCornerShape(24.dp))
-						.clickable(remember { MutableInteractionSource() }, null) { onItemSelected(i) }
+						.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onItemSelected(i) }
 						.padding(
 							horizontal = if (selected) 14.dp else 10.dp,
 							vertical = 9.dp,
@@ -155,17 +157,18 @@ fun CampusBottomNavBar(
 
 		Box(
 			modifier = Modifier
+				.height(58.dp)
 				.size(58.dp)
 				.clip(CircleShape)
 				.background(
 					Brush.linearGradient(
-						listOf(Blue, Color(0xFF2563EB)),
+						listOf(Blue, Blue.copy(alpha = 0.78f)),
 					),
 				)
-				.clickable(remember { MutableInteractionSource() }, null, onClick = onFabClick),
+				.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onFabClick),
 			contentAlignment = Alignment.Center,
 		) {
-			Icon(Icons.Default.Add, "Create post", tint = TextPrimary, modifier = Modifier.size(26.dp))
+			Icon(Icons.Default.Add, strings.createPost, tint = TextPrimary, modifier = Modifier.size(26.dp))
 		}
 
 		Box(modifier = Modifier.size(58.dp)) {
@@ -174,17 +177,23 @@ fun CampusBottomNavBar(
 					.size(58.dp)
 					.clip(CircleShape)
 					.background(
-						if (isProfileSelected) Card else Card.copy(alpha = 0.5f)
+						if (isProfileSelected) Blue.copy(alpha = if (UiIsDark) 0.22f else 0.14f)
+						else Card.copy(alpha = if (UiIsDark) 0.5f else 0.82f)
 					)
 					.border(
 						1.dp,
-						if (isProfileSelected) Blue.copy(alpha = 0.65f) else Border,
+						if (isProfileSelected) Blue.copy(alpha = 0.75f) else Border,
 						CircleShape
 					)
-					.clickable(remember { MutableInteractionSource() }, null, onClick = onProfileClick),
+					.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onProfileClick),
 				contentAlignment = Alignment.Center,
 			) {
-				Icon(Icons.Outlined.Person, "Profile", tint = if (isProfileSelected) Blue else TextSecondary, modifier = Modifier.size(24.dp))
+				Icon(
+					Icons.Outlined.Person,
+					"Profile",
+					tint = if (isProfileSelected) Blue else TextSecondary,
+					modifier = Modifier.size(24.dp)
+				)
 			}
 		}
 	}

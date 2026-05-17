@@ -1,6 +1,8 @@
 @file:Suppress("SpellCheckingInspection")
 package com.example.kampus.ui.events
 
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -30,11 +32,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.DateRange
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.LocationOn
+import androidx.compose.material.icons.outlined.MicNone
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Title
 import androidx.compose.material3.*
@@ -45,6 +51,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
@@ -53,6 +60,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import coil.compose.AsyncImage
 import com.example.kampus.ui.events.getFileName
 import com.example.kampus.ui.theme.BgDark
 import com.example.kampus.ui.theme.BorderSubtle
@@ -64,6 +72,10 @@ import com.example.kampus.ui.theme.TextSecondary
 import com.example.kampus.ui.theme.TextTertiary
 import com.example.kampus.ui.groups.GroupColors
 import com.example.kampus.ui.theme.AccentYellow
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Models
@@ -78,7 +90,16 @@ data class NewEventData(
     val organiser: String = "",
     val website: String = "",
     val coverEmoji: String = "🎉",
+    val coverImageUri: Uri? = null,
+    val coverImageUrl: String = "",
     val category: EventCategory = EventCategory.CAMPUS,
+    val eventType: String = "",
+    val audienceMax: String = "",
+    val registrationDeadline: String = "",
+    val onlineEvent: Boolean = false,
+    val certificateAvailable: Boolean = false,
+    val paidEvent: Boolean = false,
+    val allowGuest: Boolean = false,
     val tags: List<String> = emptyList(),
     val attachments: List<MediaAttachment> = emptyList(),
     val textInput: String = "",
@@ -138,6 +159,30 @@ enum class EventVisibility(val label: String, val desc: String, val icon: String
     PRIVATE("Private", "Visible to you only", "🔒")
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  Cambodia Locations
+// ─────────────────────────────────────────────────────────────────────────────
+
+private val CAMBODIA_LOCATIONS = listOf(
+    "Phnom Penh",
+    "Siem Reap",
+    "Battambang",
+    "Sihanoukville",
+    "Kampong Thom",
+    "Kratié",
+    "Mondulkiri",
+    "Ratanakiri",
+    "Takéo",
+    "Kampot",
+    "Kep",
+    "Kampong Cham",
+    "Pursat",
+    "Oddar Meanchey",
+    "Preah Vihear",
+    "Stung Treng",
+    "Online"
+)
+
 @Composable
 private fun CreateEventPalette(): ScreenPalette {
     val cs = MaterialTheme.colorScheme
@@ -179,40 +224,59 @@ private data class ScreenPalette(
 @Composable
 fun CreateEventScreen(
     onBack: () -> Unit,
-    onPublish: (NewEventData) -> Unit,
+    onPublish: suspend (NewEventData) -> Result<String>,
+) {
+    CreateEventModernScreen(onBack = onBack, onPublish = onPublish)
+}
+
+@Composable
+private fun CreateEventModernScreen(
+    onBack: () -> Unit,
+    onPublish: suspend (NewEventData) -> Result<String>,
 ) {
     val p = CreateEventPalette()
-    var currentStep by remember { mutableIntStateOf(1) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
-    // State for all steps
     var title by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
-    var selectedEmoji by remember { mutableStateOf("🎉") }
-    var selectedChoice by remember { mutableStateOf<CategoryChoice?>(null) }
-    var showCustomCatDialog by remember { mutableStateOf(false) }
-    var customCategories by remember { mutableStateOf<List<CategoryChoice.Custom>>(emptyList()) }
-
     var date by remember { mutableStateOf("") }
     var time by remember { mutableStateOf("") }
     var location by remember { mutableStateOf("") }
+    var category by remember { mutableStateOf("Campus") }
+    var eventType by remember { mutableStateOf("Conference") }
+    var audience by remember { mutableStateOf("150") }
+    var registrationDeadline by remember { mutableStateOf("") }
+
     var organiser by remember { mutableStateOf("") }
     var website by remember { mutableStateOf("") }
-
+    var coverAttachment by remember { mutableStateOf<MediaAttachment?>(null) }
     var attachments by remember { mutableStateOf<List<MediaAttachment>>(emptyList()) }
-    var showTextInput by remember { mutableStateOf(false) }
-    var textInput by remember { mutableStateOf("") }
-
-    var visibility by remember { mutableStateOf(EventVisibility.PUBLIC) }
-    var limitCapacity by remember { mutableStateOf(false) }
-    var capacity by remember { mutableStateOf(50) }
-    var rsvpRequired by remember { mutableStateOf(true) }
-    var allowComments by remember { mutableStateOf(true) }
-    var shareToFeed by remember { mutableStateOf(true) }
-    var tags by remember { mutableStateOf<List<String>>(emptyList()) }
+    var tags by remember { mutableStateOf(listOf("campus")) }
     var tagInput by remember { mutableStateOf("") }
+    var speaker by remember { mutableStateOf("") }
+    var showTagInput by remember { mutableStateOf(false) }
 
-    val context = LocalContext.current
-    val mediaPickers = rememberMediaPickers(
+    var onlineEvent by remember { mutableStateOf(false) }
+    var certificateAvailable by remember { mutableStateOf(false) }
+    var paidEvent by remember { mutableStateOf(false) }
+    var allowGuest by remember { mutableStateOf(false) }
+    var isSubmitting by remember { mutableStateOf(false) }
+    var submitError by remember { mutableStateOf<String?>(null) }
+    var submitSuccess by remember { mutableStateOf<String?>(null) }
+
+    val coverPicker = rememberMediaPickers(
+        onResult = { uri, type ->
+            uri?.let {
+                val name = it.getFileName(context)
+                val media = MediaAttachment(it, type, name)
+                coverAttachment = media
+                if (attachments.isEmpty()) attachments = attachments + media
+            }
+        }
+    )
+
+    val filePicker = rememberMediaPickers(
         onResult = { uri, type ->
             uri?.let {
                 val name = it.getFileName(context)
@@ -221,137 +285,648 @@ fun CreateEventScreen(
         }
     )
 
-    val step1Valid = title.isNotBlank() && description.length >= 10 && selectedChoice != null
-    val step2Valid = date.isNotBlank() && time.isNotBlank() && location.isNotBlank()
-    val step3Valid = true // Optional
-    val allValid = step1Valid && step2Valid && step3Valid
+    val dateValue = remember { Calendar.getInstance() }
 
-    if (showCustomCatDialog) {
-        CustomCategoryDialog(
-            onDismiss = { showCustomCatDialog = false },
-            onAdd = { label, emoji ->
-                val newCat = CategoryChoice.Custom(label, emoji)
-                customCategories = customCategories + newCat
-                selectedChoice = newCat
-                showCustomCatDialog = false
+    fun submit() {
+        if (isSubmitting) return
+
+        scope.launch {
+            isSubmitting = true
+            submitError = null
+            submitSuccess = null
+
+            val result = onPublish(
+                NewEventData(
+                    title = title,
+                    description = description,
+                    date = date,
+                    time = time,
+                    location = location,
+                    organiser = organiser,
+                    website = website,
+                    coverEmoji = coverAttachment?.type?.emoji ?: "🎉",
+                    coverImageUri = coverAttachment?.uri,
+                    coverImageUrl = "",
+                    category = when (category) {
+                        "Campus" -> EventCategory.CAMPUS
+                        "Tech" -> EventCategory.TECH
+                        "Music" -> EventCategory.MUSIC
+                        "Art" -> EventCategory.ART
+                        else -> EventCategory.CAMPUS
+                    },
+                    eventType = eventType,
+                    audienceMax = audience,
+                    registrationDeadline = registrationDeadline,
+                    onlineEvent = onlineEvent,
+                    certificateAvailable = certificateAvailable,
+                    paidEvent = paidEvent,
+                    allowGuest = allowGuest,
+                    tags = tags,
+                    attachments = attachments,
+                    textInput = description,
+                    visibility = EventVisibility.PUBLIC,
+                    limitCapacity = false,
+                    capacity = audience.toIntOrNull() ?: 0,
+                    rsvpRequired = true,
+                    allowComments = true,
+                    shareToFeed = true,
+                )
+            )
+
+            isSubmitting = false
+            result.onSuccess {
+                submitSuccess = "Event created successfully"
+                onBack()
+            }.onFailure { error ->
+                submitError = error.message ?: "Failed to create event"
             }
-        )
+        }
     }
 
     Scaffold(
+        containerColor = p.bg,
         topBar = {
-            StepperTopBar(
-                currentStep = currentStep,
-                onBack = {
-                    if (currentStep > 1) currentStep--
-                    else onBack()
-                },
-                p = p,
-            )
+            Surface(color = Color.Transparent) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 18.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(p.card)
+                            .border(1.dp, p.border, RoundedCornerShape(14.dp))
+                            .clickable(onClick = onBack),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = p.primary)
+                    }
+                    Text(
+                        "Create Event",
+                        modifier = Modifier.weight(1f),
+                        color = p.text,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        "Save Draft",
+                        color = p.primary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clickable { }
+                    )
+                }
+            }
         },
         bottomBar = {
-            StepperBottom(
-                currentStep = currentStep,
-                onNext = { if (currentStep < 4) currentStep++ },
-                onPrev = { if (currentStep > 1) currentStep-- },
-                nextEnabled = when (currentStep) {
-                    1 -> step1Valid
-                    2 -> step2Valid
-                    3 -> step3Valid
-                    else -> false
-                },
-                isLastStep = currentStep == 4,
-                onPublish = {
-                    val categoryChoice = selectedChoice ?: return@StepperBottom
-                    onPublish(
-                        NewEventData(
-                            title = title,
-                            description = description,
-                            date = date,
-                            time = time,
-                            location = location,
-                            organiser = organiser,
-                            website = website,
-                            coverEmoji = selectedEmoji,
-                            category = categoryChoice.toEventCategory(),
-                            tags = tags,
-                            attachments = attachments,
-                            textInput = textInput,
-                            visibility = visibility,
-                            limitCapacity = limitCapacity,
-                            capacity = if (limitCapacity) capacity else 0,
-                            rsvpRequired = rsvpRequired,
-                            allowComments = allowComments,
-                            shareToFeed = shareToFeed
-                        )
-                    )
-                },
-                allStepsValid = allValid,
-                p = p,
-            )
+            Surface(color = Color.Transparent) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 18.dp, vertical = 14.dp)
+                ) {
+                    Button(
+                        onClick = { submit() },
+                        enabled = !isSubmitting,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(58.dp),
+                        shape = RoundedCornerShape(18.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(p.primary),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isSubmitting) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(22.dp),
+                                    color = Color.White,
+                                    strokeWidth = 2.dp,
+                                )
+                            } else {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Icon(Icons.Default.Publish, null, tint = Color.White)
+                                    Text("Publish Event", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         },
-        containerColor = p.bg,
+        floatingActionButton = {},
+        contentWindowInsets = WindowInsets(0),
     ) { innerPadding ->
-        Box(modifier = Modifier.padding(innerPadding)) {
-            AnimatedVisibility(visible = currentStep == 1, enter = fadeIn(), exit = fadeOut()) {
-                Step1Basics(
-                    title = title, onTitleChange = { title = it },
-                    description = description, onDescriptionChange = { description = it },
-                    selectedEmoji = selectedEmoji, onEmojiSelect = { selectedEmoji = it },
-                    selectedChoice = selectedChoice, onCategorySelect = { selectedChoice = it },
-                    customCategories = customCategories, onShowCustomCatDialog = { showCustomCatDialog = true }
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
+            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
+        ) {
+            item {
+                HeroCoverSection(
+                    coverAttachment = coverAttachment,
+                    onUploadCover = { coverPicker.photo.launch("image/*") }
                 )
             }
-            AnimatedVisibility(visible = currentStep == 2, enter = fadeIn(), exit = fadeOut()) {
-                Step2Details(
-                    date = date, onDateChange = { date = it },
-                    time = time, onTimeChange = { time = it },
-                    location = location, onLocationChange = { location = it },
-                    organiser = organiser, onOrganiserChange = { organiser = it },
-                    website = website, onWebsiteChange = { website = it }
-                )
+
+            item {
+                Text("Event Information", color = p.text, fontSize = 14.sp, fontWeight = FontWeight.Bold)
             }
-            AnimatedVisibility(visible = currentStep == 3, enter = fadeIn(), exit = fadeOut()) {
-                Step3Media(
-                    attachments = attachments,
-                    onAddMedia = { type ->
-                        when (type) {
-                            MediaType.PHOTO -> mediaPickers.photo.launch("image/*")
-                            MediaType.VIDEO -> mediaPickers.video.launch("video/*")
-                            MediaType.DOCUMENT -> mediaPickers.doc.launch("*/*")
+
+            item {
+                ModernCard(p) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        ModernInputField(
+                            p,
+                            value = title,
+                            onValueChange = { title = it.take(80) },
+                            label = "Event Title",
+                            placeholder = "Enter event title",
+                            icon = Icons.Outlined.Title,
+                            counter = "${title.length}/80"
+                        )
+                        ModernInputField(
+                            p,
+                            value = description,
+                            onValueChange = { description = it.take(500) },
+                            label = "Description",
+                            placeholder = "Tell people what your event is about...",
+                            icon = Icons.Outlined.Edit,
+                            maxLines = 4,
+                            counter = "${description.length}/500"
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                            PickerCardField(
+                                p,
+                                modifier = Modifier.weight(1f),
+                                value = date,
+                                label = "Date",
+                                icon = Icons.Outlined.DateRange,
+                                placeholder = "Select date",
+                                onClick = {
+                                    DatePickerDialog(
+                                        context,
+                                        { _, year, month, dayOfMonth ->
+                                            dateValue.set(year, month, dayOfMonth)
+                                            val formatted = SimpleDateFormat("MMM d, yyyy", Locale.ENGLISH).format(dateValue.time)
+                                            date = formatted
+                                        },
+                                        dateValue.get(Calendar.YEAR),
+                                        dateValue.get(Calendar.MONTH),
+                                        dateValue.get(Calendar.DAY_OF_MONTH)
+                                    ).show()
+                                }
+                            )
+                            PickerCardField(
+                                p,
+                                modifier = Modifier.weight(1f),
+                                value = time,
+                                label = "Time",
+                                icon = Icons.Outlined.Schedule,
+                                placeholder = "Select time",
+                                onClick = {
+                                    TimePickerDialog(
+                                        context,
+                                        { _, hourOfDay, minute ->
+                                            time = String.format(
+                                                Locale.ENGLISH,
+                                                "%d:%02d %s",
+                                                if (hourOfDay % 12 == 0) 12 else hourOfDay % 12,
+                                                minute,
+                                                if (hourOfDay < 12) "AM" else "PM"
+                                            )
+                                        },
+                                        dateValue.get(Calendar.HOUR_OF_DAY),
+                                        dateValue.get(Calendar.MINUTE),
+                                        false
+                                    ).show()
+                                }
+                            )
                         }
-                    },
-                    onRemoveAttachment = { attachments = attachments - it },
-                    showTextInput = showTextInput,
-                    onToggleText = { showTextInput = !showTextInput },
-                    textInput = textInput,
-                    onTextInput = {
-                        textInput = it
-                        if (title.isBlank()) title = it
-                    },
-                    tags = tags,
-                    tagInput = tagInput,
-                    onTagInputChange = { tagInput = it },
-                    onAddTag = {
-                        if (tagInput.isNotBlank() && tags.size < 8) {
-                            tags = tags + tagInput.trim()
-                            tagInput = ""
+                        LocationDropdown(selectedLocation = location, onLocationChange = { location = it })
+
+                        if (!submitError.isNullOrBlank()) {
+                            Text(
+                                submitError!!,
+                                color = MaterialTheme.colorScheme.error,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
                         }
-                    },
-                    onRemoveTag = { tags = tags - it }
-                )
+
+                        if (!submitSuccess.isNullOrBlank()) {
+                            Text(
+                                submitSuccess!!,
+                                color = p.primary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                            DropdownCardField(
+                                p,
+                                modifier = Modifier.weight(1f),
+                                value = category,
+                                label = "Category",
+                                icon = Icons.Outlined.Title,
+                                options = listOf("Campus", "Tech", "Music", "Art"),
+                                onValueChange = { category = it }
+                            )
+                            DropdownCardField(
+                                p,
+                                modifier = Modifier.weight(1f),
+                                value = eventType,
+                                label = "Event Type",
+                                icon = Icons.Outlined.Public,
+                                options = listOf("Conference", "Workshop", "Meetup", "Seminar", "Festival"),
+                                onValueChange = { eventType = it }
+                            )
+                        }
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                            DropdownCardField(
+                                p,
+                                modifier = Modifier.weight(1f),
+                                value = audience,
+                                label = "Audience / Max Students",
+                                icon = Icons.Outlined.Person,
+                                options = listOf("50", "100", "150", "250", "500", "1000"),
+                                placeholder = "e.g. 150",
+                                onValueChange = { audience = it }
+                            )
+                            PickerCardField(
+                                p,
+                                modifier = Modifier.weight(1f),
+                                value = registrationDeadline,
+                                label = "Registration Deadline",
+                                icon = Icons.Outlined.Schedule,
+                                placeholder = "Select deadline",
+                                onClick = {
+                                    DatePickerDialog(
+                                        context,
+                                        { _, year, month, dayOfMonth ->
+                                            val cal = Calendar.getInstance().apply { set(year, month, dayOfMonth) }
+                                            registrationDeadline = SimpleDateFormat("MMM d, yyyy", Locale.ENGLISH).format(cal.time)
+                                        },
+                                        dateValue.get(Calendar.YEAR),
+                                        dateValue.get(Calendar.MONTH),
+                                        dateValue.get(Calendar.DAY_OF_MONTH)
+                                    ).show()
+                                }
+                            )
+                        }
+                    }
+                }
             }
-            AnimatedVisibility(visible = currentStep == 4, enter = fadeIn(), exit = fadeOut()) {
-                Step4Settings(
-                    visibility = visibility, onVisibilityChange = { visibility = it },
-                    limitCapacity = limitCapacity, onLimitCapacityChange = { limitCapacity = it },
-                    capacity = capacity, onCapacityChange = { capacity = it },
-                    rsvpRequired = rsvpRequired, onRsvpRequiredChange = { rsvpRequired = it },
-                    allowComments = allowComments, onAllowCommentsChange = { allowComments = it },
-                    shareToFeed = shareToFeed, onShareToFeedChange = { shareToFeed = it }
-                )
+
+            item {
+                Text("Event Options", color = p.text, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            }
+
+            item {
+                ModernCard(p) {
+                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        ToggleRow(p, "Online Event", "This is an online / virtual event", onlineEvent) { onlineEvent = it }
+                        ToggleRow(p, "Certificate Available", "Participants will get a certificate", certificateAvailable) { certificateAvailable = it }
+                        ToggleRow(p, "Paid Event", "This event has a ticket or fee", paidEvent) { paidEvent = it }
+                        ToggleRow(p, "Allow Guest", "Allow students to bring guests", allowGuest) { allowGuest = it }
+                    }
+                }
+            }
+
+            item {
+                Text("Add More Details (Optional)", color = p.text, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            }
+
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    ActionCard(p, "Add Speaker", Icons.Outlined.MicNone, Modifier.weight(1f)) { speaker = if (speaker.isBlank()) "Speaker" else speaker }
+                    ActionCard(p, "Attach File", Icons.Outlined.AttachFile, Modifier.weight(1f)) { filePicker.doc.launch("*/*") }
+                }
+            }
+
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    ActionCard(p, "Add Tags", Icons.Outlined.Tag, Modifier.weight(1f)) { showTagInput = !showTagInput }
+                    ActionCard(p, "Registration Link", Icons.Outlined.Link, Modifier.weight(1f)) { website = if (website.isBlank()) "https://" else website }
+                }
+            }
+
+            if (showTagInput) {
+                item {
+                    ModernCard(p) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = tagInput,
+                                onValueChange = { if (it.length <= 24) tagInput = it },
+                                modifier = Modifier.weight(1f),
+                                label = { Text("Add Tag", color = p.text3) },
+                                placeholder = { Text("#music, #tech", color = p.text3) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(16.dp),
+                                textStyle = androidx.compose.material3.LocalTextStyle.current.copy(color = p.text),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = p.primary,
+                                    unfocusedBorderColor = p.border,
+                                    focusedContainerColor = p.surface,
+                                    unfocusedContainerColor = p.surface,
+                                    focusedLabelColor = p.primary,
+                                    unfocusedLabelColor = p.text3,
+                                    focusedTextColor = p.text,
+                                    unfocusedTextColor = p.text,
+                                    cursorColor = p.primary,
+                                )
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(p.primary)
+                                    .clickable {
+                                        if (tagInput.isNotBlank()) {
+                                            tags = tags + tagInput.trim()
+                                            tagInput = ""
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Add, null, tint = Color.White)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (tags.isNotEmpty()) {
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                        tags.forEach { tag ->
+                            ChipWithRemove(label = "#$tag", onRemove = { tags = tags - tag })
+                        }
+                    }
+                }
+            }
+
+            if (attachments.isNotEmpty()) {
+                item {
+                    ModernCard(p) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("Attached Files", color = p.text, fontWeight = FontWeight.Bold)
+                            attachments.forEach { att ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(p.surface)
+                                        .border(1.dp, p.border, RoundedCornerShape(14.dp))
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Text(att.type.emoji)
+                                    Text(att.displayName, modifier = Modifier.weight(1f), color = p.text, fontSize = 13.sp)
+                                    Icon(Icons.Default.Close, null, tint = p.primary, modifier = Modifier.clickable { attachments = attachments - att })
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun HeroCoverSection(
+    coverAttachment: MediaAttachment?,
+    onUploadCover: () -> Unit,
+) {
+    val p = CreateEventPalette()
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(22.dp))
+            .background(p.card)
+            .border(1.dp, p.border, RoundedCornerShape(22.dp))
+            .padding(16.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            if (coverAttachment != null) {
+                AsyncImage(
+                    model = coverAttachment.uri,
+                    contentDescription = coverAttachment.displayName,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(170.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .border(1.dp, p.border, RoundedCornerShape(18.dp)),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(CircleShape)
+                        .background(p.primarySoft),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Outlined.Public, null, tint = p.primary, modifier = Modifier.size(34.dp))
+                }
+            }
+
+            Text("Add Event Cover", color = p.text, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text("Upload a photo or poster for your event", color = p.text3, fontSize = 13.sp, textAlign = TextAlign.Center)
+            OutlinedButton(
+                onClick = onUploadCover,
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, p.primary),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = p.primary)
+            ) {
+                Icon(Icons.Default.FileUpload, null)
+                Spacer(Modifier.width(8.dp))
+                Text("Upload Cover")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModernCard(palette: ScreenPalette, content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(22.dp))
+            .background(palette.card)
+            .border(1.dp, palette.border, RoundedCornerShape(22.dp))
+            .padding(14.dp),
+        content = content
+    )
+}
+
+@Composable
+private fun ModernInputField(
+    palette: ScreenPalette,
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    placeholder: String,
+    icon: ImageVector,
+    counter: String? = null,
+    maxLines: Int = 1,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(label, color = palette.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            if (counter != null) Text(counter, color = palette.text3, fontSize = 11.sp)
+        }
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text(placeholder) },
+            leadingIcon = { Icon(icon, null, tint = palette.primary) },
+            shape = RoundedCornerShape(18.dp),
+            maxLines = maxLines,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = palette.primary,
+                unfocusedBorderColor = palette.border,
+                focusedContainerColor = palette.card,
+                unfocusedContainerColor = palette.card,
+            )
+        )
+    }
+}
+
+@Composable
+private fun PickerCardField(
+    palette: ScreenPalette,
+    modifier: Modifier = Modifier,
+    value: String,
+    label: String,
+    placeholder: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+) {
+    Column(modifier = modifier) {
+        Text(label, color = palette.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(6.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(58.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(palette.card)
+                .border(1.dp, palette.border, RoundedCornerShape(18.dp))
+                .clickable(onClick = onClick)
+                .padding(horizontal = 14.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Icon(icon, null, tint = palette.primary)
+                Text(if (value.isBlank()) placeholder else value, color = if (value.isBlank()) palette.text3 else palette.text, fontSize = 13.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DropdownCardField(
+    palette: ScreenPalette,
+    modifier: Modifier = Modifier,
+    value: String,
+    label: String,
+    icon: ImageVector,
+    options: List<String>,
+    placeholder: String = "Select",
+    onValueChange: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Column(modifier = modifier) {
+        Text(label, color = palette.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(6.dp))
+        Box {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(58.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(palette.card)
+                    .border(1.dp, palette.border, RoundedCornerShape(18.dp))
+                    .clickable { expanded = true }
+                    .padding(horizontal = 14.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Icon(icon, null, tint = palette.primary)
+                    Text(if (value.isBlank()) placeholder else value, color = if (value.isBlank()) palette.text3 else palette.text, fontSize = 13.sp)
+                }
+            }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                options.forEach {
+                    DropdownMenuItem(
+                        text = { Text(it) },
+                        onClick = {
+                            onValueChange(it)
+                            expanded = false
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ToggleRow(palette: ScreenPalette, title: String, subtitle: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = palette.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = palette.text3, fontSize = 11.sp)
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange, colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = palette.primary))
+    }
+}
+
+@Composable
+private fun ActionCard(palette: ScreenPalette, text: String, icon: ImageVector, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Column(
+        modifier = modifier
+            .height(92.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(palette.card)
+            .border(1.dp, palette.border, RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick)
+            .padding(10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(icon, null, tint = palette.primary)
+        Spacer(Modifier.height(10.dp))
+        Text(text, color = palette.text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
     }
 }
 
@@ -426,30 +1001,21 @@ private fun Step2Details(
     ) {
         item {
             Text("EVENT DETAILS", color = TextTertiary, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
-            EventTextField(
+            DatePickerField(
                 value = date,
                 onValue = onDateChange,
-                label = "Date *",
-                placeholder = "e.g. July 26, 2024",
-                icon = Icons.Outlined.DateRange
             )
         }
         item {
-            EventTextField(
+            TimePickerField(
                 value = time,
                 onValue = onTimeChange,
-                label = "Time *",
-                placeholder = "e.g. 7:00 PM - 10:00 PM",
-                icon = Icons.Outlined.Schedule
             )
         }
         item {
-            EventTextField(
-                value = location,
-                onValue = onLocationChange,
-                label = "Location / Room *",
-                placeholder = "e.g. Grand Hall or Online",
-                icon = Icons.Outlined.LocationOn
+            LocationDropdown(
+                selectedLocation = location,
+                onLocationChange = onLocationChange
             )
         }
         item {
@@ -915,6 +1481,149 @@ private fun StepperTopBar(currentStep: Int, onBack: () -> Unit, p: ScreenPalette
 }
 
 @Composable
+private fun DatePickerField(
+    value: String,
+    onValue: (String) -> Unit,
+) {
+    val p = CreateEventPalette()
+    val context = LocalContext.current
+    val calendar = remember { Calendar.getInstance() }
+    val formatter = remember { SimpleDateFormat("MMMM d, yyyy", Locale.ENGLISH) }
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {},
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Date *", fontSize = 13.sp) },
+            placeholder = { Text("Pick event date", color = p.text3, fontSize = 13.sp) },
+            leadingIcon = {
+                Icon(
+                    Icons.Outlined.DateRange,
+                    null,
+                    tint = if (value.isNotBlank()) p.primary else p.text3,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            trailingIcon = {
+                Icon(
+                    Icons.Default.KeyboardArrowDown,
+                    contentDescription = "Pick date",
+                    tint = p.text3,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            singleLine = true,
+            readOnly = true,
+            shape = RoundedCornerShape(14.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = p.primary,
+                unfocusedBorderColor = p.border,
+                focusedLabelColor = p.primary,
+                unfocusedLabelColor = p.text3,
+                focusedContainerColor = p.card,
+                unfocusedContainerColor = p.card,
+            ),
+        )
+
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() }
+                ) {
+                    DatePickerDialog(
+                        context,
+                        { _, year, month, dayOfMonth ->
+                            calendar.set(year, month, dayOfMonth)
+                            onValue(formatter.format(calendar.time))
+                        },
+                        calendar.get(Calendar.YEAR),
+                        calendar.get(Calendar.MONTH),
+                        calendar.get(Calendar.DAY_OF_MONTH)
+                    ).show()
+                }
+        )
+    }
+}
+
+@Composable
+private fun TimePickerField(
+    value: String,
+    onValue: (String) -> Unit,
+) {
+    val p = CreateEventPalette()
+    val context = LocalContext.current
+    val calendar = remember { Calendar.getInstance() }
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {},
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Time *", fontSize = 13.sp) },
+            placeholder = { Text("Pick event time", color = p.text3, fontSize = 13.sp) },
+            leadingIcon = {
+                Icon(
+                    Icons.Outlined.Schedule,
+                    null,
+                    tint = if (value.isNotBlank()) p.primary else p.text3,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            trailingIcon = {
+                Icon(
+                    Icons.Default.KeyboardArrowDown,
+                    contentDescription = "Pick time",
+                    tint = p.text3,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            singleLine = true,
+            readOnly = true,
+            shape = RoundedCornerShape(14.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = p.primary,
+                unfocusedBorderColor = p.border,
+                focusedLabelColor = p.primary,
+                unfocusedLabelColor = p.text3,
+                focusedContainerColor = p.card,
+                unfocusedContainerColor = p.card,
+            ),
+        )
+
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() }
+                ) {
+                    TimePickerDialog(
+                        context,
+                        { _, hourOfDay, minute ->
+                            calendar.set(Calendar.HOUR_OF_DAY, hourOfDay)
+                            calendar.set(Calendar.MINUTE, minute)
+                            val formatted = String.format(
+                                Locale.ENGLISH,
+                                "%d:%02d %s",
+                                if (hourOfDay % 12 == 0) 12 else hourOfDay % 12,
+                                minute,
+                                if (hourOfDay < 12) "AM" else "PM"
+                            )
+                            onValue(formatted)
+                        },
+                        calendar.get(Calendar.HOUR_OF_DAY),
+                        calendar.get(Calendar.MINUTE),
+                        false
+                    ).show()
+                }
+        )
+    }
+}
+
+@Composable
 private fun StepperBottom(
     currentStep: Int,
     onNext: () -> Unit,
@@ -974,6 +1683,80 @@ private fun StepperBottom(
                     Spacer(Modifier.width(6.dp))
                     Icon(Icons.AutoMirrored.Filled.ArrowForward, null)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LocationDropdown(
+    selectedLocation: String,
+    onLocationChange: (String) -> Unit,
+) {
+    val p = CreateEventPalette()
+    var expanded by remember { mutableStateOf(false) }
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = selectedLocation,
+            onValueChange = {},
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Location / Room *", fontSize = 13.sp) },
+            placeholder = { Text("Select a location in Cambodia", color = p.text3, fontSize = 13.sp) },
+            leadingIcon = {
+                Icon(Icons.Outlined.LocationOn, null, tint = if (selectedLocation.isNotBlank()) p.primary else p.text3, modifier = Modifier.size(18.dp))
+            },
+            trailingIcon = {
+                Icon(
+                    imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = "Select location",
+                    tint = p.text3,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            singleLine = true,
+            readOnly = true,
+            shape = RoundedCornerShape(14.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = p.primary,
+                unfocusedBorderColor = p.border,
+                focusedLabelColor = p.primary,
+                unfocusedLabelColor = p.text3,
+                focusedContainerColor = p.card,
+                unfocusedContainerColor = p.card,
+            ),
+        )
+
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() }
+                ) { expanded = true }
+        )
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .background(p.card)
+        ) {
+            CAMBODIA_LOCATIONS.forEach { city ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            city,
+                            color = if (selectedLocation == city) p.primary else p.text,
+                            fontWeight = if (selectedLocation == city) FontWeight.Bold else FontWeight.Normal
+                        )
+                    },
+                    onClick = {
+                        onLocationChange(city)
+                        expanded = false
+                    }
+                )
             }
         }
     }

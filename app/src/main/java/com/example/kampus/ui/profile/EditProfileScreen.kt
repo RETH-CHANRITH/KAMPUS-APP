@@ -52,6 +52,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.google.firebase.auth.FirebaseAuth
 import com.example.kampus.domain.model.User
+import com.example.kampus.ui.localization.rememberUiStrings
 
 private val yearOptions = listOf("Year 1", "Year 2", "Year 3", "Year 4", "Year 5")
 
@@ -91,19 +92,23 @@ fun EditProfileScreen(
 	viewModel: ProfileViewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
 ) {
 	val state by viewModel.uiState.collectAsStateWithLifecycle()
+	val strings = rememberUiStrings()
 	val context = LocalContext.current
 	var yearExpanded by remember { mutableStateOf(false) }
 	var locationExpanded by remember { mutableStateOf(false) }
 	
 	// Get real email from Firebase Auth (actual RUPP email)
-	val realEmail = FirebaseAuth.getInstance().currentUser?.email ?: state.email
+	val firebaseUser = FirebaseAuth.getInstance().currentUser
+	val realEmail = firebaseUser?.email ?: state.email
+	val authPhotoUrl = firebaseUser?.photoUrl?.toString().orEmpty()
+	val resolvedProfileImageUrl = if (state.profileImageUrl.isNotBlank()) state.profileImageUrl else authPhotoUrl
 	val normalizedYear = yearOptions.firstOrNull { it.equals(state.year, ignoreCase = true) }.orEmpty()
 	val normalizedLocation = cambodiaLocations.firstOrNull { it.equals(state.location, ignoreCase = true) }.orEmpty()
 	
 	var username by remember { mutableStateOf(state.displayName) }
 	var bio by remember { mutableStateOf(state.bio) }
 	var email by remember { mutableStateOf(realEmail) }
-	var phone by remember { mutableStateOf(state.phone) }
+	var phone by remember { mutableStateOf(state.phone.ifEmpty { strings.phoneNotSet }) }
 	var faculty by remember { mutableStateOf(state.faculty) }
 	var year by remember { mutableStateOf(normalizedYear) }
 	var location by remember { mutableStateOf(normalizedLocation) }
@@ -122,7 +127,7 @@ fun EditProfileScreen(
 		username = state.displayName
 		bio = state.bio
 		email = realEmail
-		phone = state.phone
+		phone = state.phone.ifEmpty { strings.phoneNotSet }
 		faculty = state.faculty
 		year = yearOptions.firstOrNull { it.equals(state.year, ignoreCase = true) }.orEmpty()
 		location = cambodiaLocations.firstOrNull { it.equals(state.location, ignoreCase = true) }.orEmpty()
@@ -130,7 +135,7 @@ fun EditProfileScreen(
 
 	Surface(
 		modifier = Modifier.fillMaxSize(),
-		color = Color(0xFF1A1D2E),
+		color = ProfileColors.Bg,
 	) {
 		Column(
 			modifier = Modifier
@@ -150,13 +155,13 @@ fun EditProfileScreen(
 					modifier = Modifier
 						.size(40.dp)
 						.clip(CircleShape)
-						.background(Color.White.copy(alpha = 0.1f))
+						.background(ProfileColors.Card)
 						.clickable(onClick = onBack),
 					contentAlignment = Alignment.Center,
 				) {
-					Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = null, tint = Color.White)
+					Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = null, tint = ProfileColors.White)
 				}
-				Text("Edit Profile", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+				Text(strings.editProfileTitle, color = ProfileColors.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
 				Spacer(Modifier.size(40.dp))
 			}
 
@@ -171,25 +176,26 @@ fun EditProfileScreen(
 						modifier = Modifier
 							.size(96.dp)
 							.clip(CircleShape)
-							.background(Color.White.copy(alpha = 0.12f))
+							.background(ProfileColors.Card)
 							.clickable { photoPickerLauncher.launch("image/*") },
 						contentAlignment = Alignment.Center,
 					) {
-						if (state.profileImageUrl.isNotEmpty()) {
+							if (resolvedProfileImageUrl.isNotEmpty()) {
 							AsyncImage(
-								model = state.profileImageUrl,
-								contentDescription = "Profile picture",
+									model = resolvedProfileImageUrl,
+								contentDescription = strings.profilePicture,
 								modifier = Modifier
 									.fillMaxSize()
 									.clip(CircleShape),
 							)
 						} else {
-							Icon(
-								imageVector = Icons.Outlined.Person,
-								contentDescription = "Profile picture",
-								tint = Color.White.copy(alpha = 0.9f),
-								modifier = Modifier.size(44.dp),
-							)
+								Text(
+									text = state.avatarEmoji.ifBlank {
+										username.firstOrNull()?.uppercase() ?: "U"
+									},
+									color = ProfileColors.White,
+									fontSize = 36.sp,
+								)
 						}
 					}
 
@@ -197,13 +203,13 @@ fun EditProfileScreen(
 						modifier = Modifier
 							.size(30.dp)
 							.clip(CircleShape)
-							.background(Color(0xFF0D7FFF))
+							.background(ProfileColors.Blue)
 							.clickable { photoPickerLauncher.launch("image/*") },
 						contentAlignment = Alignment.Center,
 					) {
 						Icon(
 							imageVector = Icons.Outlined.CameraAlt,
-							contentDescription = "Change profile picture",
+							contentDescription = strings.changeProfilePicture,
 							tint = Color.White,
 							modifier = Modifier.size(16.dp),
 						)
@@ -215,14 +221,14 @@ fun EditProfileScreen(
 				modifier = Modifier
 					.fillMaxWidth()
 					.clip(RoundedCornerShape(16.dp))
-					.background(Color(0xFF252A41))
+					.background(ProfileColors.Card)
 					.padding(14.dp),
 				verticalArrangement = Arrangement.spacedBy(12.dp),
 			) {
 				OutlinedTextField(
 					value = username,
 					onValueChange = { username = it },
-					label = { Text("Username") },
+						label = { Text(strings.usernameLabel) },
 					modifier = Modifier.fillMaxWidth(),
 				)
 				Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -231,19 +237,19 @@ fun EditProfileScreen(
 						onValueChange = { 
 							email = it
 							emailError = if (!it.endsWith("@rupp.edu.kh") && it.isNotEmpty()) {
-								"Only RUPP emails (@rupp.edu.kh) allowed"
+									strings.onlyRuppEmailsAllowed
 							} else {
 								""
 							}
 						},
-						label = { Text("Email") },
+						label = { Text(strings.emailLabel) },
 						modifier = Modifier.fillMaxWidth(),
 						isError = emailError.isNotEmpty(),
 					)
 					if (emailError.isNotEmpty()) {
 						Text(
 							text = emailError,
-							color = Color(0xFFFF4D6A),
+							color = ProfileColors.Red,
 							fontSize = 12.sp,
 							modifier = Modifier.padding(horizontal = 4.dp)
 						)
@@ -252,20 +258,20 @@ fun EditProfileScreen(
 				OutlinedTextField(
 					value = phone,
 					onValueChange = { phone = it },
-					label = { Text("Phone") },
+						label = { Text(strings.phoneLabel) },
 					modifier = Modifier.fillMaxWidth(),
 				)
 				OutlinedTextField(
 					value = bio,
 					onValueChange = { bio = it },
-					label = { Text("Bio") },
+						label = { Text(strings.bioLabel) },
 					modifier = Modifier.fillMaxWidth(),
 					minLines = 3,
 				)
 				OutlinedTextField(
 					value = faculty,
 					onValueChange = { faculty = it },
-					label = { Text("Faculty") },
+						label = { Text(strings.facultyLabel) },
 					modifier = Modifier.fillMaxWidth(),
 				)
 				ExposedDropdownMenuBox(
@@ -276,8 +282,8 @@ fun EditProfileScreen(
 						value = year,
 						onValueChange = {},
 						readOnly = true,
-						label = { Text("Year") },
-						placeholder = { Text("Select year") },
+							label = { Text(strings.yearLabel) },
+							placeholder = { Text(strings.selectYear) },
 						trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = yearExpanded) },
 						modifier = Modifier
 							.menuAnchor()
@@ -307,8 +313,8 @@ fun EditProfileScreen(
 						value = location,
 						onValueChange = {},
 						readOnly = true,
-						label = { Text("Location") },
-						placeholder = { Text("Select Cambodia province") },
+							label = { Text(strings.locationLabel) },
+							placeholder = { Text(strings.selectCambodiaProvince) },
 						trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = locationExpanded) },
 						modifier = Modifier
 							.menuAnchor()
@@ -336,7 +342,7 @@ fun EditProfileScreen(
 				onClick = {
 					// Validate RUPP email
 					if (!email.endsWith("@rupp.edu.kh")) {
-						emailError = "Only RUPP emails (@rupp.edu.kh) allowed"
+								emailError = strings.onlyRuppEmailsAllowed
 						return@Button
 					}
 					isSaving = true
@@ -375,11 +381,11 @@ fun EditProfileScreen(
 				modifier = Modifier.fillMaxWidth(),
 				shape = RoundedCornerShape(14.dp),
 				colors = ButtonDefaults.buttonColors(
-					containerColor = Color(0xFF0D7FFF),
+					containerColor = ProfileColors.Blue,
 					contentColor = Color.White,
 				),
 			) {
-				Text(if (isSaving) "Saving..." else "Save Changes", fontWeight = FontWeight.Medium)
+				Text(if (isSaving) "Saving..." else strings.saveChanges, fontWeight = FontWeight.Medium)
 			}
 		}
 	}

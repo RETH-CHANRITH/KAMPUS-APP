@@ -3,14 +3,17 @@ package com.example.kampus.ui.auth
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.firestore.FirebaseFirestore
-import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import com.example.kampus.utils.PresenceManager
+import com.example.kampus.utils.E2EEManager
+import kotlinx.coroutines.Dispatchers
 
 sealed class SessionState {
     object Unknown : SessionState()
@@ -54,10 +57,19 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                         email = auth.currentUser?.email ?: email,
                         displayName = auth.currentUser?.displayName,
                     ) { ok, err ->
-                        _authState.value = if (ok) {
-                            AuthState.Success("Login successful!")
+                        if (ok) {
+                            // Ensure E2E encryption keys are set up
+                            viewModelScope.launch(Dispatchers.IO) {
+                                E2EEManager.ensureUserKeys(uid)
+                                    .onSuccess {
+                                        _authState.value = AuthState.Success("Login successful!")
+                                    }
+                                    .onFailure { e ->
+                                        _authState.value = AuthState.Error("Key setup failed: ${e.message}")
+                                    }
+                            }
                         } else {
-                            AuthState.Error(err ?: "Login failed while syncing profile")
+                            _authState.value = AuthState.Error(err ?: "Login failed while syncing profile")
                         }
                     }
                 }
@@ -84,10 +96,19 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                         email = email,
                         displayName = name,
                     ) { ok, err ->
-                        _authState.value = if (ok) {
-                            AuthState.Success("Registration successful!")
+                        if (ok) {
+                            // Seed E2E encryption keys for new user
+                            viewModelScope.launch(Dispatchers.IO) {
+                                E2EEManager.seedKeysForNewUser(uid)
+                                    .onSuccess {
+                                        _authState.value = AuthState.Success("Registration successful!")
+                                    }
+                                    .onFailure { e ->
+                                        _authState.value = AuthState.Error("Key generation failed: ${e.message}")
+                                    }
+                            }
                         } else {
-                            AuthState.Error(err ?: "Registration failed while creating profile")
+                            _authState.value = AuthState.Error(err ?: "Registration failed while creating profile")
                         }
                     }
                 }
@@ -115,10 +136,19 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                         email = auth.currentUser?.email,
                         displayName = auth.currentUser?.displayName,
                     ) { ok, err ->
-                        _authState.value = if (ok) {
-                            AuthState.Success("Google login successful!")
+                        if (ok) {
+                            // Ensure E2E encryption keys are set up
+                            viewModelScope.launch(Dispatchers.IO) {
+                                E2EEManager.ensureUserKeys(uid)
+                                    .onSuccess {
+                                        _authState.value = AuthState.Success("Google login successful!")
+                                    }
+                                    .onFailure { e ->
+                                        _authState.value = AuthState.Error("Key setup failed: ${e.message}")
+                                    }
+                            }
                         } else {
-                            AuthState.Error(err ?: "Google login failed while syncing profile")
+                            _authState.value = AuthState.Error(err ?: "Google login failed while syncing profile")
                         }
                     }
                 }
@@ -129,9 +159,17 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun logout() {
-        auth.signOut()
-        refreshSession()
-        _authState.value = AuthState.Idle
+        viewModelScope.launch {
+            val userId = auth.currentUser?.uid
+            if (userId != null) {
+                runCatching { PresenceManager.markOffline(userId) }
+                // Clear E2E encryption keys
+                E2EEManager.clearUserKeys(userId)
+            }
+            auth.signOut()
+            refreshSession()
+            _authState.value = AuthState.Idle
+        }
     }
 
     fun sendOtp(email: String) {
@@ -217,7 +255,13 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                     )
 
                     userRef.set(profile)
-                        .addOnSuccessListener { onComplete(true, null) }
+                        .addOnSuccessListener {
+                            viewModelScope.launch {
+                                runCatching { PresenceManager.markOnline(userId) }
+                                    .onSuccess { onComplete(true, null) }
+                                    .onFailure { e -> onComplete(false, e.message) }
+                            }
+                        }
                         .addOnFailureListener { e -> onComplete(false, e.message) }
                 }
             }

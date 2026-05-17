@@ -4,6 +4,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.kampus.data.repository.GroupRepositoryImpl
+import com.example.kampus.utils.ActivityLogger
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -92,6 +94,43 @@ class GroupViewModel : ViewModel() {
 
     fun setSearch(query: String) {
         _uiState.update { it.copy(searchQuery = query) }
+    }
+
+    fun createGroup(groupData: GroupData) {
+        viewModelScope.launch {
+            val currentUserId = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
+            val groupPayload = mapOf(
+                "id" to groupData.id,
+                "name" to groupData.name,
+                "category" to groupData.category,
+                "coverColor1" to groupData.coverColor1.value,
+                "coverColor2" to groupData.coverColor2.value,
+                "coverEmoji" to groupData.coverEmoji,
+                "description" to groupData.description,
+                "members" to groupData.members,
+                "posts" to groupData.posts,
+                "isJoined" to true,
+                "createdAt" to System.currentTimeMillis(),
+                "ownerId" to currentUserId,
+            )
+
+            groupRepository.createGroup(groupPayload)
+                .onSuccess { groupId ->
+                    // Log the group creation activity
+                    ActivityLogger.logAction(
+                        type = "create_group",
+                        text = "Created group: ${groupData.name}",
+                        metadata = mapOf("groupId" to groupId),
+                    )
+                    // Add to myGroups
+                    _uiState.update { state ->
+                        state.copy(myGroups = listOf(groupData) + state.myGroups)
+                    }
+                }
+                .onFailure {
+                    // Handle error if needed
+                }
+        }
     }
 
     // ── Computed helpers ──────────────────────────────────────────────────────

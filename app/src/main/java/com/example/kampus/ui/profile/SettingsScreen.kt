@@ -28,11 +28,19 @@ import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,14 +51,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
+import com.example.kampus.ui.localization.rememberUiStrings
+import com.example.kampus.ui.theme.ThemeController
 
-private val SBg = Color(0xFF1A1D2E)
-private val SCard = Color(0xFF252A41)
-private val SBorder = Color(0xFF364153)
-private val SWhite = Color(0xFFFFFFFF)
-private val SGray2 = Color(0xFFD1D5DC)
-private val SGray4 = Color(0xFF9CA3AF)
-private val SDanger = Color(0xFFFB2C36)
+private val UiIsDark get() = ThemeController.isDark
+private val SBg get() = if (UiIsDark) Color(0xFF1A1D2E) else Color(0xFFF3F4F8)
+private val SCard get() = if (UiIsDark) Color(0xFF252A41) else Color(0xFFFFFFFF)
+private val SBorder get() = if (UiIsDark) Color(0xFF364153) else Color(0xFFD1D5DB)
+private val SWhite get() = if (UiIsDark) Color(0xFFFFFFFF) else Color(0xFF111827)
+private val SGray2 get() = if (UiIsDark) Color(0xFFD1D5DC) else Color(0xFF374151)
+private val SGray4 get() = if (UiIsDark) Color(0xFF9CA3AF) else Color(0xFF6B7280)
+private val SDanger get() = Color(0xFFFB2C36)
 
 private data class SettingsMenuItem(
     val title: String,
@@ -62,25 +75,32 @@ private data class SettingsMenuItem(
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
+    onEditProfile: () -> Unit,
     onOpenAccountSettings: () -> Unit,
     onOpenNotificationSettings: () -> Unit,
     onOpenPrivacySecurity: () -> Unit,
     onOpenAppearance: () -> Unit,
+    onOpenLanguageRegion: () -> Unit,
     onOpenBlockedUsers: () -> Unit,
     onOpenHelpSupport: () -> Unit,
     onOpenAbout: () -> Unit,
     onLogout: () -> Unit,
     viewModel: ProfileViewModel = viewModel(),
 ) {
+    val state = viewModel.uiState.collectAsStateWithLifecycle().value
+    val strings = rememberUiStrings()
+    var showLogoutDialog by remember { mutableStateOf(false) }
+
     val menuItems = listOf(
-        SettingsMenuItem("Account", Icons.Outlined.Edit, Color(0xFF0D7FFF).copy(alpha = 0.13f), onClick = onOpenAccountSettings),
-        SettingsMenuItem("Notifications", Icons.Outlined.Notifications, Color(0xFFFF4D6D).copy(alpha = 0.13f), onClick = onOpenNotificationSettings),
-        SettingsMenuItem("Privacy & Security", Icons.Outlined.Shield, Color(0xFF00C853).copy(alpha = 0.13f), onClick = onOpenPrivacySecurity),
-        SettingsMenuItem("Appearance", Icons.Outlined.Palette, Color(0xFF9C27B0).copy(alpha = 0.13f), onClick = onOpenAppearance),
-        SettingsMenuItem("Language & Region", Icons.Outlined.Language, Color(0xFF00BCD4).copy(alpha = 0.13f), onClick = {}),
-        SettingsMenuItem("Blocked Users", Icons.Outlined.VisibilityOff, Color(0xFFF44336).copy(alpha = 0.13f), onClick = onOpenBlockedUsers),
-        SettingsMenuItem("Help & Support", Icons.AutoMirrored.Outlined.HelpOutline, Color(0xFF4CAF50).copy(alpha = 0.13f), onClick = onOpenHelpSupport),
-        SettingsMenuItem("About", Icons.AutoMirrored.Outlined.HelpOutline, Color(0xFF607D8B).copy(alpha = 0.13f), onClick = onOpenAbout),
+        SettingsMenuItem(strings.editProfile, Icons.Outlined.Person, Color(0xFF0D7FFF).copy(alpha = 0.13f), onClick = onEditProfile),
+        SettingsMenuItem(strings.notifications, Icons.Outlined.Notifications, Color(0xFFFF4D6D).copy(alpha = 0.13f), onClick = onOpenNotificationSettings),
+        SettingsMenuItem(strings.privacyAndSecurity, Icons.Outlined.Shield, Color(0xFF00C853).copy(alpha = 0.13f), onClick = onOpenPrivacySecurity),
+        SettingsMenuItem(strings.account, Icons.Outlined.Edit, Color(0xFFFFB000).copy(alpha = 0.13f), onClick = onOpenAccountSettings),
+        SettingsMenuItem(strings.appearance, Icons.Outlined.Palette, Color(0xFF9C27B0).copy(alpha = 0.13f), onClick = onOpenAppearance),
+        SettingsMenuItem(strings.languageAndRegion, Icons.Outlined.Language, Color(0xFF00BCD4).copy(alpha = 0.13f), onClick = onOpenLanguageRegion),
+        SettingsMenuItem(strings.blockedUsers, Icons.Outlined.VisibilityOff, Color(0xFFF44336).copy(alpha = 0.13f), onClick = onOpenBlockedUsers),
+        SettingsMenuItem(strings.helpAndSupport, Icons.AutoMirrored.Outlined.HelpOutline, Color(0xFF4CAF50).copy(alpha = 0.13f), onClick = onOpenHelpSupport),
+        SettingsMenuItem(strings.about, Icons.AutoMirrored.Outlined.HelpOutline, Color(0xFF607D8B).copy(alpha = 0.13f), onClick = onOpenAbout),
     )
 
     Surface(color = SBg) {
@@ -98,13 +118,18 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     HeaderBackButton(onBack = onBack)
-                    Text("Settings", color = SWhite, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                    Text(strings.settings, color = SWhite, fontWeight = FontWeight.Bold, fontSize = 20.sp)
                     Spacer(Modifier.size(24.dp))
                 }
             }
 
             item {
-                ProfileHeader()
+                ProfileHeader(
+                    displayName = state.displayName,
+                    handle = state.handle,
+                    profileImageUrl = state.profileImageUrl,
+                    avatarEmoji = state.avatarEmoji,
+                )
             }
 
             items(menuItems) { menu ->
@@ -118,21 +143,21 @@ fun SettingsScreen(
                         .clip(RoundedCornerShape(14.dp))
                         .background(SCard)
                         .border(1.dp, SBorder, RoundedCornerShape(14.dp))
-                        .clickable(onClick = onLogout)
+                        .clickable(onClick = { showLogoutDialog = true })
                         .padding(vertical = 12.dp),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(Icons.Outlined.Security, contentDescription = null, tint = SDanger, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.size(8.dp))
-                    Text("Log Out", color = SDanger, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    Text(strings.logOut, color = SDanger, fontSize = 16.sp, fontWeight = FontWeight.Medium)
                 }
             }
 
             item {
                 Text(
-                    text = "Version 1.0.0",
-                    color = Color(0xFF6A7282),
+                    text = "${strings.version} 1.0.0",
+                    color = SGray4,
                     fontSize = 14.sp,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -140,6 +165,43 @@ fun SettingsScreen(
                 )
             }
         }
+    }
+
+    if (showLogoutDialog) {
+        AlertDialog(
+            onDismissRequest = { showLogoutDialog = false },
+            containerColor = SCard,
+            title = {
+                Text(
+                    text = strings.logoutConfirmTitle,
+                    color = SWhite,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            },
+            text = {
+                Text(
+                    text = strings.logoutConfirmMessage,
+                    color = SGray2,
+                    fontSize = 14.sp,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showLogoutDialog = false
+                        onLogout()
+                    },
+                ) {
+                    Text(text = strings.logOut, color = SDanger, fontWeight = FontWeight.SemiBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLogoutDialog = false }) {
+                    Text(text = strings.cancel, color = SGray4, fontWeight = FontWeight.Medium)
+                }
+            },
+        )
     }
 }
 
@@ -159,7 +221,15 @@ private fun HeaderBackButton(onBack: () -> Unit) {
 }
 
 @Composable
-private fun ProfileHeader() {
+private fun ProfileHeader(
+    displayName: String,
+    handle: String,
+    profileImageUrl: String,
+    avatarEmoji: String,
+) {
+    val resolvedName = displayName.ifBlank { "User" }
+    val resolvedHandle = if (handle.isNotBlank()) handle else "@${resolvedName.lowercase().replace(" ", "")}"
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -178,11 +248,27 @@ private fun ProfileHeader() {
                     .border(2.dp, Color.White, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("S", color = SWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                if (profileImageUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = profileImageUrl,
+                        contentDescription = "Profile Image",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(60.dp)
+                            .clip(CircleShape),
+                    )
+                } else {
+                    Text(
+                        text = avatarEmoji.ifBlank { resolvedName.firstOrNull()?.uppercase() ?: "U" },
+                        color = SWhite,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
             }
             Column {
-                Text("Sarah Johnson", color = SWhite, fontSize = 18.sp)
-                Text("@sarahjohnson", color = Color(0xFFDBEAFE), fontSize = 14.sp)
+                Text(resolvedName, color = SWhite, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                Text(resolvedHandle, color = Color(0xFFDBEAFE), fontSize = 14.sp)
             }
         }
     }

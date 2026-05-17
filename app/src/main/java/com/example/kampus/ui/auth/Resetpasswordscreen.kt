@@ -22,18 +22,20 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.kampus.ui.localization.rememberUiStrings
 
-private val RPBg     = Color(0xFF0A0D14)
-private val RPCard   = Color(0xFF111827)
-private val RPBorder = Color(0xFF1E2A3A)
-private val RPBlue   = Color(0xFF3B82F6)
-private val RPGlow   = Color(0xFF2563EB)
-private val RPWhite  = Color(0xFFFFFFFF)
-private val RPGray5  = Color(0xFF6B7280)
-private val RPGray6  = Color(0xFF4B5563)
-private val RPOk     = Color(0xFF22C55E)
-private val RPErr    = Color(0xFFFF4D6A)
-private val RPYellow = Color(0xFFFACC15)
+private val UiIsDark = true
+private val RPBg     get() = Color(0xFF0A0D14)
+private val RPCard   get() = Color(0xFF111827)
+private val RPBorder get() = Color(0xFF1E2A3A)
+private val RPBlue   get() = Color(0xFF0D7FFF)
+private val RPGlow   get() = RPBlue.copy(alpha = 0.75f)
+private val RPWhite  get() = Color(0xFFFFFFFF)
+private val RPGray5  get() = Color(0xFF6B7280)
+private val RPGray6  get() = Color(0xFF9CA3AF)
+private val RPOk     get() = Color(0xFF22C55E)
+private val RPErr    get() = Color(0xFFFF4D6A)
+private val RPYellow get() = Color(0xFFFACC15)
 
 @Composable
 fun ResetPasswordScreen(
@@ -41,6 +43,7 @@ fun ResetPasswordScreen(
     onResetSuccess : () -> Unit = {},
     onBackClick    : () -> Unit = {}
 ) {
+    val strings = rememberUiStrings()
     var newPass     by remember { mutableStateOf("") }
     var confirmPass by remember { mutableStateOf("") }
     var passVis     by remember { mutableStateOf(false) }
@@ -86,7 +89,7 @@ fun ResetPasswordScreen(
     }
 
     if (isDone) {
-        RPSuccessScreen(modifier = modifier, onContinue = onResetSuccess)
+        RPSuccessScreen(modifier = modifier, onContinue = onResetSuccess, strings = strings)
         return
     }
 
@@ -283,7 +286,8 @@ private fun PasswordRequirementRow(text: String, met: Boolean) {
 @Composable
 private fun RPSuccessScreen(
     modifier   : Modifier = Modifier,
-    onContinue : () -> Unit
+    onContinue : () -> Unit,
+    strings    : com.example.kampus.ui.localization.UiStrings,
 ) {
     val inf = rememberInfiniteTransition(label = "succ")
     val pulse by inf.animateFloat(
@@ -330,13 +334,13 @@ private fun RPSuccessScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text("All Done! 🎉", color = RPWhite, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
+                Text(strings.allDone, color = RPWhite, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
                 Text(
-                    "Password Reset Successfully",
+                    strings.passwordResetSuccessfully,
                     color = RPOk, fontSize = 15.sp, fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    "Your password has been changed.\nYou can now login with your new password.",
+                    "${strings.yourPasswordHasBeenChanged}\n${strings.loginWithNewPassword}",
                     color = RPGray5, fontSize = 14.sp,
                     lineHeight = 22.sp, textAlign = TextAlign.Center
                 )

@@ -2,6 +2,8 @@ package com.example.kampus.di
 
 import android.content.Context
 import io.github.jan.supabase.createSupabaseClient
+import io.github.jan.supabase.postgrest.Postgrest
+import io.github.jan.supabase.realtime.Realtime
 import io.github.jan.supabase.storage.Storage
 import com.example.kampus.data.remote.SupabaseStorageManager
 
@@ -19,6 +21,8 @@ object SupabaseModule {
                 supabaseUrl = SUPABASE_URL,
                 supabaseKey = SUPABASE_ANON_KEY
             ) {
+                install(Postgrest)
+                install(Realtime)
                 install(Storage)
             }
         }

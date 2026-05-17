@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,40 +27,32 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.kampus.ui.localization.rememberUiStrings
+import coil.compose.AsyncImage
 
-private val BBg = Color(0xFF1A1D2E)
-private val BCard = Color(0xFF252A41)
-private val BBorder = Color(0xFF364153)
-private val BWhite = Color(0xFFFFFFFF)
-private val BSubtle = Color(0xFF99A1AF)
-private val BBlue = Color(0xFF0D7FFF)
-
-private data class BlockedUser(
-    val id: Int,
-    val name: String,
-    val handle: String,
-)
+private val BBg get() = ProfileColors.Bg
+private val BCard get() = ProfileColors.Card
+private val BBorder get() = ProfileColors.Border
+private val BWhite get() = ProfileColors.White
+private val BSubtle get() = ProfileColors.Subtle
+private val BBlue get() = ProfileColors.Blue
 
 @Composable
-fun BlockedUsersScreen(onBack: () -> Unit) {
-    var blockedUsers by remember {
-        mutableStateOf(
-            listOf(
-                BlockedUser(1, "John Smith", "@johnsmith"),
-                BlockedUser(2, "Emma Davis", "@emmadavis"),
-            )
-        )
-    }
+fun BlockedUsersScreen(
+    onBack: () -> Unit,
+    profileViewModel: ProfileViewModel = viewModel()
+) {
+    val strings = rememberUiStrings()
+    val uiState by profileViewModel.uiState.collectAsStateWithLifecycle()
+    val blockedUsers = uiState.blockedUsers
 
     Surface(color = BBg, modifier = Modifier.fillMaxSize()) {
         Column(
@@ -84,9 +77,9 @@ fun BlockedUsersScreen(onBack: () -> Unit) {
                         .clickable(onClick = onBack),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back", tint = BWhite)
+                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = strings.back, tint = BWhite)
                 }
-                Text("Blocked Users", color = BWhite, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text(strings.blockedUsersTitle, color = BWhite, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 Box(Modifier.size(40.dp))
             }
 
@@ -100,11 +93,11 @@ fun BlockedUsersScreen(onBack: () -> Unit) {
                         .padding(20.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("No blocked users", color = BSubtle, fontSize = 15.sp)
+                    Text(strings.noBlockedUsers, color = BSubtle, fontSize = 15.sp)
                 }
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(blockedUsers, key = { it.id }) { user ->
+                    items(blockedUsers, key = { it.userId }) { user ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -119,35 +112,46 @@ fun BlockedUsersScreen(onBack: () -> Unit) {
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(48.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF4A5565)),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Text(
-                                        text = user.name.first().toString(),
-                                        color = BWhite,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 16.sp,
+                                if (user.profileImageUrl.isNotEmpty()) {
+                                    AsyncImage(
+                                        model = user.profileImageUrl,
+                                        contentDescription = user.displayName,
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .clip(CircleShape),
+                                        contentScale = ContentScale.Crop,
                                     )
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .clip(CircleShape)
+                                            .background(BBorder),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text(
+                                            text = user.avatarEmoji,
+                                            color = BWhite,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 24.sp,
+                                        )
+                                    }
                                 }
                                 Column {
-                                    Text(user.name, color = BWhite, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                                    Text(user.displayName, color = BWhite, fontSize = 16.sp, fontWeight = FontWeight.Medium)
                                     Text(user.handle, color = BSubtle, fontSize = 14.sp)
                                 }
                             }
 
                             Button(
-                                onClick = { blockedUsers = blockedUsers.filterNot { it.id == user.id } },
+                                onClick = { profileViewModel.unblockUser(user.userId) },
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = BBlue,
                                     contentColor = BWhite,
                                 ),
                                 shape = RoundedCornerShape(999.dp),
                             ) {
-                                Text("Unblock", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                                Text(strings.unblock, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                             }
                         }
                     }

@@ -58,6 +58,7 @@ import com.google.android.gms.location.Priority
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationResult
 import kotlin.concurrent.thread
+import com.example.kampus.ui.theme.ThemeController
 
 // Palette definition
 internal data class ComposerPalette(
@@ -69,6 +70,34 @@ internal data class ComposerPalette(
     val textMuted: Color,
     val placeholder: Color,
 )
+
+@Composable
+internal fun getComposerPalette(): ComposerPalette {
+    val isDark = ThemeController.isDark
+    return remember(isDark) {
+        if (isDark) {
+            ComposerPalette(
+                bg = Color(0xFF080B11),
+                card = Color(0xFF0F1520),
+                border = Color(0xFF1A2333),
+                primary = Color(0xFF3B82F6),
+                text = Color(0xFFFFFFFF),
+                textMuted = Color(0xFF9CA3AF),
+                placeholder = Color(0xFF374151),
+            )
+        } else {
+            ComposerPalette(
+                bg = Color(0xFFF3F4F8),
+                card = Color(0xFFFFFFFF),
+                border = Color(0xFFD1D5DB),
+                primary = Color(0xFF3B82F6),
+                text = Color(0xFF111827),
+                textMuted = Color(0xFF6B7280),
+                placeholder = Color(0xFF9CA3AF),
+            )
+        }
+    }
+}
 
 internal val FbDark = ComposerPalette(
     bg = Color(0xFF080B11),
@@ -137,6 +166,7 @@ internal fun FeelingEmojiPicker(
     onSelect: (String) -> Unit,
     onClose: () -> Unit,
 ) {
+    val strings = com.example.kampus.ui.localization.rememberUiStrings()
     var search by remember { mutableStateOf("") }
     val feelingLabels = mapOf(
         "😊" to "happy", "😂" to "laughing", "❤️" to "love", "😍" to "love struck",
@@ -159,13 +189,13 @@ internal fun FeelingEmojiPicker(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text("Choose your feeling", color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text(strings.chooseYourFeeling, color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 Box(
                     modifier = Modifier
                         .size(32.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(p.card)
-                        .clickable(remember { MutableInteractionSource() }, null, onClick = onClose),
+                            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClose),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(Icons.Default.Close, "Close", tint = p.text, modifier = Modifier.size(16.dp))
@@ -191,7 +221,7 @@ internal fun FeelingEmojiPicker(
                     modifier = Modifier.fillMaxWidth(),
                     decorationBox = { inner ->
                         if (search.isBlank()) {
-                            Text("Search feelings...", color = p.placeholder, fontSize = 14.sp)
+                            Text(strings.searchFeelings, color = p.placeholder, fontSize = 14.sp)
                         }
                         inner()
                     },
@@ -214,7 +244,7 @@ internal fun FeelingEmojiPicker(
                             .clip(RoundedCornerShape(12.dp))
                             .background(p.card)
                             .border(1.dp, p.border, RoundedCornerShape(12.dp))
-                            .clickable(remember { MutableInteractionSource() }, null) {
+                            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
                                 onSelect(emoji)
                                 onClose()
                             },
@@ -236,6 +266,7 @@ internal fun PeoplePicker(
     onClose: () -> Unit,
 ) {
     var localSelected by remember { mutableStateOf(selected) }
+    val strings = com.example.kampus.ui.localization.rememberUiStrings()
     var search by remember { mutableStateOf("") }
     val filtered = mockFriends.filter { it.contains(search, ignoreCase = true) }
 
@@ -249,13 +280,13 @@ internal fun PeoplePicker(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text("Tag people", color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text(strings.tagPeople, color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 Box(
                     modifier = Modifier
                         .size(32.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(p.card)
-                        .clickable(remember { MutableInteractionSource() }, null) {
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
                             onSelect(localSelected)
                             onClose()
                         },
@@ -284,7 +315,7 @@ internal fun PeoplePicker(
                     modifier = Modifier.fillMaxWidth(),
                     decorationBox = { inner ->
                         if (search.isBlank()) {
-                            Text("Search friends...", color = p.placeholder, fontSize = 14.sp)
+                            Text(strings.searchFriends, color = p.placeholder, fontSize = 14.sp)
                         }
                         inner()
                     },
@@ -293,7 +324,7 @@ internal fun PeoplePicker(
 
             // Friends list - scrollable
             if (filtered.isEmpty() && search.isNotEmpty()) {
-                Text("No friends found", color = p.textMuted, fontSize = 13.sp, modifier = Modifier.padding(16.dp))
+                Text(strings.noFriendsFound, color = p.textMuted, fontSize = 13.sp, modifier = Modifier.padding(16.dp))
             } else {
                 LazyColumn(
                     modifier = Modifier
@@ -308,7 +339,7 @@ internal fun PeoplePicker(
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(if (friend in localSelected) p.primary.copy(alpha = 0.2f) else p.card)
                                 .border(1.dp, if (friend in localSelected) p.primary else p.border, RoundedCornerShape(10.dp))
-                                .clickable(remember { MutableInteractionSource() }, null) {
+                                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
                                     localSelected = if (friend in localSelected) {
                                         localSelected - friend
                                     } else {
@@ -338,6 +369,7 @@ internal fun LocationPicker(
     onClose: () -> Unit,
 ) {
     val context = LocalContext.current
+    val strings = com.example.kampus.ui.localization.rememberUiStrings()
     var currentLocation by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(true) }
     var hasPermission by remember { mutableStateOf(false) }
@@ -450,13 +482,13 @@ internal fun LocationPicker(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text("Add Location", color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text(strings.addLocationTitle, color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 Box(
                     modifier = Modifier
                         .size(32.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(p.card)
-                        .clickable(remember { MutableInteractionSource() }, null, onClick = onClose),
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClose),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(Icons.Default.Close, "Close", tint = p.text, modifier = Modifier.size(16.dp))
@@ -487,7 +519,7 @@ internal fun LocationPicker(
                     modifier = Modifier.fillMaxWidth(),
                     decorationBox = { inner ->
                         if (searchQuery.isBlank()) {
-                            Text("Search locations...", color = p.placeholder, fontSize = 14.sp)
+                            Text(strings.searchLocations, color = p.placeholder, fontSize = 14.sp)
                         }
                         inner()
                     },
@@ -512,7 +544,7 @@ internal fun LocationPicker(
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Text("📍", fontSize = 24.sp)
-                            Text("Getting your location...", color = p.textMuted, fontSize = 13.sp)
+                            Text(strings.gettingYourLocation, color = p.textMuted, fontSize = 13.sp)
                         }
                     }
                 } else if (currentLocation != null && !currentLocation!!.contains("Permission") && !currentLocation!!.contains("denied")) {
@@ -523,7 +555,7 @@ internal fun LocationPicker(
                             .clip(RoundedCornerShape(12.dp))
                             .background(p.primary.copy(alpha = 0.12f))
                             .border(1.5.dp, p.primary, RoundedCornerShape(12.dp))
-                            .clickable(remember { MutableInteractionSource() }, null) {
+                            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
                                 onSelect(currentLocation!!)
                                 onClose()
                             }
@@ -536,7 +568,7 @@ internal fun LocationPicker(
                         ) {
                             Text("📍", fontSize = 24.sp)
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("My Location", color = p.primary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                Text(strings.myLocation, color = p.primary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                                 Text(
                                     currentLocation!!,
                                     color = p.text,
@@ -560,7 +592,7 @@ internal fun LocationPicker(
                         .padding(16.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("No locations found", color = p.textMuted, fontSize = 13.sp)
+                    Text(strings.noLocationsFound, color = p.textMuted, fontSize = 13.sp)
                 }
             } else {
                 LazyColumn(
@@ -576,7 +608,7 @@ internal fun LocationPicker(
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(p.card)
                                 .border(1.dp, p.border, RoundedCornerShape(10.dp))
-                                .clickable(remember { MutableInteractionSource() }, null) {
+                                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
                                     onSelect(location)
                                     onClose()
                                 }
@@ -606,6 +638,7 @@ internal fun GifPicker(
     onClose: () -> Unit,
 ) {
     val context = LocalContext.current
+    val strings = com.example.kampus.ui.localization.rememberUiStrings()
     var search by remember { mutableStateOf("") }
     
     // Filter GIFs locally - instant, no network calls
@@ -627,13 +660,13 @@ internal fun GifPicker(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text("Find GIF", color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text(strings.findGif, color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 Box(
                     modifier = Modifier
                         .size(32.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(p.card)
-                        .clickable(remember { MutableInteractionSource() }, null, onClick = onClose),
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClose),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(Icons.Default.Close, "Close", tint = p.text, modifier = Modifier.size(16.dp))
@@ -659,7 +692,7 @@ internal fun GifPicker(
                     modifier = Modifier.fillMaxWidth(),
                     decorationBox = { inner ->
                         if (search.isBlank()) {
-                            Text("Search GIFs...", color = p.placeholder, fontSize = 14.sp)
+                            Text(strings.searchGifs, color = p.placeholder, fontSize = 14.sp)
                         }
                         inner()
                     },
@@ -674,7 +707,7 @@ internal fun GifPicker(
                         .padding(32.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("No GIFs found\nfor \"$search\"", color = p.textMuted, fontSize = 13.sp)
+                    Text("${strings.noGifsFound}\n\"$search\"", color = p.textMuted, fontSize = 13.sp)
                 }
             }
 
@@ -705,7 +738,7 @@ internal fun GifPicker(
                                 .clip(RoundedCornerShape(12.dp))
                                 .background(p.card)
                                 .border(1.dp, p.border.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
-                                .clickable(remember { MutableInteractionSource() }, null) {
+                                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
                                     onSelect(gif.title)
                                     onClose()
                                 },
@@ -783,6 +816,7 @@ internal fun EventPicker(
     onSelect: (String) -> Unit,
     onClose: () -> Unit,
 ) {
+    val strings = com.example.kampus.ui.localization.rememberUiStrings()
     var search by remember { mutableStateOf("") }
     val filtered = mockEvents.filter { it.contains(search, ignoreCase = true) }
 
@@ -796,13 +830,13 @@ internal fun EventPicker(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text("Event", color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text(strings.searchEvent, color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 Box(
                     modifier = Modifier
                         .size(32.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(p.card)
-                        .clickable(remember { MutableInteractionSource() }, null, onClick = onClose),
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClose),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(Icons.Default.Close, "Close", tint = p.text, modifier = Modifier.size(16.dp))
@@ -828,7 +862,7 @@ internal fun EventPicker(
                     modifier = Modifier.fillMaxWidth(),
                     decorationBox = { inner ->
                         if (search.isBlank()) {
-                            Text("Search event...", color = p.placeholder, fontSize = 14.sp)
+                            Text(strings.searchEvent, color = p.placeholder, fontSize = 14.sp)
                         }
                         inner()
                     },
@@ -837,7 +871,7 @@ internal fun EventPicker(
 
             // Results - scrollable list
             if (filtered.isEmpty() && search.isNotEmpty()) {
-                Text("No events found", color = p.textMuted, fontSize = 13.sp, modifier = Modifier.padding(16.dp))
+                Text(strings.noEventsFound, color = p.textMuted, fontSize = 13.sp, modifier = Modifier.padding(16.dp))
             } else {
                 LazyColumn(
                     modifier = Modifier
@@ -852,7 +886,7 @@ internal fun EventPicker(
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(p.card)
                                 .border(1.dp, p.border, RoundedCornerShape(10.dp))
-                                .clickable(remember { MutableInteractionSource() }, null) {
+                                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
                                     onSelect(event)
                                     onClose()
                                 }

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
+import com.example.kampus.ui.theme.ThemeController
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -35,7 +36,6 @@ import androidx.compose.ui.unit.sp
 internal fun CreatePostTopBar(
     p: ComposerPalette,
     onClose: () -> Unit,
-    onThemeToggle: () -> Unit,
     isDarkMode: Boolean,
 ) {
     Row(
@@ -52,7 +52,7 @@ internal fun CreatePostTopBar(
                 .clip(CircleShape)
                 .background(p.card)
                 .border(1.dp, p.border, CircleShape)
-                .clickable(remember { MutableInteractionSource() }, null, onClick = onClose),
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClose),
             contentAlignment = Alignment.Center,
         ) {
             Icon(Icons.Default.Close, contentDescription = "Close", tint = p.text, modifier = Modifier.size(18.dp))
@@ -71,11 +71,13 @@ internal fun CreatePostTopBar(
                 .clip(CircleShape)
                 .background(p.card)
                 .border(1.dp, p.border, CircleShape)
-                .clickable(remember { MutableInteractionSource() }, null, onClick = onThemeToggle),
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = {
+                    ThemeController.isDark = !ThemeController.isDark
+                }),
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = if (isDarkMode) "A" else "B",
+                text = if (isDarkMode) "🌙" else "☀️",
                 color = p.text,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
@@ -161,7 +163,9 @@ internal fun CreatePostHeader(
                         onVisibilityChange(
                             when (visibility) {
                                 PostItem.PostVisibility.PUBLIC -> PostItem.PostVisibility.FRIENDS
-                                PostItem.PostVisibility.FRIENDS -> PostItem.PostVisibility.PRIVATE
+                                PostItem.PostVisibility.FRIENDS -> PostItem.PostVisibility.FOLLOWERS
+                                PostItem.PostVisibility.FOLLOWERS -> PostItem.PostVisibility.UNIVERSITY
+                                PostItem.PostVisibility.UNIVERSITY -> PostItem.PostVisibility.PRIVATE
                                 PostItem.PostVisibility.PRIVATE -> PostItem.PostVisibility.PUBLIC
                             }
                         )
@@ -173,6 +177,8 @@ internal fun CreatePostHeader(
                 when (visibility) {
                     PostItem.PostVisibility.PUBLIC -> "Public"
                     PostItem.PostVisibility.FRIENDS -> "Friends"
+                    PostItem.PostVisibility.FOLLOWERS -> "Followers"
+                    PostItem.PostVisibility.UNIVERSITY -> "University"
                     PostItem.PostVisibility.PRIVATE -> "Private"
                 },
                 color = p.text,

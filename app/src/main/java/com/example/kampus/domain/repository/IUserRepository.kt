@@ -5,7 +5,7 @@ import com.example.kampus.domain.model.Friend
 import com.example.kampus.domain.model.FriendRequest
 import kotlinx.coroutines.flow.Flow
 
-interface IUserRepository {
+interface  IUserRepository {
     // Current user profile
     fun getCurrentUserProfile(): Flow<Result<User>>
     fun getUserProfile(userId: String): Flow<Result<User>>
