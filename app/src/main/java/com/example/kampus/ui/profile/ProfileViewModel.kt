@@ -3,12 +3,16 @@ package com.example.kampus.ui.profile
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.kampus.data.repository.PostRepositoryImpl
+import com.example.kampus.data.repository.EventRepositoryImpl
 import com.example.kampus.data.repository.UserRepositoryImpl
 import com.example.kampus.domain.model.User
 import com.example.kampus.domain.model.Friend
 import com.example.kampus.domain.model.FriendRequest
+import com.example.kampus.domain.repository.IEventRepository
 import com.example.kampus.domain.repository.IUserRepository
 import com.example.kampus.utils.ActivityLogger
+import com.example.kampus.utils.NotificationLogger
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
@@ -19,6 +23,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.example.kampus.ui.feed.PostItem
 
 data class ProfileUiState(
 	val userId: String = "",
@@ -39,19 +44,46 @@ data class ProfileUiState(
 	val following: List<Friend> = emptyList(),
 	val friendRequests: List<FriendRequest> = emptyList(),
 	val outgoingFriendRequests: List<FriendRequest> = emptyList(),
+	val blockedUsers: List<Friend> = emptyList(),
 	val activities: List<ProfileActivityItem> = emptyList(),
 	val isOnline: Boolean = false,
 	val isLoading: Boolean = false,
 	val error: String? = null,
 	val settings: SettingsState = SettingsState(),
+	val notificationSettings: NotificationSettingsState = NotificationSettingsState(),
+	val privacySettings: PrivacySettingsState = PrivacySettingsState(),
+	val timelinePosts: List<PostItem> = emptyList(),
 )
 
 data class ProfileActivityItem(
 	val type: String,
 	val text: String,
 	val createdAt: Long,
+	val updatedAt: Long = createdAt,
+	val sourceId: String? = null,
 	val eventId: Int? = null,
 	val postId: Int? = null,
+	val previewTitle: String = "",
+	val previewSubtitle: String = "",
+	val previewImageUrl: String = "",
+	val likeCount: Int = 0,
+	val commentCount: Int = 0,
+	val shareCount: Int = 0,
+	val postVisibility: com.example.kampus.ui.feed.PostItem.PostVisibility? = null,
+	val isPinned: Boolean = false,
+	val isArchived: Boolean = false,
+	val currentUserLoved: Boolean = false,
+	val loveList: List<String> = emptyList(),
+	val commentsList: List<ActivityComment> = emptyList(),
+)
+
+data class ActivityComment(
+	val id: String = "",
+	val userId: String = "",
+	val userName: String = "",
+	val userAvatar: String = "",
+	val text: String = "",
+	val createdAt: Long = 0L,
 )
 
 data class ProfileStats(
@@ -68,15 +100,56 @@ data class SettingsState(
 	val darkModeLocked: Boolean = true,
 )
 
+data class NotificationSettingsState(
+	val pushNotifications: Boolean = true,
+	val likes: Boolean = true,
+	val comments: Boolean = true,
+	val newFollowers: Boolean = true,
+	val mentions: Boolean = true,
+	val directMessages: Boolean = true,
+	val groupActivity: Boolean = false,
+	val emailNotifications: Boolean = true,
+	val weeklyDigest: Boolean = false,
+	val smsNotifications: Boolean = false,
+)
+
+data class PrivacySettingsState(
+	val privateAccount: Boolean = false,
+	val activityStatus: Boolean = true,
+	val allowTagging: Boolean = true,
+	val allowMentions: Boolean = true,
+	val twoFactorAuthentication: Boolean = false,
+)
+
 class ProfileViewModel(
 	private val userRepository: IUserRepository = UserRepositoryImpl(
 		FirebaseFirestore.getInstance(),
 		FirebaseAuth.getInstance()
-	)
+	),
+	private val eventRepository: IEventRepository = EventRepositoryImpl(),
+	private val postRepository: PostRepositoryImpl = PostRepositoryImpl(FirebaseFirestore.getInstance()),
 ) : ViewModel() {
+	private companion object {
+		val HIDDEN_ACTIVITY_TYPES = setOf(
+			"delete_post",
+			"edit_post",
+			"edit_privacy",
+			"hide_from_profile",
+			"archive_activity",
+			"activity_notifications",
+			"pin_post",
+			"unpin_post",
+		)
+	}
+
 	private val _uiState = MutableStateFlow(ProfileUiState())
 	val uiState: StateFlow<ProfileUiState> = _uiState.asStateFlow()
 	private var activityListener: ListenerRegistration? = null
+	private var postActivityListener: ListenerRegistration? = null
+	private var groupActivityListener: ListenerRegistration? = null
+	private var notificationSettingsListener: ListenerRegistration? = null
+	private var privacySettingsListener: ListenerRegistration? = null
+	private var blockedUsersListener: ListenerRegistration? = null
 
 	private val currentUserId: String?
 		get() = FirebaseAuth.getInstance().currentUser?.uid
@@ -134,9 +207,10 @@ class ProfileViewModel(
 								isOnline = sanitizedUser.isOnline,
 								stats = ProfileStats(
 									posts = sanitizedUser.stats.posts,
-									followers = sanitizedUser.stats.followers,
-									following = sanitizedUser.stats.following,
-									friendRequests = sanitizedUser.stats.friendRequests,
+									// Keep live counters sourced from dedicated real-time listeners.
+									followers = it.stats.followers,
+									following = it.stats.following,
+									friendRequests = it.stats.friendRequests,
 								),
 								isLoading = false,
 							)
@@ -187,7 +261,12 @@ class ProfileViewModel(
 			viewModelScope.launch {
 				userRepository.getFollowers(userId).collect { result ->
 					result.onSuccess { followers ->
-						_uiState.update { it.copy(followers = followers) }
+						_uiState.update {
+							it.copy(
+								followers = followers,
+								stats = it.stats.copy(followers = followers.size),
+							)
+						}
 					}
 				}
 			}
@@ -196,7 +275,12 @@ class ProfileViewModel(
 			viewModelScope.launch {
 				userRepository.getFollowing(userId).collect { result ->
 					result.onSuccess { following ->
-						_uiState.update { it.copy(following = following) }
+						_uiState.update {
+							it.copy(
+								following = following,
+								stats = it.stats.copy(following = following.size),
+							)
+						}
 					}
 				}
 			}
@@ -226,6 +310,9 @@ class ProfileViewModel(
 					result.onSuccess { requests ->
 						_uiState.update { it.copy(outgoingFriendRequests = requests) }
 					}
+					result.onFailure { error ->
+						android.util.Log.e("ProfileViewModel", "Error loading outgoing friend requests for $userId: ${error.message}")
+					}
 				}
 			}
 
@@ -239,17 +326,218 @@ class ProfileViewModel(
 			}
 
 			observeRecentActivities(userId)
+			observeTimelinePosts(userId)
+			observeNotificationSettings(userId)
+			observePrivacySettings(userId)
+			observeBlockedUsers(userId)
 		}
+	}
+
+	private fun observeTimelinePosts(userId: String) {
+		viewModelScope.launch {
+			postRepository.getFeedPosts().collect { result ->
+				result.onSuccess { posts ->
+					val profilePosts = posts
+						.filter { it.authorId == userId }
+						.sortedWith(
+							compareByDescending<PostItem> { it.isPinned }
+								.thenByDescending { it.id }
+						)
+						.take(30)
+					_uiState.update { it.copy(timelinePosts = profilePosts) }
+				}
+				result.onFailure { error ->
+					_uiState.update { it.copy(error = error.message ?: "Failed to load profile timeline") }
+				}
+			}
+		}
+	}
+
+	private fun observePrivacySettings(userId: String) {
+		privacySettingsListener?.remove()
+		privacySettingsListener = FirebaseFirestore.getInstance()
+			.collection("users")
+			.document(userId)
+			.addSnapshotListener { snapshot, error ->
+				if (error != null || snapshot == null || !snapshot.exists()) return@addSnapshotListener
+
+				val raw = snapshot.get("privacySettings") as? Map<*, *> ?: emptyMap<String, Any>()
+				val parsed = PrivacySettingsState(
+					privateAccount = (raw["privateAccount"] as? Boolean) ?: snapshot.getBoolean("privateAccount") ?: false,
+					activityStatus = (raw["activityStatus"] as? Boolean) ?: snapshot.getBoolean("isOnline") ?: true,
+					allowTagging = (raw["allowTagging"] as? Boolean) ?: true,
+					allowMentions = (raw["allowMentions"] as? Boolean) ?: true,
+					twoFactorAuthentication = (raw["twoFactorAuthentication"] as? Boolean) ?: false,
+				)
+
+				_uiState.update { it.copy(privacySettings = parsed) }
+			}
+	}
+
+	private fun updatePrivacySettings(fields: Map<String, Any>) {
+		val userId = currentUserId ?: return
+		viewModelScope.launch {
+			runCatching {
+				FirebaseFirestore.getInstance()
+					.collection("users")
+					.document(userId)
+					.update(fields + mapOf("updatedAt" to System.currentTimeMillis()))
+					.await()
+			}.onFailure { error ->
+				_uiState.update { it.copy(error = error.message ?: "Failed to update privacy settings") }
+			}
+		}
+	}
+
+	fun setPrivateAccount(enabled: Boolean) {
+		updatePrivacySettings(mapOf("privacySettings.privateAccount" to enabled))
+	}
+
+	fun setActivityStatus(enabled: Boolean) {
+		updatePrivacySettings(mapOf("privacySettings.activityStatus" to enabled, "isOnline" to enabled))
+	}
+
+	fun setAllowTagging(enabled: Boolean) {
+		updatePrivacySettings(mapOf("privacySettings.allowTagging" to enabled))
+	}
+
+	fun setAllowMentions(enabled: Boolean) {
+		updatePrivacySettings(mapOf("privacySettings.allowMentions" to enabled))
+	}
+
+	fun setTwoFactorAuthentication(enabled: Boolean) {
+		updatePrivacySettings(mapOf("privacySettings.twoFactorAuthentication" to enabled))
+	}
+
+	private fun observeNotificationSettings(userId: String) {
+		notificationSettingsListener?.remove()
+		notificationSettingsListener = FirebaseFirestore.getInstance()
+			.collection("users")
+			.document(userId)
+			.addSnapshotListener { snapshot, error ->
+				if (error != null || snapshot == null || !snapshot.exists()) {
+					return@addSnapshotListener
+				}
+
+				val raw = snapshot.get("notificationSettings") as? Map<*, *> ?: emptyMap<String, Any>()
+				val parsed = NotificationSettingsState(
+					pushNotifications = (raw["pushNotifications"] as? Boolean) ?: true,
+					likes = (raw["likes"] as? Boolean) ?: true,
+					comments = (raw["comments"] as? Boolean) ?: true,
+					newFollowers = (raw["newFollowers"] as? Boolean) ?: true,
+					mentions = (raw["mentions"] as? Boolean) ?: true,
+					directMessages = (raw["directMessages"] as? Boolean) ?: true,
+					groupActivity = (raw["groupActivity"] as? Boolean) ?: false,
+					emailNotifications = (raw["emailNotifications"] as? Boolean) ?: true,
+					weeklyDigest = (raw["weeklyDigest"] as? Boolean) ?: false,
+					smsNotifications = (raw["smsNotifications"] as? Boolean) ?: false,
+				)
+
+				_uiState.update { it.copy(notificationSettings = parsed) }
+			}
+	}
+
+	private fun updateNotificationSettings(fields: Map<String, Any>) {
+		val userId = currentUserId ?: return
+		viewModelScope.launch {
+			runCatching {
+				FirebaseFirestore.getInstance()
+					.collection("users")
+					.document(userId)
+					.update(fields + mapOf("updatedAt" to System.currentTimeMillis()))
+					.await()
+			}.onFailure { error ->
+				_uiState.update { it.copy(error = error.message ?: "Failed to update notification settings") }
+			}
+		}
+	}
+
+	fun setPushNotificationsEnabled(enabled: Boolean) {
+		updateNotificationSettings(
+			mapOf(
+				"notificationSettings.pushNotifications" to enabled,
+				"notificationSettings.likes" to enabled,
+				"notificationSettings.comments" to enabled,
+				"notificationSettings.newFollowers" to enabled,
+				"notificationSettings.mentions" to enabled,
+				"notificationSettings.directMessages" to enabled,
+				"notificationSettings.groupActivity" to enabled,
+			)
+		)
+	}
+
+	fun setEmailNotificationsEnabled(enabled: Boolean) {
+		updateNotificationSettings(
+			mapOf(
+				"notificationSettings.emailNotifications" to enabled,
+				"notificationSettings.weeklyDigest" to if (enabled) _uiState.value.notificationSettings.weeklyDigest else false,
+			)
+		)
+	}
+
+	fun setNotificationToggle(key: String, enabled: Boolean) {
+		updateNotificationSettings(mapOf("notificationSettings.$key" to enabled))
 	}
 
 	private fun observeRecentActivities(userId: String) {
 		activityListener?.remove()
+		postActivityListener?.remove()
+		groupActivityListener?.remove()
+
+		var firestoreActivities = emptyList<ProfileActivityItem>()
+		var eventActivities = emptyList<ProfileActivityItem>()
+
+		fun publishRecentActivities() {
+			// Combine all activity sources and deduplicate
+			val allActivities = firestoreActivities + eventActivities
+			val uniqueActivities = mutableMapOf<String, ProfileActivityItem>()
+			
+			for (activity in allActivities) {
+				val key = listOfNotNull(
+					activity.type,
+					activity.sourceId,
+					activity.eventId?.toString(),
+					activity.postId?.toString(),
+				).joinToString("|")
+				if (key.isNotEmpty()) {
+					uniqueActivities[key] = activity
+				}
+			}
+			
+			val combined = uniqueActivities.values
+				.sortedWith(
+					compareByDescending<ProfileActivityItem> { it.isPinned }
+						.thenByDescending { it.createdAt }
+				)
+				.take(20) // Limit to 20 most recent activities for better performance
+			
+			_uiState.update { it.copy(activities = combined) }
+		}
+
+		fun parseIntField(doc: com.google.firebase.firestore.DocumentSnapshot, field: String): Int? {
+			return when (val value = doc.get(field)) {
+				is Number -> value.toInt()
+				is String -> value.toIntOrNull()
+				else -> null
+			}
+		}
+
+		fun parseTimestampField(doc: com.google.firebase.firestore.DocumentSnapshot, field: String): Long {
+			return when (val value = doc.get(field)) {
+				is com.google.firebase.Timestamp -> value.toDate().time
+				is Number -> value.toLong()
+				is String -> value.toLongOrNull() ?: 0L
+				else -> 0L
+			}
+		}
+
+		// Main Firestore activities listener - handles all activity types
 		activityListener = FirebaseFirestore.getInstance()
 			.collection("users")
 			.document(userId)
 			.collection("activities")
 			.orderBy("createdAt", Query.Direction.DESCENDING)
-			.limit(20)
+			.limit(20) // Fetch limit 20 for efficiency
 			.addSnapshotListener { snapshot, error ->
 				if (error != null) {
 					_uiState.update { it.copy(error = error.message ?: "Failed to load activity") }
@@ -258,21 +546,159 @@ class ProfileViewModel(
 
 				val activities = snapshot?.documents
 					?.mapNotNull { doc ->
-						val createdAt = doc.getTimestamp("createdAt")?.toDate()?.time
-							?: (doc.getLong("createdAt") ?: 0L)
+						val createdAt = normalizeTimestamp(parseTimestampField(doc, "createdAt"))
+						val updatedAt = normalizeTimestamp(doc.getLong("updatedAt") ?: createdAt)
+						val eventId = parseIntField(doc, "eventId")
+						val postId = parseIntField(doc, "postId")
+						val type = doc.getString("type") ?: "activity"
+						if (type in HIDDEN_ACTIVITY_TYPES) return@mapNotNull null
+						val author = doc.getString("author").orEmpty()
+						val hiddenFromProfile = doc.getBoolean("hiddenFromProfile") == true
+						val archivedAt = doc.getLong("archivedAt") ?: 0L
+						if (hiddenFromProfile || archivedAt > 0L) return@mapNotNull null
+						val previewImageUrl = doc.getString("previewImageUrl") ?: doc.getString("imageUrl") ?: doc.getString("mediaUrl") ?: ""
+						val rawVisibility = doc.getString("visibility")?.uppercase()
+						val visibility = rawVisibility?.let { runCatching { com.example.kampus.ui.feed.PostItem.PostVisibility.valueOf(it) }.getOrNull() }
+
+						val previewTitle = when (type) {
+							"share_post" -> doc.getString("previewTitle") ?: if (author.isNotBlank()) "Shared post by $author" else "Shared post"
+							"share_profile" -> doc.getString("previewTitle") ?: "Shared profile"
+							"create_post" -> doc.getString("previewTitle") ?: "Post"
+							"create_event" -> doc.getString("previewTitle") ?: "Event"
+							"create_group" -> doc.getString("previewTitle") ?: "Group"
+							else -> doc.getString("previewTitle") ?: "Activity"
+						}
+
+						val previewSubtitle = when (type) {
+							"share_post" -> doc.getString("previewSubtitle") ?: if (author.isNotBlank()) "Shared from $author" else "Shared from your feed"
+							"share_profile" -> doc.getString("previewSubtitle") ?: "Shared on your profile"
+							"create_post" -> doc.getString("previewSubtitle") ?: "Shared from your feed"
+							"create_event" -> doc.getString("previewSubtitle") ?: "Shared from your events"
+							"create_group" -> doc.getString("previewSubtitle") ?: "Shared from your groups"
+							else -> doc.getString("previewSubtitle") ?: "Choose what to do with this activity."
+						}
+
+						@Suppress("UNCHECKED_CAST")
+						val loveList = doc.get("loveList") as? List<String> ?: emptyList()
+						@Suppress("UNCHECKED_CAST")
+						val commentsList = (doc.get("commentsList") as? List<Map<String, Any>> ?: emptyList()).mapNotNull { comment ->
+							try {
+								ActivityComment(
+									id = comment["id"] as? String ?: "",
+									userId = comment["userId"] as? String ?: "",
+									userName = comment["userName"] as? String ?: "",
+									userAvatar = comment["userAvatar"] as? String ?: "",
+									text = comment["text"] as? String ?: "",
+									createdAt = (comment["createdAt"] as? Number)?.toLong() ?: 0L,
+								)
+							} catch (e: Exception) {
+								null
+							}
+						}
 
 						ProfileActivityItem(
-							type = doc.getString("type") ?: "activity",
-							text = doc.getString("text") ?: "Did an activity",
+							type = type,
+							text = when (type) {
+								"share_post" -> doc.getString("text") ?: if (author.isNotBlank()) "Shared post by $author" else "Shared a post"
+								"share_profile" -> doc.getString("text") ?: "Shared profile"
+								"create_post" -> doc.getString("text") ?: "Created a new post"
+								"create_event" -> doc.getString("text") ?: "Created an event"
+								"create_group" -> doc.getString("text") ?: "Created a group"
+								else -> doc.getString("text") ?: "Did an activity"
+							},
 							createdAt = createdAt,
-							eventId = doc.getLong("eventId")?.toInt(),
-							postId = doc.getLong("postId")?.toInt(),
+							updatedAt = updatedAt,
+							sourceId = doc.id,
+							eventId = eventId,
+							postId = postId,
+							previewTitle = previewTitle,
+							previewSubtitle = previewSubtitle,
+							previewImageUrl = previewImageUrl,
+							likeCount = doc.getLong("likeCount")?.toInt() ?: 0,
+							commentCount = doc.getLong("commentCount")?.toInt() ?: 0,
+							shareCount = doc.getLong("shareCount")?.toInt() ?: 0,
+							postVisibility = visibility,
+							isPinned = doc.getBoolean("isPinned") == true,
+							isArchived = archivedAt > 0L,
+							currentUserLoved = loveList.contains(userId),
+							loveList = loveList,
+							commentsList = commentsList,
 						)
 					}
 					?: emptyList()
 
-				_uiState.update { it.copy(activities = activities) }
+				firestoreActivities = activities
+				publishRecentActivities()
 			}
+
+		// Real-time event activities listener
+		viewModelScope.launch {
+			eventRepository.getEvents().collect { result ->
+				result.onSuccess { events ->
+					eventActivities = events
+						.filter { it.ownerId == userId }
+						.mapNotNull { event ->
+							val rawCreatedAt = event.createdAt ?: 0L
+							val createdAt = normalizeTimestamp(if (rawCreatedAt < 100_000_000_000L) rawCreatedAt * 1000L else rawCreatedAt)
+							if (createdAt <= 0L) return@mapNotNull null
+							ProfileActivityItem(
+								type = "create_event",
+								text = "Created event: ${event.title.ifBlank { "Untitled event" }}",
+								createdAt = createdAt,
+								sourceId = event.id,
+								previewTitle = event.title.ifBlank { "Untitled event" },
+								previewSubtitle = event.location.orEmpty().ifBlank { "Event" },
+								previewImageUrl = event.imageUrl.orEmpty(),
+							)
+						}
+					publishRecentActivities()
+				}
+			}
+		}
+	}
+
+	private fun updateLocalActivity(activity: ProfileActivityItem, transform: (ProfileActivityItem) -> ProfileActivityItem) {
+		_uiState.update { state ->
+			state.copy(
+				activities = state.activities.map { current ->
+					if (current.sourceId == activity.sourceId) transform(current) else current
+				}.sortedWith(
+					compareByDescending<ProfileActivityItem> { it.isPinned }
+						.thenByDescending { it.createdAt }
+				),
+			)
+		}
+	}
+
+	private fun removeLocalActivity(activity: ProfileActivityItem) {
+		_uiState.update { state ->
+			state.copy(activities = state.activities.filterNot { it.sourceId == activity.sourceId })
+		}
+	}
+
+	private suspend fun updateActivityBackends(activity: ProfileActivityItem, updates: Map<String, Any>) {
+		when (activity.type) {
+			"create_post" -> {
+				postRef(activity)?.update(updates)?.await()
+				activityRef(activity)?.update(updates)?.await()
+			}
+			else -> activityRef(activity)?.update(updates)?.await()
+		}
+	}
+
+	private suspend fun deleteActivityBackends(activity: ProfileActivityItem) {
+		when (activity.type) {
+			"create_post" -> {
+				postRef(activity)?.delete()?.await()
+				activityRef(activity)?.delete()?.await()
+			}
+			else -> activityRef(activity)?.delete()?.await()
+		}
+	}
+
+	private fun normalizeTimestamp(timestamp: Long): Long {
+		if (timestamp <= 0L) return 0L
+		return if (timestamp < 100_000_000_000L) timestamp * 1000L else timestamp
 	}
 
 	fun togglePushNotifications() {
@@ -296,6 +722,15 @@ class ProfileViewModel(
 	fun acceptFriendRequest(requestId: String) {
 		viewModelScope.launch {
 			val result = userRepository.acceptFriendRequest(requestId)
+			result.onSuccess {
+				_uiState.update { state ->
+					state.copy(
+						friendRequests = state.friendRequests.filterNot { it.id == requestId },
+						outgoingFriendRequests = state.outgoingFriendRequests.filterNot { it.id == requestId },
+						stats = state.stats.copy(friendRequests = (state.stats.friendRequests - 1).coerceAtLeast(0)),
+					)
+				}
+			}
 			result.onFailure { error ->
 				_uiState.update { it.copy(error = error.message) }
 			}
@@ -305,6 +740,15 @@ class ProfileViewModel(
 	fun rejectFriendRequest(requestId: String) {
 		viewModelScope.launch {
 			val result = userRepository.rejectFriendRequest(requestId)
+			result.onSuccess {
+				_uiState.update { state ->
+					state.copy(
+						friendRequests = state.friendRequests.filterNot { it.id == requestId },
+						outgoingFriendRequests = state.outgoingFriendRequests.filterNot { it.id == requestId },
+						stats = state.stats.copy(friendRequests = (state.stats.friendRequests - 1).coerceAtLeast(0)),
+					)
+				}
+			}
 			result.onFailure { error ->
 				_uiState.update { it.copy(error = error.message) }
 			}
@@ -314,6 +758,13 @@ class ProfileViewModel(
 	fun cancelFriendRequest(requestId: String) {
 		viewModelScope.launch {
 			val result = userRepository.cancelFriendRequest(requestId)
+			result.onSuccess {
+				_uiState.update { state ->
+					state.copy(
+						outgoingFriendRequests = state.outgoingFriendRequests.filterNot { it.id == requestId },
+					)
+				}
+			}
 			result.onFailure { error ->
 				_uiState.update { it.copy(error = error.message) }
 			}
@@ -338,6 +789,15 @@ class ProfileViewModel(
 				val result = userRepository.sendFriendRequest(userId, toUserId)
 				result.onSuccess {
 					android.util.Log.d("ProfileViewModel", "Friend request sent successfully from $userId to $toUserId")
+					runCatching {
+						NotificationLogger.notifyUser(
+							toUserId = toUserId,
+							type = "friend_request",
+							title = "New Follow Request",
+							body = "Someone sent you a follow request",
+							targetId = userId,
+						)
+					}
 				}
 				result.onFailure { error ->
 					android.util.Log.e("ProfileViewModel", "Error sending friend request: ${error.message}")
@@ -351,11 +811,275 @@ class ProfileViewModel(
 		_uiState.update { it.copy(error = null) }
 	}
 
+	private fun activityRef(activity: ProfileActivityItem): com.google.firebase.firestore.DocumentReference? {
+		val userId = currentUserId ?: return null
+		val sourceId = activity.sourceId ?: return null
+		return FirebaseFirestore.getInstance().collection("users").document(userId).collection("activities").document(sourceId)
+	}
+
+	private fun postRef(activity: ProfileActivityItem): com.google.firebase.firestore.DocumentReference? {
+		val sourceId = activity.sourceId ?: return null
+		return FirebaseFirestore.getInstance().collection("posts").document(sourceId)
+	}
+
+	fun pinPostActivity(activity: ProfileActivityItem, isPinned: Boolean = true) {
+		viewModelScope.launch {
+			try {
+				updateLocalActivity(activity) { current ->
+					current.copy(isPinned = isPinned)
+				}
+				updateActivityBackends(
+					activity,
+					mapOf(
+						"isPinned" to isPinned,
+						"pinnedAt" to if (isPinned) System.currentTimeMillis() else 0L,
+					),
+				)
+				ActivityLogger.logAction(
+					type = if (isPinned) "pin_post" else "unpin_post",
+					text = if (isPinned) "Pinned post ${activity.postId ?: activity.sourceId ?: activity.text}" else "Unpinned post ${activity.postId ?: activity.sourceId ?: activity.text}",
+				)
+			} catch (error: Exception) {
+				_uiState.update { it.copy(error = error.message ?: "Failed to update pin state") }
+			}
+		}
+	}
+
+	fun editPostActivity(activity: ProfileActivityItem) {
+		viewModelScope.launch {
+			try {
+				val updatedAt = System.currentTimeMillis()
+				updateLocalActivity(activity) { current ->
+					current.copy(updatedAt = updatedAt)
+				}
+				updateActivityBackends(
+					activity,
+					mapOf(
+						"updatedAt" to updatedAt,
+					),
+				)
+				ActivityLogger.logAction(
+					type = "edit_post",
+					text = "Edited ${activity.postId ?: activity.sourceId ?: activity.text}",
+				)
+			} catch (error: Exception) {
+				_uiState.update { it.copy(error = error.message ?: "Failed to update activity") }
+			}
+		}
+	}
+
+	fun updatePostVisibility(activity: ProfileActivityItem, visibility: com.example.kampus.ui.feed.PostItem.PostVisibility) {
+		viewModelScope.launch {
+			try {
+				val payload = mapOf(
+					"visibility" to visibility.name.lowercase(),
+					"updatedAt" to System.currentTimeMillis(),
+				)
+				updateLocalActivity(activity) { current ->
+					current.copy(postVisibility = visibility)
+				}
+				updateActivityBackends(activity, payload)
+				ActivityLogger.logAction(
+					type = "edit_privacy",
+					text = "Updated visibility for ${activity.postId ?: activity.sourceId ?: activity.text} to $visibility",
+				)
+			} catch (error: Exception) {
+				_uiState.update { it.copy(error = error.message ?: "Failed to update privacy") }
+			}
+		}
+	}
+
+	fun deletePostFromProfile(activity: ProfileActivityItem) {
+		viewModelScope.launch {
+			try {
+				removeLocalActivity(activity)
+				deleteActivityBackends(activity)
+			} catch (error: Exception) {
+				_uiState.update { it.copy(error = error.message ?: "Failed to delete activity") }
+			}
+		}
+	}
+
+	fun hideFromProfile(activity: ProfileActivityItem) {
+		viewModelScope.launch {
+			try {
+				val payload = mapOf(
+					"hiddenFromProfile" to true,
+					"updatedAt" to System.currentTimeMillis(),
+				)
+				removeLocalActivity(activity)
+				updateActivityBackends(activity, payload)
+				ActivityLogger.logAction(
+					type = "hide_from_profile",
+					text = "Hid post ${activity.postId ?: activity.sourceId ?: activity.text} from profile",
+				)
+			} catch (error: Exception) {
+				_uiState.update { it.copy(error = error.message ?: "Failed to hide activity") }
+			}
+		}
+	}
+
+	fun archiveActivity(activity: ProfileActivityItem) {
+		viewModelScope.launch {
+			try {
+				val payload = mapOf(
+					"archivedAt" to System.currentTimeMillis(),
+					"hiddenFromProfile" to true,
+					"updatedAt" to System.currentTimeMillis(),
+				)
+				removeLocalActivity(activity)
+				updateActivityBackends(activity, payload)
+				ActivityLogger.logAction(
+					type = "archive_activity",
+					text = "Archived ${activity.postId ?: activity.sourceId ?: activity.text}",
+				)
+			} catch (error: Exception) {
+				_uiState.update { it.copy(error = error.message ?: "Failed to archive activity") }
+			}
+		}
+	}
+
+	fun toggleActivityNotifications(activity: ProfileActivityItem) {
+		viewModelScope.launch {
+			try {
+				val payload = mapOf(
+					"notificationsEnabled" to true,
+					"updatedAt" to System.currentTimeMillis(),
+				)
+				updateLocalActivity(activity) { current ->
+					current.copy(updatedAt = System.currentTimeMillis())
+				}
+				updateActivityBackends(activity, payload)
+				ActivityLogger.logAction(
+					type = "activity_notifications",
+					text = "Toggled notifications for ${activity.postId ?: activity.sourceId ?: activity.text}",
+				)
+			} catch (error: Exception) {
+				_uiState.update { it.copy(error = error.message ?: "Failed to update notifications") }
+			}
+		}
+	}
+
 	fun logShareProfileActivity() {
 		ActivityLogger.logAction(
 			type = "share_profile",
 			text = "Shared profile",
 		)
+	}
+
+	fun toggleActivityLove(activity: ProfileActivityItem) {
+		viewModelScope.launch {
+			try {
+				currentUserId?.let { userId ->
+					val isLoved = activity.currentUserLoved
+					val newLoveList = activity.loveList.toMutableList()
+					
+					if (isLoved) {
+						newLoveList.remove(userId)
+					} else {
+						if (!newLoveList.contains(userId)) newLoveList.add(userId)
+					}
+					
+					val payload = mapOf(
+						"loveList" to newLoveList,
+						"likeCount" to newLoveList.size,
+						"updatedAt" to System.currentTimeMillis(),
+					)
+					
+					updateLocalActivity(activity) { current ->
+						current.copy(
+							loveList = newLoveList,
+							likeCount = newLoveList.size,
+							currentUserLoved = !isLoved,
+							updatedAt = System.currentTimeMillis(),
+						)
+					}
+					
+					updateActivityBackends(activity, payload)
+				}
+			} catch (error: Exception) {
+				_uiState.update { it.copy(error = error.message ?: "Failed to love activity") }
+			}
+		}
+	}
+
+	fun addActivityComment(activity: ProfileActivityItem, commentText: String) {
+		viewModelScope.launch {
+			try {
+				currentUserId?.let { userId ->
+					val user = _uiState.value
+					val newComment = ActivityComment(
+						id = "${userId}_${System.currentTimeMillis()}",
+						userId = userId,
+						userName = user.displayName.ifBlank { "You" },
+						userAvatar = user.avatarEmoji,
+						text = commentText,
+						createdAt = System.currentTimeMillis(),
+					)
+					
+					val newCommentsList = (activity.commentsList + newComment).takeLast(10) // Keep last 10
+					val payload = mapOf(
+						"commentsList" to newCommentsList.map {
+							mapOf(
+								"id" to it.id,
+								"userId" to it.userId,
+								"userName" to it.userName,
+								"userAvatar" to it.userAvatar,
+								"text" to it.text,
+								"createdAt" to it.createdAt,
+							)
+						},
+						"commentCount" to newCommentsList.size,
+						"updatedAt" to System.currentTimeMillis(),
+					)
+					
+					updateLocalActivity(activity) { current ->
+						current.copy(
+							commentsList = newCommentsList,
+							commentCount = newCommentsList.size,
+							updatedAt = System.currentTimeMillis(),
+						)
+					}
+					
+					updateActivityBackends(activity, payload)
+				}
+			} catch (error: Exception) {
+				_uiState.update { it.copy(error = error.message ?: "Failed to add comment") }
+			}
+		}
+	}
+
+	fun shareActivity(activity: ProfileActivityItem) {
+		viewModelScope.launch {
+			try {
+				currentUserId?.let { userId ->
+					val newShareCount = activity.shareCount + 1
+					val payload = mapOf(
+						"shareCount" to newShareCount,
+						"updatedAt" to System.currentTimeMillis(),
+					)
+					
+					updateLocalActivity(activity) { current ->
+						current.copy(
+							shareCount = newShareCount,
+							updatedAt = System.currentTimeMillis(),
+						)
+					}
+					
+					updateActivityBackends(activity, payload)
+					
+					val shareLink = "${getShareProfileLink()}/activity/${activity.sourceId}"
+					val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+						type = "text/plain"
+						putExtra(android.content.Intent.EXTRA_SUBJECT, "Check out this activity on KAMPUS")
+						putExtra(android.content.Intent.EXTRA_TEXT, "Check out this ${activity.type.replace("create_", "")} on KAMPUS: $shareLink")
+					}
+					// Note: Actual sharing happens in UI layer with context
+				}
+			} catch (error: Exception) {
+				_uiState.update { it.copy(error = error.message ?: "Failed to share activity") }
+			}
+		}
 	}
 
 	fun getShareProfileLink(): String? {
@@ -563,8 +1287,64 @@ class ProfileViewModel(
 		}
 	}
 
+	private fun observeBlockedUsers(userId: String) {
+		blockedUsersListener?.remove()
+		blockedUsersListener = FirebaseFirestore.getInstance()
+			.collection("users")
+			.document(userId)
+			.collection("blockedUsers")
+			.addSnapshotListener { snapshot, error ->
+				if (error != null) {
+					android.util.Log.e("ProfileViewModel", "Error loading blocked users: ${error.message}")
+					return@addSnapshotListener
+				}
+
+				if (snapshot == null) return@addSnapshotListener
+
+				val blockedUsers = snapshot.documents.mapNotNull { doc ->
+					val blockedUserId = doc.id
+					val displayName = doc.getString("displayName") ?: ""
+					val handle = doc.getString("handle") ?: ""
+					val profileImageUrl = doc.getString("profileImageUrl") ?: ""
+					val avatarEmoji = doc.getString("avatarEmoji") ?: "🎓"
+					Friend(
+						userId = blockedUserId,
+						displayName = displayName,
+						handle = handle,
+						profileImageUrl = profileImageUrl,
+						avatarEmoji = avatarEmoji,
+						isOnline = false
+					)
+				}
+
+				_uiState.update { it.copy(blockedUsers = blockedUsers) }
+			}
+	}
+
+	fun unblockUser(blockedUserId: String) {
+		currentUserId?.let { userId ->
+			viewModelScope.launch {
+				try {
+					FirebaseFirestore.getInstance()
+						.collection("users")
+						.document(userId)
+						.collection("blockedUsers")
+						.document(blockedUserId)
+						.delete()
+						.await()
+				} catch (e: Exception) {
+					android.util.Log.e("ProfileViewModel", "Error unblocking user: ${e.message}")
+					_uiState.update { it.copy(error = "Failed to unblock user: ${e.message}") }
+				}
+			}
+		}
+	}
+
 	override fun onCleared() {
 		super.onCleared()
 		activityListener?.remove()
+		notificationSettingsListener?.remove()
+		privacySettingsListener?.remove()
+		blockedUsersListener?.remove()
 	}
 }

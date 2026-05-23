@@ -1,0 +1,11 @@
+{
+  "name": "kampus-scripts",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "backfill:chat-previews": "node backfill-chat-previews.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^11.10.0"
+  }
+}
