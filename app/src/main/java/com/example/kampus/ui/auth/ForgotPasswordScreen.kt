@@ -24,14 +24,16 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.kampus.ui.localization.rememberUiStrings
 
-private val FBg     = Color(0xFF0A0D14)
-private val FCard   = Color(0xFF111827)
-private val FBorder = Color(0xFF1E2A3A)
-private val FBlue   = Color(0xFF3B82F6)
-private val FGlow   = Color(0xFF2563EB)
-private val FWhite  = Color(0xFFFFFFFF)
-private val FGray5  = Color(0xFF6B7280)
+private val UiIsDark = true
+private val FBg      get() = Color(0xFF0A0D14)
+private val FCard    get() = Color(0xFF111827)
+private val FBorder  get() = Color(0xFF1E2A3A)
+private val FBlue    get() = Color(0xFF0D7FFF)
+private val FGlow    get() = FBlue.copy(alpha = 0.75f)
+private val FWhite   get() = Color(0xFFFFFFFF)
+private val FGray5   get() = Color(0xFF6B7280)
 
 @Composable
 fun ForgotPasswordScreen(
@@ -39,6 +41,7 @@ fun ForgotPasswordScreen(
     onBackClick   : () -> Unit    = {},
     authViewModel : AuthViewModel = viewModel()
 ) {
+    val strings = rememberUiStrings()
     var selectedOption by remember { mutableIntStateOf(0) }
     var emailInput     by remember { mutableStateOf("") }
     var phoneInput     by remember { mutableStateOf("") }
@@ -229,7 +232,7 @@ fun ForgotPasswordScreen(
                     Icons.Default.Info, null,
                     tint = FGray5.copy(alpha = 0.6f), modifier = Modifier.size(13.dp)
                 )
-                Text("You'll receive a 6-digit code shortly", color = FGray5, fontSize = 12.sp)
+                Text(strings.youWillReceiveCodeShortly, color = FGray5, fontSize = 12.sp)
             }
 
             Spacer(Modifier.height(40.dp))

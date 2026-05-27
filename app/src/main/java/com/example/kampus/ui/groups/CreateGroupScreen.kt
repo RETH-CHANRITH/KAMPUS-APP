@@ -26,6 +26,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.kampus.ui.groups.GroupColors as C
 
 private val emojiOptions = listOf("🎨","🌀","💻","📷","✏️","🎵","🚀","🌸","⚽","🎮","📚","🍕","🌍","🎬","🏋️")
@@ -51,6 +52,7 @@ private val categoryOptions = listOf(
 fun CreateGroupScreen(
     onBack   : () -> Unit = {},
     onCreate : (GroupData) -> Unit = {},
+    viewModel: GroupViewModel = viewModel(),
 ) {
     var name        by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
@@ -114,20 +116,22 @@ fun CreateGroupScreen(
                             enabled           = canCreate,
                         ) {
                             val grad = gradientOptions[gradIndex]
-                            onCreate(
-                                GroupData(
-                                    id          = (100..999).random(),
-                                    name        = name,
-                                    category    = category,
-                                    coverColor1 = grad.first,
-                                    coverColor2 = grad.second,
-                                    coverEmoji  = emoji,
-                                    members     = "1",
-                                    posts       = "0",
-                                    isJoined    = true,
-                                    description = description,
-                                )
+                            val groupData = GroupData(
+                                id          = (100..999).random(),
+                                name        = name,
+                                category    = category,
+                                coverColor1 = grad.first,
+                                coverColor2 = grad.second,
+                                coverEmoji  = emoji,
+                                members     = "1",
+                                posts       = "0",
+                                isJoined    = true,
+                                description = description,
                             )
+                            // Create the group and log activity
+                            viewModel.createGroup(groupData)
+                            // Also call the original onCreate callback for navigation
+                            onCreate(groupData)
                         },
                     contentAlignment = Alignment.Center,
                 ) {

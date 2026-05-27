@@ -1,19 +1,57 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Kampus" parent="Theme.AppCompat.Light.NoActionBar" />
 
-    <!-- Custom theme for UCrop Activity with safe area insets -->
-    <style name="UCropActivityTheme" parent="Theme.AppCompat.Light.NoActionBar">
-        <!-- Ensure navigation bar visibility and color -->
-        <item name="android:navigationBarColor">#000000</item>
+    <!--
+        Base app theme — forced dark, no action bar.
+        Parent: DayNight.NoActionBar (always available via appcompat).
+        All system bar colors locked to #080B11 so there is zero white
+        flash on any device or API level.
+    -->
+    <style name="Theme.Kampus" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <!-- Match Compose dark canvas exactly -->
+        <item name="android:windowBackground">#080B11</item>
+        <!-- System bar colours — must be opaque dark, not transparent -->
+        <item name="android:statusBarColor">#080B11</item>
+        <item name="android:navigationBarColor">#080B11</item>
+        <!-- false → status/nav bar icons are WHITE (correct for dark background) -->
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <!-- Compose draws its own inset handling -->
         <item name="android:windowDrawsSystemBarBackgrounds">true</item>
-        
-        <!-- Ensure content is drawn behind system bars, but respects insets -->
+        <item name="android:windowTranslucentStatus">false</item>
+        <item name="android:windowTranslucentNavigation">false</item>
+        <!-- Disable the window's own action bar entirely -->
+        <item name="windowNoTitle">true</item>
+        <item name="windowActionBar">false</item>
+    </style>
+
+    <!--
+        Splash-screen theme (AndroidX SplashScreen API — API 12+).
+        Background and icon background must match the dark palette so
+        there is zero white frame during app start-up.
+    -->
+    <style name="Theme.Kampus.Launcher" parent="Theme.SplashScreen">
+        <!-- Use a full-screen drawable background that includes the centered logo
+             so the system splash won't mask the icon into a circular fragment. -->
+        <item name="windowSplashScreenBackground">@drawable/splash_background_full</item>
+        <item name="postSplashScreenTheme">@style/Theme.Kampus</item>
+    </style>
+
+    <!--
+        UCrop activity — also dark so there is no jarring white screen
+        when the user opens the image cropper.
+    -->
+    <style name="UCropActivityTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowBackground">#080B11</item>
+        <item name="android:statusBarColor">#080B11</item>
+        <item name="android:navigationBarColor">#000000</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
         <item name="android:fitsSystemWindows">true</item>
-        
-        <!-- Add bottom padding to keep controls above navigation bar -->
         <item name="android:windowFullscreen">false</item>
         <item name="android:windowActionBar">false</item>
         <item name="android:windowNoTitle">true</item>
     </style>
+
 </resources>

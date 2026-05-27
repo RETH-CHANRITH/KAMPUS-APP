@@ -48,26 +48,25 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage
 import com.example.kampus.ui.components.CampusBottomNavBar
+import com.example.kampus.ui.localization.rememberUiStrings
 
-private val ABg = Color(0xFF1A1D2E)
-private val ACard = Color(0xFF252A41)
-private val ABorder = Color(0xFF364153)
-private val ABlue = Color(0xFF0D7FFF)
-private val APurple = Color(0xFF7C3AED)
-private val AWhite = Color(0xFFFFFFFF)
-private val ASubtle = Color(0xFF99A1AF)
-private val ARed = Color(0xFFEF4444)
-private val ANavBg = Color(0xFF0C1018)
+// Note: This screen now uses ProfileColors for dynamic theming
+
 
 private data class AboutNavItem(
     val label: String,
@@ -91,13 +90,17 @@ fun AboutScreen(
     onChatClick: () -> Unit,
     onCreatePost: () -> Unit,
     onProfileClick: () -> Unit,
+    supportViewModel: SupportContentViewModel = viewModel(),
 ) {
+    val strings = rememberUiStrings()
     val selectedNav = remember { mutableIntStateOf(0) }
+    val supportContent by supportViewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(ABg),
+            .background(ProfileColors.Bg),
     ) {
         LazyColumn(
             modifier = Modifier
@@ -117,14 +120,14 @@ fun AboutScreen(
                         modifier = Modifier
                             .size(40.dp)
                             .clip(CircleShape)
-                            .background(ACard)
-                            .border(1.dp, ABorder, CircleShape)
+                            .background(ProfileColors.Card)
+                            .border(1.dp, ProfileColors.Border, CircleShape)
                             .clickable(onClick = onBack),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back", tint = AWhite)
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = strings.back, tint = ProfileColors.White)
                     }
-                    Text("About", color = AWhite, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    Text(strings.aboutTitle, color = ProfileColors.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                     Box(Modifier.size(40.dp))
                 }
             }
@@ -139,21 +142,49 @@ fun AboutScreen(
                         modifier = Modifier
                             .size(96.dp)
                             .clip(RoundedCornerShape(24.dp))
-                            .background(Brush.linearGradient(listOf(ABlue, APurple))),
+                            .background(Brush.linearGradient(listOf(ProfileColors.Blue, ProfileColors.Purple))),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text("K", color = AWhite, fontSize = 48.sp, fontWeight = FontWeight.Bold)
+                        if (supportContent.appLogoUrl.isNotBlank()) {
+                            AsyncImage(
+                                model = supportContent.appLogoUrl,
+                                contentDescription = supportContent.appName,
+                                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)),
+                                contentScale = ContentScale.Crop,
+                            )
+                        } else {
+                            Text(
+                                text = supportContent.appLogoFallbackText.ifBlank {
+                                    supportContent.appName.firstOrNull()?.uppercaseChar()?.toString() ?: "K"
+                                },
+                                color = ProfileColors.White,
+                                fontSize = 48.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
                     }
-                    Text("KAMPUS", color = AWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                    Text("Version 1.0.0", color = ASubtle, fontSize = 15.sp)
+                    Text(supportContent.appName, color = ProfileColors.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                    Text("${strings.version} ${supportContent.aboutVersion}", color = ProfileColors.Subtle, fontSize = 15.sp)
                 }
             }
 
             item {
-                AboutActionRow("Privacy Policy", Icons.Outlined.Description)
+                AboutActionRow(
+                    title = supportContent.aboutActions.getOrNull(0)?.title ?: "Privacy Policy",
+                    icon = SupportContentViewModel.iconForAbout(supportContent.aboutActions.getOrNull(0)?.iconKey ?: "privacy"),
+                    onClick = {
+                        openWebPage(context, supportContent.aboutActions.getOrNull(0)?.actionUrl?.ifBlank { "https://kampus.app/privacy" } ?: "https://kampus.app/privacy")
+                    },
+                )
             }
             item {
-                AboutActionRow("Open Source Licenses", Icons.Outlined.Gavel)
+                AboutActionRow(
+                    title = supportContent.aboutActions.getOrNull(1)?.title ?: "Open Source Licenses",
+                    icon = SupportContentViewModel.iconForAbout(supportContent.aboutActions.getOrNull(1)?.iconKey ?: "licenses"),
+                    onClick = {
+                        openWebPage(context, supportContent.aboutActions.getOrNull(1)?.actionUrl?.ifBlank { "https://kampus.app/licenses" } ?: "https://kampus.app/licenses")
+                    },
+                )
             }
 
             item {
@@ -161,15 +192,15 @@ fun AboutScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
-                        .background(ACard)
-                        .border(1.dp, ABorder, RoundedCornerShape(14.dp))
+                        .background(ProfileColors.Card)
+                        .border(1.dp, ProfileColors.Border, RoundedCornerShape(14.dp))
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text("Credits", color = AWhite, fontSize = 18.sp, fontWeight = FontWeight.Medium)
-                    Text("- Icons by Lucide Icons", color = ASubtle, fontSize = 14.sp)
-                    Text("- Images by Unsplash", color = ASubtle, fontSize = 14.sp)
-                    Text("- Built with Android Compose", color = ASubtle, fontSize = 14.sp)
+                    Text(strings.credits, color = ProfileColors.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                    Text(strings.iconsBy, color = ProfileColors.Subtle, fontSize = 14.sp)
+                    Text(strings.imagesBy, color = ProfileColors.Subtle, fontSize = 14.sp)
+                    Text(strings.builtWith, color = ProfileColors.Subtle, fontSize = 14.sp)
                 }
             }
 
@@ -179,8 +210,8 @@ fun AboutScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Text("© 2026 KAMPUS Inc.", color = ASubtle, fontSize = 14.sp)
-                    Text("Made with love for connecting people", color = ASubtle, fontSize = 14.sp)
+                    Text(strings.copyright, color = ProfileColors.Subtle, fontSize = 14.sp)
+                    Text(strings.madeWithLove, color = ProfileColors.Subtle, fontSize = 14.sp)
                 }
             }
         }
@@ -189,7 +220,7 @@ fun AboutScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
-                .background(Brush.verticalGradient(listOf(Color.Transparent, ABg.copy(alpha = 0.98f))))
+                .background(Brush.verticalGradient(listOf(Color.Transparent, ProfileColors.Bg.copy(alpha = 0.98f))))
                 .padding(horizontal = 14.dp, vertical = 10.dp)
                 .navigationBarsPadding(),
         ) {
@@ -213,14 +244,14 @@ fun AboutScreen(
 }
 
 @Composable
-private fun AboutActionRow(title: String, icon: ImageVector) {
+private fun AboutActionRow(title: String, icon: ImageVector, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
-            .background(ACard)
-            .border(1.dp, ABorder, RoundedCornerShape(14.dp))
-            .clickable { }
+            .background(ProfileColors.Card)
+            .border(1.dp, ProfileColors.Border, RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -230,13 +261,13 @@ private fun AboutActionRow(title: String, icon: ImageVector) {
                 modifier = Modifier
                     .size(40.dp)
                     .clip(CircleShape)
-                    .background(ABlue.copy(alpha = 0.15f)),
+                    .background(ProfileColors.Blue.copy(alpha = 0.15f)),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(icon, contentDescription = null, tint = ABlue)
+                Icon(icon, contentDescription = null, tint = ProfileColors.Blue)
             }
-            Text(title, color = AWhite, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            Text(title, color = ProfileColors.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
         }
-        Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null, tint = ASubtle)
+        Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null, tint = ProfileColors.Subtle)
     }
 }

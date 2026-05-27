@@ -17,6 +17,7 @@ import kotlinx.coroutines.tasks.await
 
 data class FriendsUiState(
     val friends: List<FriendItemData> = emptyList(),
+    val legacyFriends: List<FriendItemData> = emptyList(),
     val followers: List<FriendItemData> = emptyList(),
     val following: List<FriendItemData> = emptyList(),
     val isLoading: Boolean = false,
@@ -46,6 +47,8 @@ class FriendsViewModel : ViewModel() {
     private var friendProfileListeners: List<ListenerRegistration> = emptyList()
     private var followerProfileListeners: List<ListenerRegistration> = emptyList()
     private var followingProfileListeners: List<ListenerRegistration> = emptyList()
+    private var legacyFriendsListener: ListenerRegistration? = null
+    private val mutualGraphListeners: MutableMap<String, List<ListenerRegistration>> = mutableMapOf()
     
     init {
         observeFriendsAndFollowers()
@@ -59,6 +62,27 @@ class FriendsViewModel : ViewModel() {
         }
         
         _uiState.update { it.copy(isLoading = true) }
+
+        legacyFriendsListener?.remove()
+        legacyFriendsListener = firestore.collection("users")
+            .document(currentUserId!!)
+            .collection("friends")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    _uiState.update { state -> state.copy(error = error.message) }
+                    return@addSnapshotListener
+                }
+
+                val legacyFriends = snapshot?.documents?.mapNotNull { doc ->
+                    doc.toFriendItemData()
+                } ?: emptyList()
+
+                _uiState.update { state ->
+                    state.copy(legacyFriends = legacyFriends).withComputedFriends()
+                }
+                observeFriendProfiles(legacyFriends.map { it.userId })
+                calculateMutualFriends(legacyFriends, isFriends = true)
+            }
         
         // Observe followers
         viewModelScope.launch {
@@ -79,6 +103,8 @@ class FriendsViewModel : ViewModel() {
                         val updated = state.copy(followers = followersWithMutuals, isLoading = false)
                         updated.withComputedFriends()
                     }
+                    observeFriendProfiles((_uiState.value.friends + followersWithMutuals).map { it.userId })
+                    syncMutualGraphListeners()
                     observeFollowerProfiles(followersWithMutuals.map { it.userId })
                     calculateMutualFriends(followersWithMutuals, isFriends = false)
                 }
@@ -107,6 +133,8 @@ class FriendsViewModel : ViewModel() {
                         val updated = state.copy(following = followingWithMutuals, isLoading = false)
                         updated.withComputedFriends()
                     }
+                    observeFriendProfiles((_uiState.value.friends + followingWithMutuals).map { it.userId })
+                    syncMutualGraphListeners()
                     observeFollowingProfiles(followingWithMutuals.map { it.userId })
                     calculateMutualFriends(followingWithMutuals, isFollowing = true)
                 }
@@ -181,23 +209,105 @@ class FriendsViewModel : ViewModel() {
             if (isFriends) {
                 _uiState.update { state -> state.copy(friends = updatedItems).withComputedFriends() }
             } else if (isFollowing) {
-                _uiState.update { state -> state.copy(following = updatedItems) }
+                _uiState.update { state -> state.copy(following = updatedItems).withComputedFriends() }
             } else {
-                _uiState.update { state -> state.copy(followers = updatedItems) }
+                _uiState.update { state -> state.copy(followers = updatedItems).withComputedFriends() }
+            }
+            syncMutualGraphListeners()
+        }
+    }
+
+    private fun syncMutualGraphListeners() {
+        val targetIds = (_uiState.value.followers.map { it.userId } + _uiState.value.following.map { it.userId })
+            .toSet()
+
+        val obsoleteIds = mutualGraphListeners.keys - targetIds
+        obsoleteIds.forEach { userId ->
+            mutualGraphListeners.remove(userId)?.forEach { it.remove() }
+        }
+
+        val newIds = targetIds - mutualGraphListeners.keys
+        newIds.forEach { targetUserId ->
+            val followersListener = firestore.collection("users")
+                .document(targetUserId)
+                .collection("followers")
+                .addSnapshotListener { _, error ->
+                    if (error == null) recalculateMutualForUser(targetUserId)
+                }
+
+            val followingListener = firestore.collection("users")
+                .document(targetUserId)
+                .collection("following")
+                .addSnapshotListener { _, error ->
+                    if (error == null) recalculateMutualForUser(targetUserId)
+                }
+
+            mutualGraphListeners[targetUserId] = listOf(followersListener, followingListener)
+        }
+    }
+
+    private fun recalculateMutualForUser(targetUserId: String) {
+        viewModelScope.launch {
+            val mutualCount = getMutualFriendsCount(targetUserId)
+            _uiState.update { state ->
+                state.copy(
+                    friends = state.friends.map { item ->
+                        if (item.userId == targetUserId) item.copy(mutualFriendsCount = mutualCount) else item
+                    },
+                    followers = state.followers.map { item ->
+                        if (item.userId == targetUserId) item.copy(mutualFriendsCount = mutualCount) else item
+                    },
+                    following = state.following.map { item ->
+                        if (item.userId == targetUserId) item.copy(mutualFriendsCount = mutualCount) else item
+                    },
+                ).withComputedFriends()
             }
         }
     }
     
     private suspend fun getMutualFriendsCount(targetUserId: String): Int {
         return try {
-            val targetUserFriends = firestore.collection("users")
+            val me = currentUserId ?: return 0
+            val currentFriendIds = allFriendsIds
+                .filterNot { it == me || it == targetUserId }
+                .toSet()
+
+            if (currentFriendIds.isEmpty()) return 0
+
+            // A friend is modeled as mutual follow; compute target friends from followers ∩ following.
+            val targetFollowers = firestore.collection("users")
+                .document(targetUserId)
+                .collection("followers")
+                .get()
+                .await()
+            val targetFollowing = firestore.collection("users")
+                .document(targetUserId)
+                .collection("following")
+                .get()
+                .await()
+
+            val targetFollowerIds = targetFollowers.documents.map { doc ->
+                doc.getString("userId") ?: doc.id
+            }.toSet()
+            val targetFollowingIds = targetFollowing.documents.map { doc ->
+                doc.getString("userId") ?: doc.id
+            }.toSet()
+            val targetMutualFollowIds = (targetFollowerIds intersect targetFollowingIds)
+                .filterNot { it == me || it == targetUserId }
+                .toSet()
+
+            // Backward-compatibility: include legacy users/{id}/friends ids when present.
+            val targetLegacyFriends = firestore.collection("users")
                 .document(targetUserId)
                 .collection("friends")
                 .get()
                 .await()
-            
-            val targetFriendsIds = targetUserFriends.documents.mapNotNull { it.getString("userId") }.toSet()
-            (allFriendsIds intersect targetFriendsIds).size
+            val targetLegacyFriendIds = targetLegacyFriends.documents.mapNotNull { doc ->
+                doc.getString("userId") ?: doc.id
+            }.filterNot { it == me || it == targetUserId }.toSet()
+
+            val targetFriendGraph = targetMutualFollowIds + targetLegacyFriendIds
+            (currentFriendIds intersect targetFriendGraph).size
         } catch (e: Exception) {
             0
         }
@@ -210,22 +320,59 @@ class FriendsViewModel : ViewModel() {
                 
                 val followerData = _uiState.value.followers.find { it.userId == followerUserId } ?: return@launch
 
-                // Follow back: add to current user's following.
-                firestore.collection("users")
+                val currentUserDoc = firestore.collection("users")
                     .document(currentUserId!!)
-                    .collection("following")
-                    .document(followerUserId)
-                    .set(mapOf(
-                        "userId" to followerUserId,
-                        "displayName" to followerData.name,
-                        "handle" to followerData.handle,
-                        "avatarEmoji" to followerData.avatarEmoji,
-                        "profileImageUrl" to followerData.profileImageUrl,
-                        "isOnline" to followerData.isOnline,
-                        "isMutual" to true,
-                        "addedAt" to com.google.firebase.Timestamp.now(),
-                    ))
+                    .get()
                     .await()
+
+                val now = System.currentTimeMillis()
+                val followingData = mapOf(
+                    "userId" to followerUserId,
+                    "displayName" to followerData.name,
+                    "handle" to followerData.handle,
+                    "avatarEmoji" to followerData.avatarEmoji,
+                    "profileImageUrl" to followerData.profileImageUrl,
+                    "isOnline" to followerData.isOnline,
+                    "isMutual" to true,
+                    "createdAt" to now,
+                )
+                val followerDataForTarget = mapOf(
+                    "userId" to currentUserId!!,
+                    "displayName" to (currentUserDoc.getString("displayName") ?: ""),
+                    "handle" to (currentUserDoc.getString("handle") ?: ""),
+                    "avatarEmoji" to (currentUserDoc.getString("avatarEmoji") ?: "👤"),
+                    "profileImageUrl" to (currentUserDoc.getString("profileImageUrl") ?: ""),
+                    "isOnline" to (currentUserDoc.getBoolean("isOnline") ?: false),
+                    "isMutual" to true,
+                    "createdAt" to now,
+                )
+
+                runCatching {
+                    val batch = firestore.batch()
+                    batch.set(
+                        firestore.collection("users")
+                            .document(currentUserId!!)
+                            .collection("following")
+                            .document(followerUserId),
+                        followingData,
+                    )
+                    batch.set(
+                        firestore.collection("users")
+                            .document(followerUserId)
+                            .collection("followers")
+                            .document(currentUserId!!),
+                        followerDataForTarget,
+                    )
+                    batch.commit().await()
+                }.getOrElse {
+                    // Fallback for stricter security rules: keep local following consistent.
+                    firestore.collection("users")
+                        .document(currentUserId!!)
+                        .collection("following")
+                        .document(followerUserId)
+                        .set(followingData)
+                        .await()
+                }
 
                 // Keep follower visible in Followers tab; add to Following tab if not already present.
                 _uiState.update { state ->
@@ -234,6 +381,7 @@ class FriendsViewModel : ViewModel() {
                         following = if (alreadyFollowing) state.following else state.following + followerData,
                     ).withComputedFriends()
                 }
+                syncMutualGraphListeners()
                 observeFollowingProfiles(_uiState.value.following.map { it.userId })
             } catch (e: Exception) {
                 _uiState.update { state -> state.copy(error = e.message) }
@@ -270,6 +418,7 @@ class FriendsViewModel : ViewModel() {
                         following = state.following.filter { it.userId != followingUserId },
                     ).withComputedFriends()
                 }
+                syncMutualGraphListeners()
             } catch (e: Exception) {
                 _uiState.update { state -> state.copy(error = e.message) }
             }
@@ -283,7 +432,7 @@ class FriendsViewModel : ViewModel() {
 
                 val blockedData = mapOf(
                     "userId" to userId,
-                    "blockedAt" to com.google.firebase.Timestamp.now(),
+                    "blockedAt" to System.currentTimeMillis(),
                 )
 
                 firestore.collection("users")
@@ -313,10 +462,21 @@ class FriendsViewModel : ViewModel() {
                         followers = state.followers.filter { it.userId != userId },
                     ).withComputedFriends()
                 }
+                syncMutualGraphListeners()
             } catch (e: Exception) {
                 _uiState.update { state -> state.copy(error = e.message) }
             }
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        legacyFriendsListener?.remove()
+        friendProfileListeners.forEach { it.remove() }
+        followerProfileListeners.forEach { it.remove() }
+        followingProfileListeners.forEach { it.remove() }
+        mutualGraphListeners.values.flatten().forEach { it.remove() }
+        mutualGraphListeners.clear()
     }
 
     private fun FriendsUiState.withComputedFriends(): FriendsUiState {
@@ -331,8 +491,25 @@ class FriendsViewModel : ViewModel() {
                 isOnline = followingItem.isOnline || follower.isOnline,
             )
         }
-        allFriendsIds = mutual.map { it.userId }.toSet()
-        return copy(friends = mutual.distinctBy { it.userId })
+        val combinedFriends = (mutual + legacyFriends).distinctBy { it.userId }
+        allFriendsIds = combinedFriends.map { it.userId }.toSet()
+        return copy(friends = combinedFriends)
+    }
+
+    private fun com.google.firebase.firestore.DocumentSnapshot.toFriendItemData(): FriendItemData? {
+        return try {
+            FriendItemData(
+                userId = getString("userId") ?: id,
+                name = getString("displayName") ?: "",
+                handle = getString("handle") ?: "",
+                mutualFriendsCount = 0,
+                avatarEmoji = getString("avatarEmoji") ?: "👤",
+                profileImageUrl = getString("profileImageUrl") ?: "",
+                isOnline = getBoolean("isOnline") ?: false,
+            )
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun FriendItemData.fromUser(user: User): FriendItemData {

@@ -4,6 +4,7 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
+import com.example.kampus.utils.NotificationLogger
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -14,6 +15,7 @@ data class EventEngagementSummary(
     val commentsCount: Int = 0,
     val savesCount: Int = 0,
     val interestedCount: Int = 0,
+    val sharesCount: Int = 0,
 )
 
 data class EventMemberEngagement(
@@ -56,6 +58,7 @@ class EventEngagementRepository(
                             commentsCount = (snapshot?.getLong("commentsCount") ?: 0L).toInt(),
                             savesCount = (snapshot?.getLong("savesCount") ?: 0L).toInt(),
                             interestedCount = (snapshot?.getLong("interestedCount") ?: 0L).toInt(),
+                            sharesCount = (snapshot?.getLong("sharesCount") ?: 0L).toInt(),
                         ),
                     ),
                 )
@@ -191,6 +194,7 @@ class EventEngagementRepository(
         text: String,
         imageUrl: String? = null,
         parentCommentId: String? = null,
+        eventOwnerId: String = "",
     ): Result<Unit> = try {
         val cleanText = text.trim()
         if (cleanText.isBlank()) {
@@ -198,6 +202,13 @@ class EventEngagementRepository(
         } else {
             val summaryRef = summaryRoot.document(eventId)
             val commentRef = summaryRef.collection("comments").document()
+            val parentAuthorId = parentCommentId
+                ?.takeIf { it.isNotBlank() }
+                ?.let { parentId ->
+                    summaryRef.collection("comments").document(parentId).get().await().getString("authorId").orEmpty()
+                }
+                .orEmpty()
+            val isReply = parentAuthorId.isNotBlank()
 
             firestore.runTransaction { transaction ->
                 val summarySnapshot = transaction.get(summaryRef)
@@ -227,6 +238,25 @@ class EventEngagementRepository(
                     SetOptions.merge(),
                 )
             }.await()
+
+            val recipientId = parentAuthorId.takeIf { it.isNotBlank() && it != userId }
+                ?: eventOwnerId.takeIf { it.isNotBlank() && it != userId }
+
+            if (!recipientId.isNullOrBlank()) {
+                runCatching {
+                    NotificationLogger.notifyUser(
+                        toUserId = recipientId,
+                        type = if (isReply) "reply" else "comment",
+                        title = if (isReply) "New reply" else "New comment",
+                        body = if (isReply) {
+                            "${authorName.ifBlank { "Someone" }} replied to your comment"
+                        } else {
+                            "${authorName.ifBlank { "Someone" }} commented on your event"
+                        },
+                        targetId = eventId,
+                    )
+                }
+            }
 
             Result.success(Unit)
         }
@@ -269,7 +299,38 @@ class EventEngagementRepository(
             !currentlyLiked
         }.await()
 
+        if (liked) {
+            val commentSnapshot = commentRef.get().await()
+            val recipientId = commentSnapshot.getString("authorId").orEmpty()
+            if (recipientId.isNotBlank() && recipientId != userId) {
+                runCatching {
+                    NotificationLogger.notifyUser(
+                        toUserId = recipientId,
+                        type = "like",
+                        title = "New like",
+                        body = "Someone liked your comment",
+                        targetId = commentId,
+                    )
+                }
+            }
+        }
+
         Result.success(liked)
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    suspend fun incrementShare(eventId: String): Result<Unit> = try {
+        summaryRoot.document(eventId)
+            .set(
+                mapOf(
+                    "sharesCount" to FieldValue.increment(1),
+                    "updatedAt" to FieldValue.serverTimestamp(),
+                ),
+                SetOptions.merge(),
+            )
+            .await()
+        Result.success(Unit)
     } catch (e: Exception) {
         Result.failure(e)
     }

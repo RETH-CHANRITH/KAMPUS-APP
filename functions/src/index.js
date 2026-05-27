@@ -14,27 +14,34 @@ exports.onCallInviteCreated = onDocumentCreated(
     if (!snap) return;
 
     const data = snap.data() || {};
-    if (data.messageType !== "call_invite") return;
-
     const chatId = event.params.chatId;
     const callerId = data.senderId || "";
-    const calleeId = data.receiverId || data.recipientId || "";
+    const messageType = (data.messageType || "message").toString().toLowerCase();
     const callType = (data.callType || "voice").toString().toLowerCase();
-    const callId = (data.callId || "").toString();
-    const callStatus = (data.callStatus || "ringing").toString().toLowerCase();
+    const callId = (data.callId || event.params.messageId || "").toString();
 
-    if (!calleeId || !callerId || callStatus !== "ringing") {
-      logger.info("Skipping call invite push due to missing ids or non-ringing status", {
+    if (!callerId) {
+      logger.info("Skipping push because sender id is missing", { chatId, messageType });
+      return;
+    }
+
+    const chatSnap = await admin.firestore().collection("chats").doc(chatId).get();
+    const participants = Array.isArray(chatSnap.get("participants")) ? chatSnap.get("participants") : [];
+    const inferredRecipientId = participants.find((participant) => participant && participant !== callerId) || chatSnap.get("otherUserId") || "";
+    const calleeId = data.receiverId || data.recipientId || inferredRecipientId;
+
+    if (!calleeId || calleeId === callerId) {
+      logger.info("Skipping push because recipient could not be resolved", {
         chatId,
         callerId,
         calleeId,
-        callStatus,
+        messageType,
       });
       return;
     }
 
     const callerProfile = await admin.firestore().collection("users").doc(callerId).get();
-    const callerName = callerProfile.get("displayName") || "Incoming call";
+    const callerName = callerProfile.get("displayName") || "Someone";
 
     const tokensSnap = await admin
       .firestore()
@@ -55,12 +62,17 @@ exports.onCallInviteCreated = onDocumentCreated(
     const message = {
       tokens,
       data: {
-        type: "call_invite",
-        messageType: "call_invite",
-        title: callerName,
-        body: callType === "video" ? "Incoming video call" : "Incoming voice call",
+        type: messageType === "call_invite" ? "call_invite" : "chat_message",
+        messageType,
+        title: messageType === "call_invite" ? callerName : callerName,
+        body:
+          messageType === "call_invite"
+            ? callType === "video"
+              ? "Incoming video call"
+              : "Incoming voice call"
+            : (data.text || data.body || data.message || "New message").toString(),
         chatId,
-        callerId,
+        senderId: callerId,
         calleeId,
         callType,
         callId,
@@ -76,7 +88,8 @@ exports.onCallInviteCreated = onDocumentCreated(
     };
 
     const result = await admin.messaging().sendEachForMulticast(message);
-    logger.info("Call invite push sent", {
+    logger.info("Chat/call push sent", {
+      messageType,
       chatId,
       callId,
       successCount: result.successCount,

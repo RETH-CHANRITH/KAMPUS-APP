@@ -30,6 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.kampus.ui.theme.ThemeController
 import com.example.kampus.ui.groups.GroupColors as C
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -42,12 +43,7 @@ private data class NavItem(
     val iconSelected : ImageVector,
 )
 
-private val navItems = listOf(
-    NavItem("Home",   Icons.Outlined.Home,              Icons.Filled.Home),
-    NavItem("Groups", Icons.Outlined.Group,             Icons.Filled.Group),
-    NavItem("Events", Icons.Outlined.CalendarMonth,     Icons.Filled.CalendarMonth),
-    NavItem("Chat",   Icons.Outlined.ChatBubbleOutline, Icons.Filled.ChatBubble),
-)
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Screen
@@ -65,6 +61,7 @@ fun GroupListScreen(
     viewModel          : GroupViewModel      = viewModel(),
 ) {
     val state       by viewModel.uiState.collectAsState()
+    val strings     = com.example.kampus.ui.localization.rememberUiStrings()
     var searchQuery by remember { mutableStateOf("") }
     var selectedTab by remember { mutableIntStateOf(0) }
 
@@ -86,6 +83,7 @@ fun GroupListScreen(
                 selectedTab        = selectedTab,
                 onTabSelected      = { selectedTab = it; viewModel.selectTab(it) },
                 onCreateGroupClick = onCreateGroupClick,
+                strings            = strings,
             )
         },
 
@@ -132,7 +130,7 @@ fun GroupListScreen(
             modifier = Modifier.padding(innerPadding),
         ) { _ ->
             if (displayed.isEmpty()) {
-                EmptyState()
+                EmptyState(strings = strings)
             } else {
                 LazyColumn(
                     modifier            = Modifier.fillMaxSize(),
@@ -147,6 +145,7 @@ fun GroupListScreen(
                             index    = index,
                             onJoin   = { viewModel.toggleJoin(group.id) },
                             onClick  = { onGroupClick(group) },
+                            strings  = strings,
                         )
                     }
                 }
@@ -165,14 +164,24 @@ private fun GroupBottomNav(
     onFabClick     : () -> Unit,
     onProfileClick : () -> Unit,
 ) {
-    val NavBg     = Color(0xFF0C1018)
-    val HBlue     = Color(0xFF3B82F6)
-    val HGlow     = Color(0xFF2563EB)
-    val HBorder   = Color(0xFF1A2333)
-    val HCard     = Color(0xFF0F1520)
-    val HGray4    = Color(0xFF9CA3AF)
-    val HWhite    = Color(0xFFFFFFFF)
-    val HBg       = Color(0xFF080B11)
+        val isDark = ThemeController.isDark
+        val NavBg = if (isDark) Color(0xFF0C1018) else Color(0xFFFFFFFF)
+        val HBlue = ThemeController.accent.color
+        val HGlow = HBlue.copy(alpha = if (isDark) 0.75f else 0.55f)
+        val HBorder = if (isDark) Color(0xFF1A2333) else Color(0xFFD1D5DB)
+        val HCard = if (isDark) Color(0xFF0F1520) else Color(0xFFFFFFFF)
+        val HGray4 = if (isDark) Color(0xFF9CA3AF) else Color(0xFF6B7280)
+        val HWhite = if (isDark) Color(0xFFFFFFFF) else Color(0xFF111827)
+        val HBg = if (isDark) Color(0xFF080B11) else Color(0xFFF3F4F8)
+        val strings = com.example.kampus.ui.localization.rememberUiStrings()
+        val navItems = remember(strings) {
+            listOf(
+                NavItem(strings.home,   Icons.Outlined.Home,              Icons.Filled.Home),
+                NavItem(strings.groups, Icons.Outlined.Group,             Icons.Filled.Group),
+                NavItem(strings.events, Icons.Outlined.CalendarMonth,     Icons.Filled.CalendarMonth),
+                NavItem(strings.chat,   Icons.Outlined.ChatBubbleOutline, Icons.Filled.ChatBubble),
+            )
+        }
 
     Row(
         modifier              = Modifier.fillMaxWidth(),
@@ -212,7 +221,7 @@ private fun GroupBottomNav(
                         .clip(RoundedCornerShape(24.dp))
                         .background(tabBg)
                         .border(1.dp, tabBorder, RoundedCornerShape(24.dp))
-                        .clickable(remember { MutableInteractionSource() }, null) { onItemSelected(i) }
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onItemSelected(i) }
                         .padding(horizontal = if (selected) 14.dp else 10.dp, vertical = 9.dp),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -254,7 +263,7 @@ private fun GroupBottomNav(
                     start = androidx.compose.ui.geometry.Offset(0f, 0f),
                     end   = androidx.compose.ui.geometry.Offset(80f, 80f),
                 ))
-                .clickable(remember { MutableInteractionSource() }, null, onClick = onFabClick),
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onFabClick),
             contentAlignment = Alignment.Center,
         ) {
             Icon(Icons.Default.Add, "Create post", tint = HWhite, modifier = Modifier.size(26.dp))
@@ -268,7 +277,7 @@ private fun GroupBottomNav(
                     .clip(CircleShape)
                     .background(HCard)
                     .border(1.dp, HBorder, CircleShape)
-                    .clickable(remember { MutableInteractionSource() }, null, onClick = onProfileClick),
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onProfileClick),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(Icons.Outlined.Person, "Profile", tint = HGray4, modifier = Modifier.size(24.dp))
@@ -287,6 +296,7 @@ private fun GroupTopBar(
     selectedTab        : Int,
     onTabSelected      : (Int) -> Unit,
     onCreateGroupClick : () -> Unit,
+    strings            : com.example.kampus.ui.localization.UiStrings,
 ) {
     Surface(color = C.Bg, shadowElevation = 0.dp) {
         Column(
@@ -314,10 +324,10 @@ private fun GroupTopBar(
                         .size(38.dp)
                         .clip(CircleShape)
                         .background(C.Blue)
-                        .clickable(remember { MutableInteractionSource() }, null, onClick = onCreateGroupClick),
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onCreateGroupClick),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.Default.Add, "Create Group", tint = C.White, modifier = Modifier.size(20.dp))
+                    Icon(Icons.Default.Add, strings.createGroup, tint = C.White, modifier = Modifier.size(20.dp))
                 }
             }
 
@@ -350,7 +360,7 @@ private fun GroupTopBar(
                         Icon(Icons.Outlined.Search, null, tint = C.Gray3, modifier = Modifier.size(17.dp))
                         Spacer(Modifier.width(9.dp))
                         Box(Modifier.weight(1f)) {
-                            if (searchQuery.isEmpty()) Text("Search groups…", color = C.Gray5, fontSize = 14.sp)
+                            if (searchQuery.isEmpty()) Text(strings.searchGroupsPlaceholder, color = C.Gray5, fontSize = 14.sp)
                             inner()
                         }
                     }
@@ -367,7 +377,7 @@ private fun GroupTopBar(
                     .padding(3.dp),
                 horizontalArrangement = Arrangement.spacedBy(3.dp),
             ) {
-                listOf("My Groups", "Discover").forEachIndexed { index, label ->
+                listOf(strings.myGroups, strings.discover).forEachIndexed { index, label ->
                     val selected = selectedTab == index
                     val bgBrush = if (selected)
                         Brush.linearGradient(listOf(C.Blue, C.BlueGlow))
@@ -386,7 +396,7 @@ private fun GroupTopBar(
                             .fillMaxHeight()
                             .clip(RoundedCornerShape(10.dp))
                             .background(bgBrush)
-                            .clickable(remember { MutableInteractionSource() }, null) { onTabSelected(index) },
+                            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onTabSelected(index) },
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
@@ -412,6 +422,7 @@ private fun StaggeredGroupCard(
     index    : Int,
     onJoin   : () -> Unit,
     onClick  : () -> Unit,
+    strings  : com.example.kampus.ui.localization.UiStrings,
 ) {
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
@@ -422,7 +433,7 @@ private fun StaggeredGroupCard(
         visible = visible,
         enter   = fadeIn(tween(280)) + slideInVertically(tween(280, easing = EaseOutCubic)) { it / 3 },
     ) {
-        GroupCard(group = group, isJoined = isJoined, onJoin = onJoin, onClick = onClick)
+        GroupCard(group = group, isJoined = isJoined, onJoin = onJoin, onClick = onClick, strings = strings)
     }
 }
 
@@ -435,6 +446,7 @@ private fun GroupCard(
     isJoined : Boolean,
     onJoin   : () -> Unit,
     onClick  : () -> Unit,
+    strings  : com.example.kampus.ui.localization.UiStrings,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
 
@@ -476,11 +488,11 @@ private fun GroupCard(
                 Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     StatChip(
                         icon  = { Icon(Icons.Outlined.Group, null, tint = C.Gray3, modifier = Modifier.size(13.dp)) },
-                        label = "${group.members} members",
+                        label = "${group.members} ${strings.membersLabel}",
                     )
                     StatChip(
                         icon  = { Icon(Icons.AutoMirrored.Outlined.TrendingUp, null, tint = C.Gray3, modifier = Modifier.size(13.dp)) },
-                        label = "${group.posts} posts",
+                        label = "${group.posts} ${strings.postsLabel}",
                     )
                 }
 
@@ -496,11 +508,11 @@ private fun GroupCard(
                             else Brush.linearGradient(listOf(C.Blue, C.BlueGlow))
                         )
                         .border(1.dp, if (isJoined) C.Border else Color.Transparent, RoundedCornerShape(12.dp))
-                        .clickable(remember { MutableInteractionSource() }, null, onClick = onJoin),
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onJoin),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text       = if (isJoined) "Joined" else "Join Group",
+                        text       = if (isJoined) strings.joined else strings.joinGroup,
                         color      = if (isJoined) C.Gray3 else C.White,
                         fontSize   = 14.sp,
                         fontWeight = FontWeight.SemiBold,
@@ -523,7 +535,7 @@ private fun StatChip(icon: @Composable () -> Unit, label: String) {
 }
 
 @Composable
-private fun EmptyState() {
+private fun EmptyState(strings: com.example.kampus.ui.localization.UiStrings) {
     Box(modifier = Modifier.fillMaxSize().padding(top = 80.dp), contentAlignment = Alignment.TopCenter) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Box(
@@ -532,8 +544,8 @@ private fun EmptyState() {
             ) {
                 Icon(Icons.Outlined.Search, null, tint = C.Gray5, modifier = Modifier.size(24.dp))
             }
-            Text("No groups found", color = C.Gray5, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            Text("Try a different keyword", color = C.Border, fontSize = 13.sp)
+            Text(strings.noGroupsFound, color = C.Gray5, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(strings.tryDifferentKeyword, color = C.Border, fontSize = 13.sp)
         }
     }
 }

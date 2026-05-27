@@ -35,24 +35,26 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.kampus.R
+import com.example.kampus.ui.localization.rememberUiStrings
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 
 
 // ── Design tokens ──────────────────────────────────────────────────────────────
-private val Bg          = Color(0xFF0A0D14)
-private val Card        = Color(0xFF111827)
-private val CardBorder  = Color(0xFF1E2A3A)
-private val Blue        = Color(0xFF3B82F6)
-private val BlueGlow    = Color(0xFF2563EB)
-private val FieldBg     = Color(0xFF0F1623)
-private val FieldBorder = Color(0xFF1E2A3A)
-private val FieldFocus  = Color(0xFF3B82F6)
-private val ErrorRed    = Color(0xFFFF4D6A)
-private val White       = Color(0xFFFFFFFF)
-private val Gray300     = Color(0xFFD1D5DB)
-private val Gray500     = Color(0xFF6B7280)
-private val Gray600     = Color(0xFF4B5563)
+private val UiIsDark    = true
+private val Bg          get() = Color(0xFF0A0D14)
+private val Card        get() = Color(0xFF111827)
+private val CardBorder  get() = Color(0xFF1E2A3A)
+private val Blue        get() = Color(0xFF0D7FFF)
+private val BlueGlow    get() = Blue.copy(alpha = 0.75f)
+private val FieldBg     get() = Color(0xFF0F1623)
+private val FieldBorder get() = Color(0xFF1E2A3A)
+private val FieldFocus  get() = Blue
+private val ErrorRed    get() = Color(0xFFFF4D6A)
+private val White       get() = Color(0xFFFFFFFF)
+private val Gray300     get() = Color(0xFFD1D5DB)
+private val Gray500     get() = Color(0xFF6B7280)
+private val Gray600     get() = Color(0xFF9CA3AF)
 
 @Composable
 fun LoginScreen(
@@ -65,6 +67,7 @@ fun LoginScreen(
     prefilledEmail   : String = "",
     authViewModel    : AuthViewModel = viewModel()
 ) {
+    val strings = rememberUiStrings()
     var email           by remember(prefilledEmail) { mutableStateOf(prefilledEmail) }
     var password        by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
@@ -226,7 +229,7 @@ fun LoginScreen(
                             authViewModel.resetState()
                         },
                         colors = ButtonDefaults.textButtonColors(contentColor = ErrorRed)
-                    ) { Text("Dismiss") }
+                    ) { Text(strings.dismiss) }
                 }
             }
 
@@ -236,14 +239,14 @@ fun LoginScreen(
                 horizontalAlignment = Alignment.Start
             ) {
                 Text(
-                    "Welcome back 👋",
+                    strings.welcomeBack,
                     color      = Gray500,
                     fontSize   = 14.sp,
                     fontWeight = FontWeight.Medium
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "Login to your\nAccount",
+                    strings.loginTitle,
                     color         = White,
                     fontSize      = 32.sp,
                     fontWeight    = FontWeight.ExtraBold,
@@ -268,7 +271,7 @@ fun LoginScreen(
                     PremiumInputField(
                         value         = email,
                         onValueChange = { email = it; emailError = ""; authViewModel.resetState() },
-                        label         = "Email Address",
+                        label         = strings.emailAddress,
                         placeholder   = "reth.chanrith.2823@rupp.edu.kh",
                         icon          = Icons.Outlined.Email,
                         error         = emailError,
@@ -278,7 +281,7 @@ fun LoginScreen(
                     )
                     // RUPP email hint
                     Text(
-                        text = "🎓 Use your RUPP University email (@rupp.edu.kh)",
+                        text = "🎓 ${strings.ruppEmailOnly}",
                         fontSize = 12.sp,
                         color = Gray500,
                         modifier = Modifier.padding(horizontal = 4.dp)
@@ -288,7 +291,7 @@ fun LoginScreen(
                 PremiumInputField(
                     value            = password,
                     onValueChange    = { password = it; passwordError = ""; authViewModel.resetState() },
-                    label            = "Password",
+                    label            = strings.password,
                     placeholder      = "Enter your password",
                     icon             = Icons.Outlined.Lock,
                     error            = passwordError,
@@ -334,10 +337,10 @@ fun LoginScreen(
                                 )
                             }
                         }
-                        Text("Remember me", color = Gray500, fontSize = 13.sp)
+                        Text(strings.rememberMe, color = Gray500, fontSize = 13.sp)
                     }
                     Text(
-                        "Forgot Password?",
+                        strings.forgotPassword,
                         color      = Blue,
                         fontSize   = 13.sp,
                         fontWeight = FontWeight.SemiBold,
@@ -353,7 +356,7 @@ fun LoginScreen(
 
             // ── Login button ──────────────────────────────────────────────────
             PremiumButton(
-                text      = "Login",
+                text      = strings.login,
                 isLoading = isLoading,
                 onClick   = {
                     if (validate()) {
@@ -370,9 +373,9 @@ fun LoginScreen(
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment     = Alignment.CenterVertically
             ) {
-                Text("Don't have an account? ", color = Gray500, fontSize = 14.sp)
+                Text(strings.dontHaveAccount, color = Gray500, fontSize = 14.sp)
                 Text(
-                    "Sign Up",
+                    strings.signUp,
                     color      = Blue,
                     fontSize   = 14.sp,
                     fontWeight = FontWeight.Bold,
@@ -389,7 +392,7 @@ fun LoginScreen(
                 modifier              = Modifier.fillMaxWidth()
             ) {
                 HorizontalDivider(Modifier.weight(1f), color = CardBorder)
-                Text("or continue with", color = Gray600, fontSize = 12.sp)
+                Text(strings.orContinueWith, color = Gray600, fontSize = 12.sp)
                 HorizontalDivider(Modifier.weight(1f), color = CardBorder)
             }
 

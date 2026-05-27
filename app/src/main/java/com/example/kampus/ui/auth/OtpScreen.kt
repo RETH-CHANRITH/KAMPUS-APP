@@ -26,20 +26,22 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.kampus.ui.localization.rememberUiStrings
 
-private val OBg     = Color(0xFF0A0D14)
-private val OCard   = Color(0xFF111827)
-private val OBorder = Color(0xFF1E2A3A)
-private val OBlue   = Color(0xFF3B82F6)
-private val OGlow   = Color(0xFF2563EB)
-private val OFBg    = Color(0xFF0F1623)
-private val OFBrd   = Color(0xFF1E2A3A)
-private val OWhite  = Color(0xFFFFFFFF)
-private val OGray3  = Color(0xFFD1D5DB)
-private val OGray5  = Color(0xFF6B7280)
-private val OGray6  = Color(0xFF4B5563)
-private val OErr    = Color(0xFFFF4D6A)
-private val OOk     = Color(0xFF22C55E)
+private val UiIsDark = true
+private val OBg      get() = Color(0xFF0A0D14)
+private val OCard    get() = Color(0xFF111827)
+private val OBorder  get() = Color(0xFF1E2A3A)
+private val OBlue    get() = Color(0xFF0D7FFF)
+private val OGlow    get() = OBlue.copy(alpha = 0.75f)
+private val OFBg     get() = Color(0xFF0F1623)
+private val OFBrd    get() = Color(0xFF1E2A3A)
+private val OWhite   get() = Color(0xFFFFFFFF)
+private val OGray3   get() = Color(0xFFD1D5DB)
+private val OGray5   get() = Color(0xFF6B7280)
+private val OGray6   get() = Color(0xFF9CA3AF)
+private val OErr     get() = Color(0xFFFF4D6A)
+private val OOk      get() = Color(0xFF22C55E)
 
 @Composable
 fun OtpScreen(
@@ -51,6 +53,7 @@ fun OtpScreen(
     email           : String        = "",
     authViewModel   : AuthViewModel = viewModel()
 ) {
+    val strings = rememberUiStrings()
     val displayContact = contact.ifBlank { email }
     val isEmail        = method == "email" || displayContact.contains("@")
     val channelIcon    = if (isEmail) "📧" else "📱"
@@ -320,7 +323,7 @@ fun OtpScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text("Didn't receive the code?", color = OGray5, fontSize = 14.sp)
+                Text(strings.didNotReceiveCode, color = OGray5, fontSize = 14.sp)
 
                 if (resendTimer > 0) {
                     Row(
@@ -334,7 +337,7 @@ fun OtpScreen(
                     ) {
                         Icon(Icons.Default.Timer, null, tint = OBlue, modifier = Modifier.size(14.dp))
                         Text(
-                            "Resend in ${resendTimer}s",
+                            "${strings.resendIn} ${resendTimer}s",
                             color = OGray3, fontSize = 13.sp, fontWeight = FontWeight.SemiBold
                         )
                     }
@@ -351,7 +354,7 @@ fun OtpScreen(
                             .padding(horizontal = 22.dp, vertical = 10.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("Resend Code", color = OBlue, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text(strings.resendCode, color = OBlue, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }

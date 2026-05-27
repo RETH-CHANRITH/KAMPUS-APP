@@ -23,19 +23,21 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.kampus.R
+import com.example.kampus.ui.localization.rememberUiStrings
 
 // ── Design tokens (same as LoginScreen) ───────────────────────────────────────
-private val RegBg         = Color(0xFF0A0D14)
-private val RegCard       = Color(0xFF111827)
-private val RegCardBorder = Color(0xFF1E2A3A)
-private val RegBlue       = Color(0xFF3B82F6)
-private val RegBlueGlow   = Color(0xFF2563EB)
-private val RegFieldBg    = Color(0xFF0F1623)
-private val RegWhite      = Color(0xFFFFFFFF)
-private val RegGray300    = Color(0xFFD1D5DB)
-private val RegGray500    = Color(0xFF6B7280)
-private val RegGray600    = Color(0xFF4B5563)
-private val RegErrorRed   = Color(0xFFFF4D6A)
+private val UiIsDark      = true
+private val RegBg         get() = Color(0xFF0A0D14)
+private val RegCard       get() = Color(0xFF111827)
+private val RegCardBorder get() = Color(0xFF1E2A3A)
+private val RegBlue       get() = Color(0xFF0D7FFF)
+private val RegBlueGlow   get() = RegBlue.copy(alpha = 0.75f)
+private val RegFieldBg    get() = Color(0xFF0F1623)
+private val RegWhite      get() = Color(0xFFFFFFFF)
+private val RegGray300    get() = Color(0xFFD1D5DB)
+private val RegGray500    get() = Color(0xFF6B7280)
+private val RegGray600    get() = Color(0xFF9CA3AF)
+private val RegErrorRed   get() = Color(0xFFFF4D6A)
 
 @Composable
 fun RegisterScreen(
@@ -46,6 +48,7 @@ fun RegisterScreen(
     onBackClick       : () -> Unit = {},
     authViewModel     : AuthViewModel = viewModel()
 ) {
+    val strings = rememberUiStrings()
     var name            by remember { mutableStateOf("") }
     var email           by remember { mutableStateOf("") }
     var password        by remember { mutableStateOf("") }
@@ -332,14 +335,14 @@ fun RegisterScreen(
                     Row {
                         Text("I agree to the ", color = RegGray500, fontSize = 13.sp)
                         Text(
-                            "Terms of Service",
+                            strings.termsOfService,
                             color      = RegBlue,
                             fontSize   = 13.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(" & ", color = RegGray500, fontSize = 13.sp)
                         Text(
-                            "Privacy Policy",
+                            strings.privacyPolicy,
                             color      = RegBlue,
                             fontSize   = 13.sp,
                             fontWeight = FontWeight.SemiBold
@@ -373,7 +376,7 @@ fun RegisterScreen(
 
             // ── Register button ────────────────────────────────────────────────
             PremiumButton(
-                text      = "Create Account",
+                text      = strings.createAccount,
                 isLoading = isLoading,
                 onClick   = {
                     if (validate()) {
@@ -392,7 +395,7 @@ fun RegisterScreen(
             ) {
                 Text("Already have an account? ", color = RegGray500, fontSize = 14.sp)
                 Text(
-                    "Sign In",
+                    strings.signIn,
                     color      = RegBlue,
                     fontSize   = 14.sp,
                     fontWeight = FontWeight.Bold,
@@ -409,7 +412,7 @@ fun RegisterScreen(
                 modifier              = Modifier.fillMaxWidth()
             ) {
                 HorizontalDivider(Modifier.weight(1f), color = RegCardBorder)
-                Text("or continue with", color = RegGray600, fontSize = 12.sp)
+                Text(strings.orContinueWith, color = RegGray600, fontSize = 12.sp)
                 HorizontalDivider(Modifier.weight(1f), color = RegCardBorder)
             }
 

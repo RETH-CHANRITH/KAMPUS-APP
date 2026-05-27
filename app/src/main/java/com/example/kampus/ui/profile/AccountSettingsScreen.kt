@@ -40,20 +40,14 @@ import com.google.firebase.auth.FirebaseAuth
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-
-private val ABg = Color(0xFF1A1D2E)
-private val ACard = Color(0xFF252A41)
-private val ABorder = Color(0xFF364153)
-private val AWhite = Color(0xFFFFFFFF)
-private val ASubtle = Color(0xFF99A1AF)
-private val ABlue = Color(0xFF0D7FFF)
-private val ADanger = Color(0xFFFB2C36)
+import com.example.kampus.ui.localization.rememberUiStrings
 
 @Composable
 fun AccountSettingsScreen(
     onBack: () -> Unit,
     viewModel: ProfileViewModel = viewModel(),
 ) {
+    val strings = rememberUiStrings()
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     
     // Get real email from Firebase Auth
@@ -66,9 +60,9 @@ fun AccountSettingsScreen(
     } ?: "N/A"
     
     // Get phone from profile state
-    val phone = state.phone.ifEmpty { "Not set" }
+    val phone = state.phone.ifEmpty { strings.phoneNotSet }
     
-    Surface(color = ABg, modifier = Modifier.fillMaxSize()) {
+    Surface(color = ProfileColors.Bg, modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -87,78 +81,78 @@ fun AccountSettingsScreen(
                     modifier = Modifier
                         .size(40.dp)
                         .clip(CircleShape)
-                        .background(ACard)
-                        .border(1.dp, ABorder, CircleShape)
+                        .background(ProfileColors.Card)
+                        .border(1.dp, ProfileColors.Border, CircleShape)
                         .clickable(onClick = onBack),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back", tint = AWhite)
+                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = strings.back, tint = ProfileColors.White)
                 }
-                Text("Account", color = AWhite, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text(strings.accountTitle, color = ProfileColors.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 Box(Modifier.size(40.dp))
             }
 
-            Section(title = "Account Information") {
-                InfoRow(label = "Email", value = realEmail)
-                InfoRow(label = "Phone", value = phone)
-                InfoRow(label = "Account Created", value = createdDate, showDivider = false)
+            Section(title = strings.accountInformation) {
+                InfoRow(label = strings.emailLabel, value = realEmail)
+                InfoRow(label = strings.phoneLabel, value = phone)
+                InfoRow(label = strings.accountCreated, value = createdDate, showDivider = false)
             }
 
-            Section(title = "Linked Accounts") {
+            Section(title = strings.linkedAccounts) {
                 LinkedRow(
                     tag = "f",
                     tagBackground = Color(0xFF2B7FFF),
                     name = "Facebook",
-                    status = "Connected",
+                    status = strings.connected,
                     action = "Disconnect",
-                    actionColor = ADanger,
+                    actionColor = ProfileColors.Red,
                 )
                 LinkedRow(
                     tag = "@",
                     tagBackground = Brush.horizontalGradient(listOf(Color(0xFFAD46FF), Color(0xFFF6339A))),
                     name = "Instagram",
-                    status = "Not connected",
+                    status = strings.notConnected,
                     action = "Connect",
-                    actionColor = ABlue,
+                    actionColor = ProfileColors.Blue,
                 )
                 LinkedRow(
                     tag = "X",
                     tagBackground = Color.Black,
                     name = "X (Twitter)",
-                    status = "Not connected",
+                    status = strings.notConnected,
                     action = "Connect",
-                    actionColor = ABlue,
+                    actionColor = ProfileColors.Blue,
                     showDivider = false,
                 )
             }
 
-            Section(title = "Account Actions") {
+            Section(title = strings.accountActions) {
                 ActionRow(
-                    title = "Deactivate Account",
-                    subtitle = "Temporarily disable your account",
+                    title = strings.deactivateAccount,
+                    subtitle = strings.temporarilyDisableAccount,
                     showDivider = false,
                 )
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Danger Zone", color = ADanger, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                Text(strings.dangerZone, color = ProfileColors.Red, fontSize = 18.sp, fontWeight = FontWeight.Medium)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
-                        .background(ADanger.copy(alpha = 0.1f))
-                        .border(1.dp, ADanger.copy(alpha = 0.2f), RoundedCornerShape(14.dp))
+                        .background(ProfileColors.Red.copy(alpha = 0.1f))
+                        .border(1.dp, ProfileColors.Red.copy(alpha = 0.2f), RoundedCornerShape(14.dp))
                         .padding(horizontal = 16.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
                         contentDescription = null,
-                        tint = ADanger,
+                        tint = ProfileColors.Red,
                         modifier = Modifier.size(18.dp),
                     )
                     Text(
-                        text = "Permanently delete your account and data",
+                        text = strings.permanentlyDeleteAccount,
                         color = Color(0xFFFF6467),
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium,
@@ -173,13 +167,13 @@ fun AccountSettingsScreen(
 @Composable
 private fun Section(title: String, content: @Composable () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(title, color = AWhite, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+        Text(title, color = ProfileColors.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(14.dp))
-                .background(ACard)
-                .border(1.dp, ABorder, RoundedCornerShape(14.dp)),
+                .background(ProfileColors.Card)
+                .border(1.dp, ProfileColors.Border, RoundedCornerShape(14.dp)),
         ) {
             content()
         }
@@ -189,14 +183,14 @@ private fun Section(title: String, content: @Composable () -> Unit) {
 @Composable
 private fun InfoRow(label: String, value: String, showDivider: Boolean = true) {
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp)) {
-        Text(label, color = ASubtle, fontSize = 14.sp)
-        Text(value, color = AWhite, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+        Text(label, color = ProfileColors.Subtle, fontSize = 14.sp)
+        Text(value, color = ProfileColors.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
         if (showDivider) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 12.dp)
-                    .background(ABorder)
+                    .background(ProfileColors.Border)
                     .size(width = 1.dp, height = 1.dp),
             )
         }
@@ -275,11 +269,11 @@ private fun LinkedRowContent(
                         },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(tag, color = AWhite, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text(tag, color = ProfileColors.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
                 Column {
-                    Text(name, color = AWhite, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                    Text(status, color = ASubtle, fontSize = 14.sp)
+                    Text(name, color = ProfileColors.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    Text(status, color = ProfileColors.Subtle, fontSize = 14.sp)
                 }
             }
             Text(
@@ -296,7 +290,7 @@ private fun LinkedRowContent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 12.dp)
-                    .background(ABorder)
+                    .background(ProfileColors.Border)
                     .size(width = 1.dp, height = 1.dp),
             )
         }
@@ -317,13 +311,13 @@ private fun ActionRow(title: String, subtitle: String, showDivider: Boolean = tr
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(title, color = AWhite, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                Text(subtitle, color = ASubtle, fontSize = 13.sp)
+                Text(title, color = ProfileColors.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                Text(subtitle, color = ProfileColors.Subtle, fontSize = 13.sp)
             }
             Icon(
                 imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
                 contentDescription = null,
-                tint = ASubtle,
+                tint = ProfileColors.Subtle,
             )
         }
         if (showDivider) {
@@ -331,7 +325,7 @@ private fun ActionRow(title: String, subtitle: String, showDivider: Boolean = tr
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 12.dp)
-                    .background(ABorder)
+                    .background(ProfileColors.Border)
                     .size(width = 1.dp, height = 1.dp),
             )
         }

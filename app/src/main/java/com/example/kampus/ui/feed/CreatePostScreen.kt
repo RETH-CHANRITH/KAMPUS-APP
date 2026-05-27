@@ -72,6 +72,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import com.example.kampus.ui.theme.ThemeController
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private enum class FbComposerTheme { A_LIGHT, B_DARK }
 
@@ -80,10 +83,11 @@ private enum class PickerType { FEELING, PEOPLE, LOCATION, EVENT, GIF }
 @Composable
 fun CreatePostScreen(
     onClose: () -> Unit,
-    onPost: (text: String, mediaUris: List<Uri>, mediaTypes: List<PostItem.MediaType>, visibility: PostItem.PostVisibility, allowComments: Boolean, taggedPeople: List<String>, feelingEmoji: String?, location: String?) -> Unit,
+    onPost: suspend (text: String, mediaUris: List<Uri>, mediaTypes: List<PostItem.MediaType>, visibility: PostItem.PostVisibility, allowComments: Boolean, taggedPeople: List<String>, feelingEmoji: String?, location: String?) -> Result<String>,
 ) {
-    var lightMode by remember { mutableStateOf(false) }
-    val p = if (lightMode) FbLight else FbDark
+    val p = getComposerPalette()
+    val strings = com.example.kampus.ui.localization.rememberUiStrings()
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     var text by remember { mutableStateOf("") }
 
@@ -105,8 +109,11 @@ fun CreatePostScreen(
     var musicText by remember { mutableStateOf("") }
 
     var pickerShown by remember { mutableStateOf<PickerType?>(null) }
+    var isSubmitting by remember { mutableStateOf(false) }
+    var submitError by remember { mutableStateOf<String?>(null) }
+    var submitSuccess by remember { mutableStateOf<String?>(null) }
 
-    val canPost = text.isNotBlank()
+    val canPost = text.isNotBlank() || mediaUris.isNotEmpty()
 
     // Track selected index for editing
     var selectedMediaIndex by remember { mutableStateOf<Int?>(null) }
@@ -292,8 +299,7 @@ fun CreatePostScreen(
             CreatePostTopBar(
                 p = p,
                 onClose = onClose,
-                onThemeToggle = { lightMode = !lightMode },
-                isDarkMode = !lightMode,
+                isDarkMode = ThemeController.isDark,
             )
 
             // Header row (avatar + name + tags)
@@ -397,7 +403,7 @@ fun CreatePostScreen(
                                     .clip(CircleShape)
                                     .background(p.bg.copy(alpha = 0.8f))
                                     .border(1.dp, p.border, CircleShape)
-                                    .clickable(remember { MutableInteractionSource() }, null) {
+                                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
                                         // Remove this media item
                                         mediaUris = mediaUris.filterIndexed { i, _ -> i != index }
                                         mediaTypes = mediaTypes.filterIndexed { i, _ -> i != index }
@@ -425,7 +431,7 @@ fun CreatePostScreen(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(999.dp))
                                         .background(p.primary.copy(alpha = 0.85f))
-                                        .clickable(remember { MutableInteractionSource() }, null) {
+                                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
                                             showEditMenu = index
                                         }
                                         .padding(horizontal = 10.dp, vertical = 6.dp),
@@ -459,7 +465,7 @@ fun CreatePostScreen(
                                                         tint = p.text,
                                                         modifier = Modifier.size(18.dp).padding(end = 8.dp)
                                                     )
-                                                    Text("Crop", color = p.text)
+                                                    Text(strings.crop, color = p.text)
                                                 }
                                             },
                                             onClick = {
@@ -485,7 +491,7 @@ fun CreatePostScreen(
                                                     tint = p.text,
                                                     modifier = Modifier.size(18.dp).padding(end = 8.dp)
                                                 )
-                                                Text("Change", color = p.text)
+                                                Text(strings.change, color = p.text)
                                             }
                                         },
                                         onClick = {
@@ -529,7 +535,7 @@ fun CreatePostScreen(
                         .clip(RoundedCornerShape(16.dp))
                         .background(p.card)
                         .border(1.dp, p.border, RoundedCornerShape(16.dp))
-                        .clickable(remember { MutableInteractionSource() }, null) {
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
                             selectedMediaIndex = null // Add new, don't replace
                             galleryLauncher.launch("*/*")
                         },
@@ -540,7 +546,7 @@ fun CreatePostScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Icon(Icons.Default.Add, "Add more", tint = p.primary, modifier = Modifier.size(18.dp))
-                        Text("Add more photos", color = p.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text(strings.addMorePhotos, color = p.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                     }
                 }
 
@@ -555,7 +561,7 @@ fun CreatePostScreen(
                         .clip(RoundedCornerShape(16.dp))
                         .background(p.card)
                         .border(2.dp, p.border, RoundedCornerShape(16.dp))
-                        .clickable(remember { MutableInteractionSource() }, null) {
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
                             galleryLauncher.launch("*/*")
                         },
                     contentAlignment = Alignment.Center,
@@ -570,8 +576,8 @@ fun CreatePostScreen(
                             tint = p.primary,
                             modifier = Modifier.size(32.dp)
                         )
-                        Text("Add photos or videos", color = p.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                        Text("Tap to select", color = p.textMuted, fontSize = 12.sp)
+                        Text(strings.addPhotosOrVideos, color = p.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text(strings.tapToSelect, color = p.textMuted, fontSize = 12.sp)
                     }
                 }
 
@@ -604,6 +610,23 @@ fun CreatePostScreen(
                 )
             }
 
+            if (isSubmitting || !submitError.isNullOrBlank() || !submitSuccess.isNullOrBlank()) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (isSubmitting) {
+                        Text("Uploading and syncing to Home…", color = p.primary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    if (!submitSuccess.isNullOrBlank()) {
+                        Text(submitSuccess!!, color = Color(0xFF22C55E), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    if (!submitError.isNullOrBlank()) {
+                        Text(submitError!!, color = Color(0xFFEF4444), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+
             // Bottom action bar (facebook-like)
             Column(
                 modifier = Modifier
@@ -634,14 +657,41 @@ fun CreatePostScreen(
                             .background(if (canPost) p.primary else p.card)
                             .border(1.dp, if (canPost) p.primary else p.border, RoundedCornerShape(12.dp))
                             .clickable(
-                                enabled = canPost,
+                                enabled = canPost && !isSubmitting,
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null,
-                            ) { onPost(text.trim(), mediaUris, mediaTypes, visibility, allowComments, taggedPeople, feelingEmoji, locationText) },
+                            ) {
+                                scope.launch {
+                                    if (isSubmitting) return@launch
+                                    isSubmitting = true
+                                    submitError = null
+                                    submitSuccess = null
+
+                                    val result = onPost(
+                                        text.trim(),
+                                        mediaUris,
+                                        mediaTypes,
+                                        visibility,
+                                        allowComments,
+                                        taggedPeople,
+                                        feelingEmoji,
+                                        locationText,
+                                    )
+
+                                    isSubmitting = false
+                                    if (result.isSuccess) {
+                                        submitSuccess = "Posted and synced to Firebase"
+                                        delay(700)
+                                        onClose()
+                                    } else {
+                                        submitError = result.exceptionOrNull()?.message ?: "Failed to sync post"
+                                    }
+                                }
+                            },
                     ) {
                         Text(
                             text = "Post",
-                            color = if (canPost) Color.White else p.textMuted,
+                            color = if (canPost && !isSubmitting) Color.White else p.textMuted,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
@@ -676,7 +726,7 @@ private fun PostChip(p: ComposerPalette, label: String, emoji: String, onClick: 
             .clip(RoundedCornerShape(999.dp))
             .background(p.card)
             .border(1.dp, p.border, RoundedCornerShape(999.dp))
-            .clickable(remember { MutableInteractionSource() }, null, onClick = onClick)
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -699,7 +749,7 @@ private fun FbChipPill(
             .clip(RoundedCornerShape(999.dp))
             .background(p.card)
             .border(1.dp, p.border, RoundedCornerShape(999.dp))
-            .clickable(remember { MutableInteractionSource() }, null, onClick = onClick)
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -722,7 +772,7 @@ private fun RoundIconButton(
             .clip(CircleShape)
             .background(p.bg.copy(alpha = 0.65f))
             .border(1.dp, p.border.copy(alpha = 0.6f), CircleShape)
-            .clickable(remember { MutableInteractionSource() }, null, onClick = onClick),
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(icon, contentDescription = contentDescription, tint = p.text, modifier = Modifier.size(18.dp))
@@ -738,7 +788,7 @@ private fun RowScope.ActionPill(p: ComposerPalette, label: String, onClick: () -
             .clip(RoundedCornerShape(16.dp))
             .background(p.card)
             .border(1.dp, p.border, RoundedCornerShape(16.dp))
-            .clickable(remember { MutableInteractionSource() }, null, onClick = onClick),
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Text(label, color = p.text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
@@ -753,7 +803,7 @@ private fun ActionSmallPill(p: ComposerPalette, label: String, selected: Boolean
             .background(if (selected) p.card else p.bg)
             .border(1.dp, if (selected) p.border else p.border.copy(alpha = 0.6f), RoundedCornerShape(999.dp))
             .padding(horizontal = 12.dp, vertical = 8.dp)
-            .clickable(remember { MutableInteractionSource() }, null, onClick = onClick),
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Text(label, color = p.text, fontSize = 12.sp, fontWeight = FontWeight.Medium)

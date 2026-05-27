@@ -1,11 +1,10 @@
 package com.example.kampus.utils
 
+import android.util.Log
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.FirebaseFirestore
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
 /**
@@ -13,49 +12,170 @@ import kotlinx.coroutines.tasks.await
  */
 object FirestoreSeedData {
 
+    private const val TAG = "FirestoreSeedData"
+    private const val DELETE_BATCH_SIZE = 400
+    private const val MAX_DELETE_RETRIES = 2
+    private const val RETRY_DELAY_MS = 250L
+
     suspend fun clearSeededSocialDataForCurrentUser(firestore: FirebaseFirestore): Boolean {
         val currentUser = FirebaseAuth.getInstance().currentUser ?: return false
         val userDoc = firestore.collection("users").document(currentUser.uid)
+        var allSuccessful = true
 
         // Remove legacy social docs so Friends/Followers starts from real account data only.
-        deleteSubcollection(userDoc, "friends")
-        deleteSubcollection(userDoc, "followers")
-        deleteSubcollection(userDoc, "following")
-        deleteSubcollection(userDoc, "friendRequests")
-        deleteSubcollection(userDoc, "outgoingFriendRequests")
+        allSuccessful = deleteSubcollection(userDoc, "friends") && allSuccessful
+        allSuccessful = deleteSubcollection(userDoc, "followers") && allSuccessful
+        allSuccessful = deleteSubcollection(userDoc, "following") && allSuccessful
+        allSuccessful = deleteSubcollection(userDoc, "friendRequests") && allSuccessful
+        allSuccessful = deleteSubcollection(userDoc, "outgoingFriendRequests") && allSuccessful
 
         // Discover often contains legacy suggested people used during initial setup.
-        deleteNestedSubcollection(userDoc, "discover", "suggested", "people")
-        deleteNestedSubcollection(userDoc, "discover", "new", "people")
-        deleteNestedSubcollection(userDoc, "discover", "all", "people")
+        allSuccessful = deleteNestedSubcollection(userDoc, "discover", "suggested", "people") && allSuccessful
+        allSuccessful = deleteNestedSubcollection(userDoc, "discover", "new", "people") && allSuccessful
+        allSuccessful = deleteNestedSubcollection(userDoc, "discover", "all", "people") && allSuccessful
 
-        return true
+        return allSuccessful
     }
 
     suspend fun seedAllData(firestore: FirebaseFirestore) {
         try {
-            println("\n═══════════════════════════════════════════════════════════════")
-            println("🚀 KAMPUS FIRESTORE INITIALIZATION")
-            println("═══════════════════════════════════════════════════════════════")
-            
-            seedChatData(firestore)
+            Log.i(TAG, "Starting Firestore initialization")
             
             // Seed current user profile if authenticated
             val currentUser = FirebaseAuth.getInstance().currentUser
             if (currentUser != null) {
-                println("✅ Authenticated: ${currentUser.email}")
-                println("👤 User ID: ${currentUser.uid}")
-                println("📛 Display Name: ${currentUser.displayName}")
+                Log.i(TAG, "Authenticated user=${currentUser.uid} email=${currentUser.email}")
                 seedUserProfile(firestore, currentUser.uid)
+                seedSocialRelationshipsForCurrentUser(firestore, currentUser.uid)
             } else {
-                println("⚠️  No authenticated user found")
+                Log.w(TAG, "No authenticated user found; skipping profile seed")
             }
             
-            println("\n✅ Firestore initialization complete!")
-            println("═══════════════════════════════════════════════════════════════\n")
+            Log.i(TAG, "Firestore initialization complete")
         } catch (e: Exception) {
-            println("❌ Error seeding data: ${e.message}")
-            e.printStackTrace()
+            Log.e(TAG, "Error seeding data", e)
+        }
+    }
+
+    private suspend fun seedSocialRelationshipsForCurrentUser(firestore: FirebaseFirestore, userId: String) {
+        try {
+            Log.i(TAG, "Seeding social relationships for user $userId")
+
+            val userDoc = firestore.collection("users").document(userId).get().await()
+            if (userDoc.getBoolean("demoSocialDataSeeded") == true) {
+                Log.i(TAG, "Social relationships already seeded for user $userId; skipping")
+                return
+            }
+
+            val hasExistingSocialData = listOf("friends", "followers", "following", "friendRequests", "outgoingFriendRequests")
+                .any { subcollection ->
+                    firestore.collection("users").document(userId)
+                        .collection(subcollection)
+                        .limit(1)
+                        .get()
+                        .await()
+                        .isEmpty
+                        .not()
+                }
+
+            if (hasExistingSocialData) {
+                Log.i(TAG, "Existing social data found for user $userId; skipping seed")
+                firestore.collection("users").document(userId)
+                    .set(mapOf("demoSocialDataSeeded" to true), com.google.firebase.firestore.SetOptions.merge())
+                    .await()
+                return
+            }
+            
+            // Get all other users to create sample relationships
+            val allUsers = firestore.collection("users").get().await().documents
+                .filter { it.id != userId }
+                .take(5)  // Use first 5 other users
+            
+            if (allUsers.isEmpty()) {
+                Log.w(TAG, "No other users found to seed relationships")
+                return
+            }
+
+            // Create sample followers and following relationships
+            allUsers.forEachIndexed { index, userDoc ->
+                val otherUserId = userDoc.id
+                val otherUserData = mapOf(
+                    "userId" to otherUserId,
+                    "displayName" to (userDoc.getString("displayName") ?: "User"),
+                    "handle" to (userDoc.getString("handle") ?: "@user"),
+                    "avatarEmoji" to (userDoc.getString("avatarEmoji") ?: "👤"),
+                    "profileImageUrl" to (userDoc.getString("profileImageUrl") ?: ""),
+                    "isOnline" to (userDoc.getBoolean("isOnline") ?: false),
+                    "isMutual" to false,
+                    "createdAt" to System.currentTimeMillis(),
+                )
+
+                val currentUserData = mapOf(
+                    "userId" to userId,
+                    "displayName" to "You",
+                    "handle" to "@you",
+                    "avatarEmoji" to "👤",
+                    "profileImageUrl" to "",
+                    "isOnline" to true,
+                    "isMutual" to false,
+                    "createdAt" to System.currentTimeMillis(),
+                )
+
+                // Add as follower
+                firestore.collection("users").document(userId)
+                    .collection("followers").document(otherUserId)
+                    .set(otherUserData)
+                    .await()
+
+                // Add as following (alternate pattern for variety)
+                if (index % 2 == 0) {
+                    firestore.collection("users").document(userId)
+                        .collection("following").document(otherUserId)
+                        .set(otherUserData)
+                        .await()
+                }
+
+                // Create sample friend request from other user
+                if (index < 2) {
+                    val requestId = firestore.collection("users").document(userId)
+                        .collection("friendRequests").document().id
+
+                    val requestData = mapOf(
+                        "id" to requestId,
+                        "fromUserId" to otherUserId,
+                        "fromUserName" to (userDoc.getString("displayName") ?: "User"),
+                        "fromUserHandle" to (userDoc.getString("handle") ?: "@user"),
+                        "fromUserAvatar" to (userDoc.getString("avatarEmoji") ?: "👤"),
+                        "fromUserProfileImageUrl" to (userDoc.getString("profileImageUrl") ?: ""),
+                        "toUserId" to userId,
+                        "toUserName" to "You",
+                        "toUserHandle" to "@you",
+                        "toUserAvatar" to "👤",
+                        "toUserProfileImageUrl" to "",
+                        "status" to "PENDING",
+                        "createdAt" to System.currentTimeMillis(),
+                    )
+
+                    firestore.collection("users").document(userId)
+                        .collection("friendRequests").document(requestId)
+                        .set(requestData)
+                        .await()
+                }
+            }
+
+            firestore.collection("users").document(userId)
+                .set(
+                    mapOf(
+                        "demoSocialDataSeeded" to true,
+                        "demoSocialDataSeededAt" to System.currentTimeMillis(),
+                    ),
+                    com.google.firebase.firestore.SetOptions.merge(),
+                )
+                .await()
+
+            Log.i(TAG, "Social relationships seeded successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error seeding social relationships", e)
         }
     }
 
@@ -68,35 +188,19 @@ object FirestoreSeedData {
             val email = currentUser?.email ?: "user@example.com"
             
             // Extract displayName from email if not set
-            val displayName = if (!currentUser?.displayName.isNullOrEmpty()) {
-                currentUser?.displayName ?: "User"
-            } else {
-                // Extract from email: reth.chanrith.2823@rupp.edu.kh → Reth Chanrith
-                email.substringBefore("@")
-                    .replace(".", " ")
-                    .replace(Regex("\\d+"), "")  // Remove numbers
-                    .trim()
-                    .split(" ")
-                    .joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
-                    .ifEmpty { "User" }
-            }
-            
-            println("\n📦 PROFILE SETUP")
-            println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-            println("👤 Display Name: $displayName")
-            println("📧 Email: $email")
-            println("🔗 Handle: @${displayName.lowercase().replace(" ", "")}")
+            val displayName = deriveDisplayName(currentUser?.displayName, email)
+            val computedHandle = createHandle(displayName)
+            Log.i(TAG, "Profile setup displayName=$displayName email=$email handle=$computedHandle")
 
             // Check if profile already exists
             val existingProfile = firestore.collection("users").document(userId).get().await()
             
             if (existingProfile.exists()) {
                 // Profile exists - update only core auth identity fields, keep user-entered profile data intact
-                println("📝 Profile exists - syncing auth identity fields (non-destructive)")
+                Log.i(TAG, "Profile exists, syncing identity fields non-destructively")
                 val currentName = existingProfile.getString("displayName").orEmpty()
                 val currentEmail = existingProfile.getString("email").orEmpty()
                 val currentHandle = existingProfile.getString("handle").orEmpty()
-                val computedHandle = "@${displayName.lowercase().replace(" ", "")}"
 
                 val updates = mutableMapOf<String, Any>()
                 if (currentName.isBlank()) updates["displayName"] = displayName
@@ -106,13 +210,13 @@ object FirestoreSeedData {
                 if (updates.isNotEmpty()) {
                     updates["updatedAt"] = System.currentTimeMillis()
                     firestore.collection("users").document(userId).update(updates).await()
-                    println("✅ Missing identity fields synced")
+                    Log.i(TAG, "Missing identity fields synced")
                 } else {
-                    println("✅ Profile already complete - no overwrite performed")
+                    Log.i(TAG, "Profile already complete, no overwrite performed")
                 }
             } else {
                 // Profile doesn't exist - create new one
-                println("🆕 Creating new profile...")
+                Log.i(TAG, "Creating new profile")
                 
                 val statsMap = mapOf(
                     "posts" to 0L,
@@ -120,18 +224,11 @@ object FirestoreSeedData {
                     "following" to 0L,
                     "friendRequests" to 0L,
                 )
-                
-                println("\n📊 INITIAL STATS")
-                println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                println("📝 Posts: 0")
-                println("👥 Followers: 0")
-                println("🔗 Following: 0")
-                println("🤝 Friend Requests: 0")
 
                 val userProfile = mapOf(
                     "id" to userId,
                     "displayName" to displayName,  // ← From Gmail or extracted from email
-                    "handle" to "@${displayName.lowercase().replace(" ", "")}",  // Auto-generate
+                    "handle" to computedHandle,  // Auto-generate
                     "bio" to "",  // ← EMPTY - user fills in Edit Profile
                     "email" to email,  // ← From Gmail
                     "phone" to "",  // ← EMPTY - user fills in Edit Profile
@@ -153,122 +250,61 @@ object FirestoreSeedData {
                     .set(userProfile)
                     .await()
                 
-                println("\n✅ New profile created in Firestore")
+                Log.i(TAG, "New profile created in Firestore")
             }
         } catch (e: Exception) {
-            println("❌ Error seeding user profile: ${e.message}")
-            e.printStackTrace()
+            Log.e(TAG, "Error seeding user profile", e)
+            throw e
         }
     }
 
-    private suspend fun seedChatData(firestore: FirebaseFirestore) {
-        try {
-            // Sample chats
-            val chats = listOf(
-                mapOf(
-                    "id" to "chat_1",
-                    "name" to "Joanna Evan",
-                    "lastMessage" to "See you on the next meeting! 😊",
-                    "lastMessageTime" to System.currentTimeMillis() - 2040000,
-                    "timestamp" to "34 min",
-                    "unreadCount" to 3,
-                    "isOnline" to true,
-                    "avatarInitials" to "JE",
-                    "avatarColor" to 0xFF8B5CF6
-                ),
-                mapOf(
-                    "id" to "chat_2",
-                    "name" to "Lana Smith",
-                    "lastMessage" to "I'm doing my homework, but need to take...",
-                    "lastMessageTime" to System.currentTimeMillis() - 3600000,
-                    "timestamp" to "1h",
-                    "unreadCount" to 0,
-                    "isOnline" to false,
-                    "avatarInitials" to "LS",
-                    "avatarColor" to 0xFFEC4899
-                ),
-                mapOf(
-                    "id" to "chat_3",
-                    "name" to "Marina Martinez",
-                    "lastMessage" to "I'm watching Friends, what are u doin? 😊",
-                    "lastMessageTime" to System.currentTimeMillis() - 3600000,
-                    "timestamp" to "1 hour",
-                    "unreadCount" to 1,
-                    "isOnline" to true,
-                    "avatarInitials" to "MM",
-                    "avatarColor" to 0xFF10B981
-                ),
-                mapOf(
-                    "id" to "chat_4",
-                    "name" to "Alex Johnson",
-                    "lastMessage" to "See you on the next meeting! 😊",
-                    "lastMessageTime" to System.currentTimeMillis() - 7200000,
-                    "timestamp" to "2 hour",
-                    "unreadCount" to 12,
-                    "isOnline" to false,
-                    "avatarInitials" to "AJ",
-                    "avatarColor" to 0xFFF59E0B
-                ),
-            )
+    internal fun deriveDisplayName(authDisplayName: String?, email: String): String {
+        if (!authDisplayName.isNullOrBlank()) return authDisplayName
 
-            // Add chats to Firestore
-            for (chat in chats) {
-                firestore.collection("chats")
-                    .document(chat["id"].toString())
-                    .set(chat)
-                    .await()
+        // Extract from email: reth.chanrith.2823@rupp.edu.kh -> Reth Chanrith
+        return email.substringBefore("@")
+            .replace('.', ' ')
+            .replace(Regex("\\d+"), "")
+            .trim()
+            .split(" ")
+            .filter { it.isNotBlank() }
+            .joinToString(" ") { token ->
+                token.replaceFirstChar { c -> c.uppercaseChar() }
             }
+            .ifEmpty { "User" }
+    }
 
-            // Sample messages for chat_1
-            val messages1 = listOf(
-                mapOf("id" to "msg_1", "senderId" to "user_joanna", "text" to "Hi! How are you doing? 😊", "timestamp" to System.currentTimeMillis() - 5400000, "isRead" to true),
-                mapOf("id" to "msg_2", "senderId" to "current_user", "text" to "I'm doing great, thanks for asking!", "timestamp" to System.currentTimeMillis() - 5100000, "isRead" to true),
-                mapOf("id" to "msg_3", "senderId" to "user_joanna", "text" to "Are you coming to the meeting tomorrow?", "timestamp" to System.currentTimeMillis() - 4800000, "isRead" to true),
-                mapOf("id" to "msg_4", "senderId" to "current_user", "text" to "Yes of course! See you on the next meeting! 😊", "timestamp" to System.currentTimeMillis() - 4500000, "isRead" to true),
-            )
+    internal fun createHandle(displayName: String): String {
+        val normalized = displayName.lowercase()
+            .replace(Regex("[^a-z0-9 ]"), "")
+            .trim()
+            .replace(Regex("\\s+"), "")
 
-            for (msg in messages1) {
-                firestore.collection("chats").document("chat_1").collection("messages").document(msg["id"].toString()).set(msg).await()
-            }
-
-            // Sample messages for chat_3
-            val messages3 = listOf(
-                mapOf("id" to "msg_1", "senderId" to "user_marina", "text" to "Hey! What's up?", "timestamp" to System.currentTimeMillis() - 3600000, "isRead" to true),
-                mapOf("id" to "msg_2", "senderId" to "user_marina", "text" to "I'm watching Friends, what are u doin? 😊", "timestamp" to System.currentTimeMillis() - 3300000, "isRead" to true),
-                mapOf("id" to "msg_3", "senderId" to "current_user", "text" to "Nothing much, just relaxing at home", "timestamp" to System.currentTimeMillis() - 3000000, "isRead" to true),
-            )
-
-            for (msg in messages3) {
-                firestore.collection("chats").document("chat_3").collection("messages").document(msg["id"].toString()).set(msg).await()
-            }
-
-            println("✅ Chat data seeded successfully!")
-        } catch (e: Exception) {
-            println("❌ Error seeding chat data: ${e.message}")
-            e.printStackTrace()
-        }
+        return "@${normalized.ifEmpty { "user" }}"
     }
 
     private suspend fun deleteSubcollection(
-        userDoc: com.google.firebase.firestore.DocumentReference,
+        userDoc: DocumentReference,
         subcollection: String,
-    ) {
+    ): Boolean {
         try {
             val docs = userDoc.collection(subcollection).get().await().documents
-            for (doc in docs) {
-                doc.reference.delete().await()
-            }
+            return deleteDocumentsInBatches(
+                docs = docs.map { it.reference },
+                context = subcollection,
+            )
         } catch (e: Exception) {
-            println("⚠️ Skipping cleanup for $subcollection: ${e.message}")
+            Log.w(TAG, "Skipping cleanup for $subcollection", e)
+            return false
         }
     }
 
     private suspend fun deleteNestedSubcollection(
-        userDoc: com.google.firebase.firestore.DocumentReference,
+        userDoc: DocumentReference,
         parentCollection: String,
         parentDoc: String,
         childCollection: String,
-    ) {
+    ): Boolean {
         try {
             val docs = userDoc.collection(parentCollection)
                 .document(parentDoc)
@@ -277,11 +313,53 @@ object FirestoreSeedData {
                 .await()
                 .documents
 
-            for (doc in docs) {
-                doc.reference.delete().await()
-            }
+            return deleteDocumentsInBatches(
+                docs = docs.map { it.reference },
+                context = "$parentCollection/$parentDoc/$childCollection",
+            )
         } catch (e: Exception) {
-            println("⚠️ Skipping cleanup for $parentCollection/$parentDoc/$childCollection: ${e.message}")
+            Log.w(TAG, "Skipping cleanup for $parentCollection/$parentDoc/$childCollection", e)
+            return false
         }
+    }
+    private suspend fun deleteDocumentsInBatches(
+        docs: List<DocumentReference>,
+        context: String,
+    ): Boolean {
+        if (docs.isEmpty()) return true
+
+        docs.chunked(DELETE_BATCH_SIZE).forEachIndexed { index, chunk ->
+            var attempts = 0
+            var deleted = false
+
+            while (!deleted && attempts <= MAX_DELETE_RETRIES) {
+                attempts++
+
+                try {
+                    val batch = docs.first().firestore.batch()
+                    chunk.forEach { batch.delete(it) }
+                    batch.commit().await()
+                    deleted = true
+                } catch (e: Exception) {
+                    if (attempts > MAX_DELETE_RETRIES) {
+                        Log.w(
+                            TAG,
+                            "Failed deleting batch ${index + 1} for $context after $attempts attempts",
+                            e,
+                        )
+                        return false
+                    }
+
+                    Log.w(
+                        TAG,
+                        "Retrying delete batch ${index + 1} for $context (attempt $attempts)",
+                        e,
+                    )
+                    delay(RETRY_DELAY_MS * attempts)
+                }
+            }
+        }
+
+        return true
     }
 }
