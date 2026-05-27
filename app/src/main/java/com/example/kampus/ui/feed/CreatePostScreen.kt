@@ -73,6 +73,8 @@ import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.example.kampus.ui.theme.ThemeController
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private enum class FbComposerTheme { A_LIGHT, B_DARK }
 
@@ -81,10 +83,11 @@ private enum class PickerType { FEELING, PEOPLE, LOCATION, EVENT, GIF }
 @Composable
 fun CreatePostScreen(
     onClose: () -> Unit,
-    onPost: (text: String, mediaUris: List<Uri>, mediaTypes: List<PostItem.MediaType>, visibility: PostItem.PostVisibility, allowComments: Boolean, taggedPeople: List<String>, feelingEmoji: String?, location: String?) -> Unit,
+    onPost: suspend (text: String, mediaUris: List<Uri>, mediaTypes: List<PostItem.MediaType>, visibility: PostItem.PostVisibility, allowComments: Boolean, taggedPeople: List<String>, feelingEmoji: String?, location: String?) -> Result<String>,
 ) {
     val p = getComposerPalette()
     val strings = com.example.kampus.ui.localization.rememberUiStrings()
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     var text by remember { mutableStateOf("") }
 
@@ -106,8 +109,11 @@ fun CreatePostScreen(
     var musicText by remember { mutableStateOf("") }
 
     var pickerShown by remember { mutableStateOf<PickerType?>(null) }
+    var isSubmitting by remember { mutableStateOf(false) }
+    var submitError by remember { mutableStateOf<String?>(null) }
+    var submitSuccess by remember { mutableStateOf<String?>(null) }
 
-    val canPost = text.isNotBlank()
+    val canPost = text.isNotBlank() || mediaUris.isNotEmpty()
 
     // Track selected index for editing
     var selectedMediaIndex by remember { mutableStateOf<Int?>(null) }
@@ -604,6 +610,23 @@ fun CreatePostScreen(
                 )
             }
 
+            if (isSubmitting || !submitError.isNullOrBlank() || !submitSuccess.isNullOrBlank()) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (isSubmitting) {
+                        Text("Uploading and syncing to Home…", color = p.primary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    if (!submitSuccess.isNullOrBlank()) {
+                        Text(submitSuccess!!, color = Color(0xFF22C55E), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    if (!submitError.isNullOrBlank()) {
+                        Text(submitError!!, color = Color(0xFFEF4444), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+
             // Bottom action bar (facebook-like)
             Column(
                 modifier = Modifier
@@ -634,14 +657,41 @@ fun CreatePostScreen(
                             .background(if (canPost) p.primary else p.card)
                             .border(1.dp, if (canPost) p.primary else p.border, RoundedCornerShape(12.dp))
                             .clickable(
-                                enabled = canPost,
+                                enabled = canPost && !isSubmitting,
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null,
-                            ) { onPost(text.trim(), mediaUris, mediaTypes, visibility, allowComments, taggedPeople, feelingEmoji, locationText) },
+                            ) {
+                                scope.launch {
+                                    if (isSubmitting) return@launch
+                                    isSubmitting = true
+                                    submitError = null
+                                    submitSuccess = null
+
+                                    val result = onPost(
+                                        text.trim(),
+                                        mediaUris,
+                                        mediaTypes,
+                                        visibility,
+                                        allowComments,
+                                        taggedPeople,
+                                        feelingEmoji,
+                                        locationText,
+                                    )
+
+                                    isSubmitting = false
+                                    if (result.isSuccess) {
+                                        submitSuccess = "Posted and synced to Firebase"
+                                        delay(700)
+                                        onClose()
+                                    } else {
+                                        submitError = result.exceptionOrNull()?.message ?: "Failed to sync post"
+                                    }
+                                }
+                            },
                     ) {
                         Text(
                             text = "Post",
-                            color = if (canPost) Color.White else p.textMuted,
+                            color = if (canPost && !isSubmitting) Color.White else p.textMuted,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),

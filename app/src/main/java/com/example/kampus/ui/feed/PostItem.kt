@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION")
+
 package com.example.kampus.ui.feed
 
 import android.net.Uri
@@ -7,8 +9,10 @@ data class PostItem(
     val author: String,
     val authorId: String = "",
     val avatar: String,
+    val profileImageUrl: String = "",
     val time: String,
     val content: String,
+    val timestamp: Long = 0L,
 
     // Support for multiple media items (images/videos/emojis)
     val mediaUris: List<Uri> = emptyList(),           // List of image/video URIs
@@ -16,25 +20,23 @@ data class PostItem(
     val mediaEmojis: List<String> = emptyList(),      // List of emoji backgrounds
 
     // Backward compatibility - single media (deprecated, use mediaUris/mediaTypes instead)
-    @Deprecated("Use mediaUris and mediaTypes instead", level = DeprecationLevel.WARNING)
     val imageUri: Uri? = null,
-    @Deprecated("Use mediaEmojis instead", level = DeprecationLevel.WARNING)
     val imageEmoji: String? = null,
-    @Deprecated("Use mediaTypes instead", level = DeprecationLevel.WARNING)
     val mediaType: MediaType? = null,
 
     val likes: Int,
     val comments: Int,
+    val shares: Int = 0,
     val isVerified: Boolean = false,
     val feeling: String? = null,
     val location: String? = null,
     val tags: List<String> = emptyList(),
+    val likedBy: List<String> = emptyList(),
     val visibility: PostVisibility = PostVisibility.PUBLIC,
     val allowComments: Boolean = true,
     val taggedPeople: List<String> = emptyList(),
     val feelingEmoji: String? = null,
     val isPinned: Boolean = false,
-    val authorId: String = "",
 ) {
     enum class PostVisibility { PUBLIC, FRIENDS, FOLLOWERS, UNIVERSITY, PRIVATE }
     enum class MediaType { IMAGE, VIDEO }
@@ -42,23 +44,23 @@ data class PostItem(
     /**
      * Get first media URI for backward compatibility
      */
-    fun getFirstMediaUri(): Uri? = mediaUris.firstOrNull() ?: imageUri
+    fun getFirstMediaUri(): Uri? = mediaUris.firstOrNull()
 
     /**
      * Get first media type for backward compatibility
      */
-    fun getFirstMediaType(): MediaType? = mediaTypes.firstOrNull() ?: mediaType
+    fun getFirstMediaType(): MediaType? = mediaTypes.firstOrNull()
 
     /**
      * Check if post has any media
      */
-    fun hasMedia(): Boolean = mediaUris.isNotEmpty() || imageUri != null
+    fun hasMedia(): Boolean = mediaUris.isNotEmpty() || mediaTypes.isNotEmpty() || mediaEmojis.isNotEmpty()
 
     /**
      * Get total media count
      */
     fun getMediaCount(): Int = maxOf(
-        mediaUris.size + (if (imageUri != null) 1 else 0),
+        mediaUris.size,
         mediaTypes.size,
         mediaEmojis.size
     )

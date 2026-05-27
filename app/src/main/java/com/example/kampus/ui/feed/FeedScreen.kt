@@ -1,6 +1,9 @@
 @file:Suppress("SpellCheckingInspection")
 package com.example.kampus.ui.feed
 import android.content.Intent
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.text.format.DateUtils
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -33,6 +36,8 @@ import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -46,9 +51,10 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
+import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.launch
 import com.example.kampus.ui.components.CampusBottomNavBar
-import com.example.kampus.ui.feed.MenuItemLarge
+import com.example.kampus.ui.chat.ChatStory
 import com.example.kampus.ui.theme.ThemeController
 import com.example.kampus.utils.ActivityLogger
 
@@ -67,6 +73,29 @@ private val HGray4 get() = if (UiIsDark) Color(0xFF9CA3AF) else Color(0xFF6B7280
 private val HGray6 get() = if (UiIsDark) Color(0xFF374151) else Color(0xFF9CA3AF)
 private val HRed get() = Color(0xFFEF4444)
 private val HNavBg get() = if (UiIsDark) Color(0xFF0C1018) else Color(0xFFF3F4F8)
+private val HChipBg get() = if (UiIsDark) Color(0xFF111827) else Color(0xFFEFF2F7)
+
+private fun formatPostTime(post: PostItem): String {
+    val timestamp = post.timestamp
+    return if (timestamp > 0L) {
+        DateUtils.getRelativeTimeSpanString(timestamp, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS).toString()
+    } else {
+        post.time
+    }
+}
+
+private fun postMetadataLines(post: PostItem): List<String> = buildList {
+    post.feelingEmoji?.takeIf { it.isNotBlank() }?.let { add("Feeling $it") }
+    post.feeling?.takeIf { it.isNotBlank() }?.let { feeling ->
+        if (post.feelingEmoji.isNullOrBlank()) add("Feeling $feeling")
+    }
+    post.location?.takeIf { it.isNotBlank() }?.let { add("📍 $it") }
+    if (post.tags.isNotEmpty()) add(post.tags.take(4).joinToString(" "))
+    if (post.taggedPeople.isNotEmpty()) add("With ${post.taggedPeople.take(3).joinToString(", ")}")
+    if (post.visibility != PostItem.PostVisibility.PUBLIC) {
+        add("Visible to ${post.visibility.name.lowercase().replaceFirstChar { it.uppercaseChar() }}")
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Models
@@ -74,6 +103,7 @@ private val HNavBg get() = if (UiIsDark) Color(0xFF0C1018) else Color(0xFFF3F4F8
 data class StoryItem(
     val name   : String,
     val emoji  : String,
+    val profileImageUrl: String = "",
     val isMe   : Boolean = false,
     val hasNew : Boolean = true,
 )
@@ -104,6 +134,14 @@ private val navItems = listOf(
     NavItem("Chat",   Icons.Outlined.ChatBubbleOutline, Icons.Filled.ChatBubble),
 )
 
+private fun ChatStory.toFeedStoryItem(): StoryItem = StoryItem(
+    name = ownerName,
+    emoji = ownerAvatarEmoji,
+    profileImageUrl = ownerProfileImageUrl,
+    isMe = isMine,
+    hasNew = true,
+)
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Screen
 // ─────────────────────────────────────────────────────────────────────────────
@@ -113,15 +151,19 @@ fun HomeScreen(
     onProfileClick : () -> Unit = {},
     onNotifClick   : () -> Unit = {},
     onSearchClick  : () -> Unit = {},
+    onPostClick    : (Int) -> Unit = {},
     onGroupsClick  : () -> Unit = {},   // ← ADDED
     onEventsClick  : () -> Unit = {},   // ← ADDED (for future use)
     onChatClick    : () -> Unit = {},   // ← ADDED (for future use)
+    viewModel      : FeedViewModel = viewModel(),
 ) {
-    val vm: FeedViewModel = viewModel()
+    val vm = viewModel
     val context = LocalContext.current
     val uiState by vm.uiState.collectAsStateWithLifecycle()
     val likedPosts by vm.likedIds.collectAsState()
+    val currentUserId = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
     val posts = uiState.posts
+    val stories = uiState.stories.map { it.toFeedStoryItem() }
 
     var selectedNav by remember { mutableIntStateOf(0) }
     var notifCount  by remember { mutableIntStateOf(3) }
@@ -201,7 +243,11 @@ fun HomeScreen(
 
             item {
                 Spacer(Modifier.height(8.dp))
-                StoriesRow()
+                StoriesRow(
+                    stories = stories,
+                    currentUserProfileImageUrl = uiState.currentUserProfileImageUrl,
+                    currentUserAvatarEmoji = uiState.currentUserAvatarEmoji,
+                )
                 Spacer(Modifier.height(14.dp))
                 HorizontalDivider(
                     color     = HBorder.copy(alpha = 0.5f),
@@ -212,11 +258,12 @@ fun HomeScreen(
             items(posts, key = { it.id }) { post ->
                 PostCard(
                     post    = post,
-                    isLiked = post.id in likedPosts,
+                    isLiked = post.id in likedPosts || (currentUserId.isNotBlank() && currentUserId in post.likedBy),
                     onLike  = {
                         vm.toggleLike(post.id)
                     },
                     onShare = {
+                        vm.incrementShareCount(post.id)
                         ActivityLogger.logAction(
                             type = "share_post",
                             text = "Shared post by ${post.author}",
@@ -232,6 +279,14 @@ fun HomeScreen(
                     
                     onMenuAction = { targetPost, action ->
                         when (action) {
+                            "open" -> {
+                                onPostClick(targetPost.id)
+                            }
+                            "copy" -> {
+                                val clipboard = context.getSystemService(ClipboardManager::class.java)
+                                clipboard?.setPrimaryClip(ClipData.newPlainText("post", targetPost.content))
+                                coroutineScope.launch { snackbarHostState.showSnackbar("Post text copied") }
+                            }
                             "pin" -> {
                                 vm.pinPostBackend(targetPost.id, true)
                                 coroutineScope.launch { snackbarHostState.showSnackbar("Post pinned") }
@@ -273,6 +328,7 @@ fun HomeScreen(
                             }
                         }
                     },
+                    onComment = { onPostClick(post.id) },
                 )
                 Spacer(Modifier.height(6.dp))
             }
@@ -415,12 +471,132 @@ private fun TopBar(
 // Stories
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
-private fun StoriesRow() {
+private fun StoriesRow(
+    stories: List<StoryItem>,
+    currentUserProfileImageUrl: String,
+    currentUserAvatarEmoji: String,
+) {
     LazyRow(
         contentPadding        = PaddingValues(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
+        item {
+            StoryAddTile(
+                profileImageUrl = currentUserProfileImageUrl,
+                avatarEmoji = currentUserAvatarEmoji,
+                onLabelClick = {},
+                onAvatarClick = {},
+                label = "Create note",
+            )
+        }
         items(stories) { StoryBubble(it) }
+    }
+}
+
+@Composable
+private fun StoryAddTile(
+    profileImageUrl: String,
+    avatarEmoji: String,
+    onLabelClick: () -> Unit,
+    onAvatarClick: () -> Unit,
+    label: String,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.widthIn(min = 92.dp, max = 112.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(22.dp))
+                .background(
+                    Brush.linearGradient(
+                        listOf(
+                            HCard.copy(alpha = 0.98f),
+                            HCard.copy(alpha = 0.88f),
+                        ),
+                    ),
+                )
+                .border(1.dp, HBorder.copy(alpha = 0.82f), RoundedCornerShape(22.dp))
+                .clickable(onClick = onLabelClick)
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = label,
+                    color = HWhite,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Start,
+                )
+                Text(
+                    text = "Create note",
+                    color = HGray4,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Start,
+                )
+            }
+        }
+
+        Box(contentAlignment = Alignment.BottomEnd) {
+            Box(
+                modifier = Modifier
+                    .size(62.dp)
+                    .clip(CircleShape)
+                    .background(HChipBg)
+                    .border(2.dp, HBlue.copy(alpha = 0.55f), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (profileImageUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = profileImageUrl,
+                        contentDescription = "Your note",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(CircleShape)
+                            .clickable(onClick = onAvatarClick),
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable(onClick = onAvatarClick),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = avatarEmoji.ifBlank { "👤" },
+                            color = HWhite,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 22.sp,
+                        )
+                    }
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .offset(x = 2.dp, y = 2.dp)
+                    .clip(CircleShape)
+                    .background(HBlue)
+                    .border(2.dp, HBg, CircleShape)
+                    .clickable(onClick = onAvatarClick),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Default.Add,
+                    contentDescription = null,
+                    tint = HWhite,
+                    modifier = Modifier.size(13.dp),
+                )
+            }
+        }
     }
 }
 
@@ -452,7 +628,16 @@ private fun StoryBubble(story: StoryItem) {
                         .border(2.5.dp, HBg, CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(story.emoji, fontSize = 26.sp)
+                    if (story.profileImageUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = story.profileImageUrl,
+                            contentDescription = story.name,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize().clip(CircleShape),
+                        )
+                    } else {
+                        Text(story.emoji, fontSize = 26.sp)
+                    }
                 }
             }
             if (story.isMe) {
@@ -471,8 +656,9 @@ private fun StoryBubble(story: StoryItem) {
         }
 
     }
-    }
-    // ─────────────────────────────────────────────────────────────────────────────
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Post Card
 // ─────────────────────────────────────────────────────────────────────────────
 @OptIn(ExperimentalMaterial3Api::class)
@@ -482,6 +668,7 @@ private fun PostCard(
     isLiked: Boolean,
     onLike: () -> Unit,
     onShare: () -> Unit,
+    onComment: () -> Unit = {},
     onMenuAction: (PostItem, String) -> Unit = { _, _ -> },
 ) {
     val context = LocalContext.current
@@ -520,7 +707,16 @@ private fun PostCard(
                         .border(1.5.dp, HBorder, CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(post.avatar, fontSize = 20.sp)
+                    if (post.profileImageUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = post.profileImageUrl,
+                            contentDescription = post.author,
+                            modifier = Modifier.fillMaxSize().clip(CircleShape),
+                            contentScale = ContentScale.Crop,
+                        )
+                    } else {
+                        Text(post.avatar, fontSize = 20.sp)
+                    }
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Row(
@@ -532,7 +728,7 @@ private fun PostCard(
                             Icon(Icons.Default.Verified, "Verified", tint = HBlue, modifier = Modifier.size(15.dp))
                         }
                     }
-                    Text(post.time, color = HGray4, fontSize = 12.sp)
+                    Text(formatPostTime(post), color = HGray4, fontSize = 12.sp)
                 }
             }
             var showMenu by rememberSaveable { mutableStateOf(false) }
@@ -590,7 +786,7 @@ private fun PostCard(
                                     Text("Post options", color = HWhite, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 18.dp, top = 6.dp, end = 18.dp, bottom = 2.dp))
                                     Text("Choose what to do with this post.", color = HGray4, fontSize = 13.sp, modifier = Modifier.padding(start = 18.dp, end = 18.dp, bottom = 8.dp))
 
-                                    MenuItemLarge(icon = Icons.Outlined.OpenInNew, label = "Open post", tint = HBlue) {
+                                    MenuItemLarge(icon = Icons.AutoMirrored.Outlined.Send, label = "Open post", tint = HBlue) {
                                         onMenuAction(post, "open")
                                         closeMenu()
                                     }
@@ -599,7 +795,7 @@ private fun PostCard(
                                         closeMenu()
                                     }
 
-                                    Divider(color = HBorder.copy(alpha = 0.5f))
+                                    HorizontalDivider(color = HBorder.copy(alpha = 0.5f))
 
                                     MenuItemLarge(icon = Icons.Default.BookmarkAdd, label = if (post.isPinned) "Unpin post" else "Pin post", tint = HBlue, subtitle = "Keep this post at the top") {
                                         onMenuAction(post, if (post.isPinned) "unpin" else "pin")
@@ -631,12 +827,12 @@ private fun PostCard(
                                         onMenuAction(post, "privacy_public")
                                         closeMenu()
                                     }
-                                    Divider(color = HBorder.copy(alpha = 0.5f))
+                                    HorizontalDivider(color = HBorder.copy(alpha = 0.5f))
                                     MenuItemLarge(icon = Icons.Outlined.Group, label = "Friends", tint = HBlue, subtitle = "Only your friends can see it") {
                                         onMenuAction(post, "privacy_friends")
                                         closeMenu()
                                     }
-                                    Divider(color = HBorder.copy(alpha = 0.5f))
+                                    HorizontalDivider(color = HBorder.copy(alpha = 0.5f))
                                     MenuItemLarge(icon = Icons.Outlined.Lock, label = "Only me", tint = HGray2, subtitle = "Visible only to you") {
                                         onMenuAction(post, "privacy_private")
                                         closeMenu()
@@ -659,7 +855,7 @@ private fun PostCard(
                                         onMenuAction(post, "hide_profile")
                                         closeMenu()
                                     }
-                                    Divider(color = HBorder.copy(alpha = 0.5f))
+                                    HorizontalDivider(color = HBorder.copy(alpha = 0.5f))
                                     MenuItemLarge(icon = Icons.Default.Delete, label = "Delete post", tint = HRed, subtitle = "This removes the post from the feed") {
                                         onMenuAction(post, "trash")
                                         closeMenu()
@@ -822,7 +1018,7 @@ private fun PostCard(
                 ) {
                     ImageAction(
                         icon    = if (isLiked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-                        label   = "${post.likes + if (isLiked) 1 else 0}",
+                        label   = "${post.likes}",
                         tint    = likeColor, scale = likeScale, onClick = onLike,
                     )
                     ImageAction(Icons.Outlined.ChatBubbleOutline, "${post.comments}", HWhite.copy(0.8f))
@@ -840,16 +1036,28 @@ private fun PostCard(
                 post.content, color = HGray2, fontSize = 15.sp, lineHeight = 24.sp,
                 modifier = Modifier.padding(horizontal = 14.dp),
             )
+            val metadataLines = postMetadataLines(post)
+            if (metadataLines.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                Column(
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    metadataLines.forEach { line ->
+                        Text(line, color = HGray4, fontSize = 12.sp, lineHeight = 16.sp)
+                    }
+                }
+            }
             Spacer(Modifier.height(10.dp))
             HorizontalDivider(color = HBorder.copy(0.5f), thickness = 0.5.dp, modifier = Modifier.padding(horizontal = 14.dp))
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp)) {
                 TextAction(
                     icon    = if (isLiked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-                    label   = "${post.likes + if (isLiked) 1 else 0}",
+                    label   = "${post.likes}",
                     tint    = likeColor, scale = likeScale, onClick = onLike,
                 )
-                TextAction(Icons.Outlined.ChatBubbleOutline, "${post.comments}", HGray4)
-                TextAction(Icons.AutoMirrored.Outlined.Send, "Share", HGray4, onClick = onShare)
+                TextAction(Icons.Outlined.ChatBubbleOutline, "${post.comments}", HGray4, onClick = onComment)
+                TextAction(Icons.AutoMirrored.Outlined.Send, "${post.shares}", HGray4, onClick = onShare)
             }
             Spacer(Modifier.height(4.dp))
         }

@@ -53,6 +53,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -67,6 +74,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.painter.ColorPainter
+import coil.request.ImageRequest
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -100,8 +109,22 @@ fun PublicProfileScreen(
     Surface(modifier = Modifier.fillMaxSize(), color = Bg) {
         if (state.isLoading) {
             android.util.Log.d("PublicProfileScreen", "Profile still loading for userId=${state.userId}")
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = Blue)
+            // Simple skeleton shimmer for header and stats
+            Column(modifier = Modifier.fillMaxSize().statusBarsPadding(), verticalArrangement = Arrangement.Top) {
+                ShimmerBox(modifier = Modifier
+                    .fillMaxWidth()
+                    .height(190.dp)
+                )
+
+                Row(modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 40.dp, start = 24.dp, end = 24.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    ShimmerBox(modifier = Modifier.size(64.dp))
+                    ShimmerBox(modifier = Modifier.size(64.dp))
+                    ShimmerBox(modifier = Modifier.size(64.dp))
+                }
             }
             return@Surface
         }
@@ -126,8 +149,13 @@ fun PublicProfileScreen(
                         ),
                 ) {
                     if (state.coverImageUrl.isNotEmpty()) {
+                        val ctx = LocalContext.current
                         AsyncImage(
-                            model = state.coverImageUrl,
+                            model = ImageRequest.Builder(ctx)
+                                .data(state.coverImageUrl)
+                                .crossfade(true)
+                                .build(),
+                            placeholder = ColorPainter(Color.Gray.copy(alpha = 0.12f)),
                             contentDescription = "Cover",
                             contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize(),
@@ -159,8 +187,13 @@ fun PublicProfileScreen(
                     contentAlignment = Alignment.Center,
                 ) {
                     if (state.profileImageUrl.isNotEmpty()) {
+                        val ctx = LocalContext.current
                         AsyncImage(
-                            model = state.profileImageUrl,
+                            model = ImageRequest.Builder(ctx)
+                                .data(state.profileImageUrl)
+                                .crossfade(true)
+                                .build(),
+                            placeholder = ColorPainter(Color.DarkGray.copy(alpha = 0.12f)),
                             contentDescription = "Profile",
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
@@ -344,6 +377,24 @@ fun PublicProfileScreen(
             }
         }
     }
+}
+
+@Composable
+private fun ShimmerBox(modifier: Modifier) {
+    val transition = rememberInfiniteTransition()
+    val anim by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(animation = tween(durationMillis = 900, easing = LinearEasing), repeatMode = RepeatMode.Reverse)
+    )
+
+    val brush = Brush.linearGradient(
+        colors = listOf(Color.Gray.copy(alpha = 0.12f), Color.Gray.copy(alpha = 0.06f), Color.Gray.copy(alpha = 0.12f)),
+        start = androidx.compose.ui.geometry.Offset(0f + anim * 200f, 0f),
+        end = androidx.compose.ui.geometry.Offset(200f + anim * 200f, 0f),
+    )
+
+    Spacer(modifier = modifier.background(brush = brush))
 }
 
 @Composable

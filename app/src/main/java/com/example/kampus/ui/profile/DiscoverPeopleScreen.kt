@@ -78,6 +78,8 @@ private data class DiscoverPerson(
     val coverImageUrl: String,
     val isRequested: Boolean,
     val isFriend: Boolean,
+    val isFollowing: Boolean,
+    val isFollowedBy: Boolean,
 )
 
 private data class SocialMetrics(
@@ -107,6 +109,7 @@ fun DiscoverPeopleScreen(
     var mutualCountByUser by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     var followerCountByUser by remember { mutableStateOf<Map<String, Long>>(emptyMap()) }
     var followingCountByUser by remember { mutableStateOf<Map<String, Long>>(emptyMap()) }
+    var optimisticOutgoingRequestIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     val profileState by viewModel.uiState.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val strings = rememberUiStrings()
@@ -114,8 +117,19 @@ fun DiscoverPeopleScreen(
     val currentFriendIds = remember(profileState.friends) {
         profileState.friends.map { it.userId }.toSet()
     }
+    val currentFollowerIds = remember(profileState.followers) {
+        profileState.followers.map { it.userId }.toSet()
+    }
+    val currentFollowingIds = remember(profileState.following) {
+        profileState.following.map { it.userId }.toSet()
+    }
     val outgoingRequestIds = remember(profileState.outgoingFriendRequests) {
-        profileState.outgoingFriendRequests.map { it.toUserId }.toSet()
+        profileState.outgoingFriendRequests.map { it.toUserId }.toSet() + optimisticOutgoingRequestIds
+    }
+
+    LaunchedEffect(profileState.outgoingFriendRequests) {
+        val liveOutgoingIds = profileState.outgoingFriendRequests.map { it.toUserId }.toSet()
+        optimisticOutgoingRequestIds = optimisticOutgoingRequestIds - liveOutgoingIds
     }
 
     LaunchedEffect(Unit) {
@@ -155,19 +169,23 @@ fun DiscoverPeopleScreen(
                             coverImageUrl = doc.getString("coverImageUrl") ?: "",
                             isRequested = false,
                             isFriend = false,
+                            isFollowing = false,
+                            isFollowedBy = false,
                         )
                     }
                     .sortedByDescending { it.isNew }
             }
     }
 
-    val decoratedUsers = remember(allUsers, currentFriendIds, outgoingRequestIds) {
+    val decoratedUsers = remember(allUsers, currentFriendIds, currentFollowerIds, currentFollowingIds, outgoingRequestIds) {
         allUsers.map { person ->
             val liveFollowerCount = followerCountByUser[person.userId] ?: person.followers
             val liveFollowingCount = followingCountByUser[person.userId] ?: person.following
             person.copy(
                 isRequested = person.userId in outgoingRequestIds,
                 isFriend = person.userId in currentFriendIds,
+                isFollowing = person.userId in currentFollowingIds,
+                isFollowedBy = person.userId in currentFollowerIds,
                 mutualCount = mutualCountByUser[person.userId] ?: 0,
                 followers = liveFollowerCount,
                 following = liveFollowingCount,
@@ -175,32 +193,7 @@ fun DiscoverPeopleScreen(
         }
     }
 
-    LaunchedEffect(allUsers, currentFriendIds) {
-        val firestore = FirebaseFirestore.getInstance()
-        val counts = mutableMapOf<String, Int>()
-        val followerCounts = mutableMapOf<String, Long>()
-        val followingCounts = mutableMapOf<String, Long>()
-
-        allUsers.forEach { person ->
-            val metrics = loadSocialMetrics(
-                firestore = firestore,
-                targetUserId = person.userId,
-                currentFriendIds = currentFriendIds,
-            )
-
-            if (metrics != null) {
-                counts[person.userId] = metrics.mutualCount
-                followerCounts[person.userId] = metrics.followersCount
-                followingCounts[person.userId] = metrics.followingCount
-            }
-        }
-
-        mutualCountByUser = counts
-        followerCountByUser = followerCounts
-        followingCountByUser = followingCounts
-    }
-
-    DisposableEffect(allUsers, currentFriendIds) {
+    DisposableEffect(allUsers) {
         val firestore = FirebaseFirestore.getInstance()
         val registrations = mutableListOf<ListenerRegistration>()
 
@@ -208,36 +201,21 @@ fun DiscoverPeopleScreen(
             val followersListener = firestore.collection("users")
                 .document(person.userId)
                 .collection("followers")
-                .addSnapshotListener { _, _ ->
-                    scope.launch {
-                        val metrics = loadSocialMetrics(
-                            firestore = firestore,
-                            targetUserId = person.userId,
-                            currentFriendIds = currentFriendIds,
-                        )
-                        if (metrics != null) {
-                            followerCountByUser = followerCountByUser + (person.userId to metrics.followersCount)
-                            followingCountByUser = followingCountByUser + (person.userId to metrics.followingCount)
-                            mutualCountByUser = mutualCountByUser + (person.userId to metrics.mutualCount)
-                        }
-                    }
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) return@addSnapshotListener
+
+                    val count = snapshot?.size()?.toLong() ?: 0L
+                    followerCountByUser = followerCountByUser + (person.userId to count)
                 }
 
             val followingListener = firestore.collection("users")
                 .document(person.userId)
                 .collection("following")
-                .addSnapshotListener { _, _ ->
-                    scope.launch {
-                        val metrics = loadSocialMetrics(
-                            firestore = firestore,
-                            targetUserId = person.userId,
-                            currentFriendIds = currentFriendIds,
-                        )
-                        if (metrics != null) {
-                            followingCountByUser = followingCountByUser + (person.userId to metrics.followingCount)
-                            mutualCountByUser = mutualCountByUser + (person.userId to metrics.mutualCount)
-                        }
-                    }
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) return@addSnapshotListener
+
+                    val count = snapshot?.size()?.toLong() ?: 0L
+                    followingCountByUser = followingCountByUser + (person.userId to count)
                 }
 
             registrations += followersListener
@@ -252,7 +230,7 @@ fun DiscoverPeopleScreen(
     val visible = when (selected) {
         DiscoverTab.All -> decoratedUsers
         DiscoverTab.New -> decoratedUsers.filter { it.isNew }
-        DiscoverTab.Suggested -> decoratedUsers.filter { !it.isFriend && !it.isRequested }
+        DiscoverTab.Suggested -> decoratedUsers.filter { !it.isFriend && !it.isRequested && !it.isFollowing }
     }
 
     Surface(color = DpBg, modifier = Modifier.fillMaxSize()) {
@@ -321,7 +299,10 @@ fun DiscoverPeopleScreen(
                                 strings = strings,
                                 modifier = Modifier.weight(1f),
                                 onOpenProfile = { onOpenProfile(rowItems[0].userId) },
-                                onFollow = { viewModel.sendFriendRequest(rowItems[0].userId) },
+                                onFollow = {
+                                    optimisticOutgoingRequestIds = optimisticOutgoingRequestIds + rowItems[0].userId
+                                    viewModel.sendFriendRequest(rowItems[0].userId)
+                                },
                             )
                             if (rowItems.size > 1) {
                                 DiscoverCard(
@@ -329,7 +310,10 @@ fun DiscoverPeopleScreen(
                                     strings = strings,
                                     modifier = Modifier.weight(1f),
                                     onOpenProfile = { onOpenProfile(rowItems[1].userId) },
-                                    onFollow = { viewModel.sendFriendRequest(rowItems[1].userId) },
+                                    onFollow = {
+                                        optimisticOutgoingRequestIds = optimisticOutgoingRequestIds + rowItems[1].userId
+                                        viewModel.sendFriendRequest(rowItems[1].userId)
+                                    },
                                 )
                             } else {
                                 Spacer(modifier = Modifier.weight(1f))
@@ -402,6 +386,24 @@ private fun DiscoverCard(
     onOpenProfile: () -> Unit,
     onFollow: () -> Unit,
 ) {
+        val isFriend = person.isFriend
+        val isRequested = person.isRequested
+        val isFollowing = person.isFollowing
+        val isFollowedBy = person.isFollowedBy
+        val actionText = when {
+            isFriend -> strings.friend
+            isRequested -> strings.requested
+            isFollowing -> "Following"
+            isFollowedBy -> "Follow back"
+            else -> strings.follow
+        }
+        val actionEnabled = !isFriend && !isRequested && !isFollowing
+        val actionColor = when {
+            isFriend || isRequested || isFollowing -> DpActionMuted
+            isFollowedBy -> DpBlue
+            else -> DpBlue
+        }
+
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(16.dp))
@@ -523,21 +525,16 @@ private fun DiscoverCard(
 
             Button(
                 onClick = onFollow,
-                enabled = !person.isRequested && !person.isFriend,
+                enabled = actionEnabled,
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (person.isFriend || person.isRequested) DpActionMuted else DpBlue,
+                    containerColor = actionColor,
                     contentColor = DpWhite,
                     disabledContainerColor = DpActionMuted,
                     disabledContentColor = DpWhite,
                 ),
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                val actionText = when {
-                    person.isFriend -> strings.friend
-                    person.isRequested -> strings.requested
-                    else -> strings.follow
-                }
                 Text(text = actionText, fontWeight = FontWeight.Medium)
             }
         }

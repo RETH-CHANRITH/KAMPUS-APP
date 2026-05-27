@@ -107,7 +107,7 @@ object FirestoreSeedData {
                     "profileImageUrl" to (userDoc.getString("profileImageUrl") ?: ""),
                     "isOnline" to (userDoc.getBoolean("isOnline") ?: false),
                     "isMutual" to false,
-                    "addedAt" to com.google.firebase.Timestamp.now(),
+                    "createdAt" to System.currentTimeMillis(),
                 )
 
                 val currentUserData = mapOf(
@@ -118,7 +118,7 @@ object FirestoreSeedData {
                     "profileImageUrl" to "",
                     "isOnline" to true,
                     "isMutual" to false,
-                    "addedAt" to com.google.firebase.Timestamp.now(),
+                    "createdAt" to System.currentTimeMillis(),
                 )
 
                 // Add as follower
@@ -153,7 +153,7 @@ object FirestoreSeedData {
                         "toUserAvatar" to "👤",
                         "toUserProfileImageUrl" to "",
                         "status" to "PENDING",
-                        "createdAt" to com.google.firebase.Timestamp.now(),
+                        "createdAt" to System.currentTimeMillis(),
                     )
 
                     firestore.collection("users").document(userId)

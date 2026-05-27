@@ -1,146 +1,171 @@
 package com.example.kampus.data.repository
 
-import com.example.kampus.ui.events.EventItem
-import com.example.kampus.ui.events.EventCategory
-import androidx.compose.ui.graphics.Color
-import com.google.firebase.firestore.FirebaseFirestore
+import android.net.Uri
+import android.util.Log
+import com.example.kampus.di.SupabaseModule
+import com.example.kampus.domain.model.Event
+import com.example.kampus.domain.repository.IEventRepository
+import io.github.jan.supabase.annotations.SupabaseExperimental
+import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.realtime.PostgresAction
+import io.github.jan.supabase.realtime.channel
+import io.github.jan.supabase.realtime.decodeOldRecordOrNull
+import io.github.jan.supabase.realtime.decodeRecordOrNull
+import io.github.jan.supabase.realtime.postgresChangeFlow
+import io.github.jan.supabase.realtime.realtime
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.launch
+
+private fun Event.cacheKey(): String = id ?: "${title}_${createdAt ?: ""}"
 
 class EventRepositoryImpl(
-    private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance(),
-) : com.example.kampus.domain.repository.IEventRepository {
+    private val tableName: String = "events",
+) : IEventRepository {
 
-    override fun getEvents(): Flow<Result<List<EventItem>>> = callbackFlow {
-        val listener = firestore.collection("events")
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    trySend(Result.failure(error))
-                    return@addSnapshotListener
+    private val supabase = SupabaseModule.getSupabaseClient()
+
+    override suspend fun uploadEventImage(userId: String, imageUri: Uri): Result<String> {
+        return try {
+            SupabaseModule.getStorageManager().uploadEventImage(userId, imageUri)
+        } catch (e: Exception) {
+            Log.e("EventRepositoryImpl", "uploadEventImage failed: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    @OptIn(SupabaseExperimental::class)
+    override fun getEvents(): Flow<Result<List<Event>>> {
+        return callbackFlow {
+            val channel = supabase.channel("events-realtime")
+            val cache = linkedMapOf<String, Event>()
+
+            try {
+                val initialEvents = supabase
+                    .from(tableName)
+                    .select()
+                    .decodeList<Event>()
+
+                initialEvents.forEach { record ->
+                    cache[record.cacheKey()] = record
                 }
-
-                val events = snapshot?.documents?.mapNotNull { doc ->
-                    try {
-                        val categoryStr = doc.getString("category") ?: "CAMPUS"
-                        val category = try {
-                            EventCategory.valueOf(categoryStr)
-                        } catch (e: Exception) {
-                            EventCategory.CAMPUS
-                        }
-                        
-                        EventItem(
-                            id = (doc.get("id") as? Number)?.toInt() ?: doc.id.hashCode(),
-                            title = doc.getString("title") ?: "Untitled",
-                            category = category,
-                            date = doc.getString("date") ?: "",
-                            time = doc.getString("time") ?: "",
-                            location = doc.getString("location") ?: "",
-                            interested = (doc.get("interested") as? Number)?.toInt() ?: 0,
-                            likes = (doc.get("likes") as? Number)?.toInt() ?: 0,
-                            comments = (doc.get("comments") as? Number)?.toInt() ?: 0,
-                            shares = (doc.get("shares") as? Number)?.toInt() ?: 0,
-                            coverEmoji = doc.getString("coverEmoji") ?: "🎉",
-                            coverColor1 = Color(0xFF1A0A2E),
-                            coverColor2 = Color(0xFF4A1060),
-                            description = doc.getString("description") ?: "",
-                            organizer = doc.getString("organizer") ?: "Unknown",
-                            organizerEmoji = doc.getString("organizerEmoji") ?: "👤",
-                            organizerTime = doc.getString("organizerTime") ?: "now",
-                            ownerId = doc.getString("ownerId") ?: doc.getString("authorId") ?: "",
-                            createdAt = when (val value = doc.get("createdAt")) {
-                                is Number -> value.toLong()
-                                is com.google.firebase.Timestamp -> value.toDate().time
-                                else -> null
-                            },
-                            imageUrl = doc.getString("imageUrl") ?: doc.getString("coverImageUrl"),
-                            isPinned = doc.getBoolean("isPinned") ?: false,
-                        )
-                    } catch (e: Exception) {
-                        null
-                    }
-                } ?: emptyList()
-
-                trySend(Result.success(events))
+                trySend(Result.success(cache.values.toList()))
+            } catch (e: Exception) {
+                trySend(Result.failure(e))
+                close(e)
+                return@callbackFlow
             }
 
-        awaitClose { listener.remove() }
-    }
-
-    suspend fun createEvent(event: Map<String, Any>): Result<String> = try {
-        val ref = firestore.collection("events").add(event).await()
-        Result.success(ref.id)
-    } catch (e: Exception) {
-        Result.failure(e)
-    }
-
-    suspend fun updateEvent(eventId: String, data: Map<String, Any>): Result<Unit> = try {
-        firestore.collection("events").document(eventId).update(data).await()
-        Result.success(Unit)
-    } catch (e: Exception) {
-        Result.failure(e)
-    }
-
-    suspend fun deleteEvent(eventId: String): Result<Unit> = try {
-        firestore.collection("events").document(eventId).delete().await()
-        Result.success(Unit)
-    } catch (e: Exception) {
-        Result.failure(e)
-    }
-
-    override fun getEventById(eventId: String): Flow<Result<EventItem?>> = callbackFlow {
-        val listener = firestore.collection("events").document(eventId)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    trySend(Result.failure(error))
-                    return@addSnapshotListener
-                }
-
-                val event = if (snapshot != null && snapshot.exists()) {
-                    try {
-                        val categoryStr = snapshot.getString("category") ?: "CAMPUS"
-                        val category = try {
-                            EventCategory.valueOf(categoryStr)
-                        } catch (e: Exception) {
-                            EventCategory.CAMPUS
+            val collectJob = launch {
+                channel.postgresChangeFlow<PostgresAction>("public") {
+                    table = tableName
+                }.collect { action ->
+                    when (action) {
+                        is PostgresAction.Insert -> action.decodeRecordOrNull<Event>()?.let { record ->
+                            cache[record.cacheKey()] = record
+                            trySend(Result.success(cache.values.toList()))
                         }
-                        
-                        EventItem(
-                            id = (snapshot.get("id") as? Number)?.toInt() ?: snapshot.id.hashCode(),
-                            title = snapshot.getString("title") ?: "Untitled",
-                            category = category,
-                            date = snapshot.getString("date") ?: "",
-                            time = snapshot.getString("time") ?: "",
-                            location = snapshot.getString("location") ?: "",
-                            interested = (snapshot.get("interested") as? Number)?.toInt() ?: 0,
-                            likes = (snapshot.get("likes") as? Number)?.toInt() ?: 0,
-                            comments = (snapshot.get("comments") as? Number)?.toInt() ?: 0,
-                            shares = (snapshot.get("shares") as? Number)?.toInt() ?: 0,
-                            coverEmoji = snapshot.getString("coverEmoji") ?: "🎉",
-                            coverColor1 = Color(0xFF1A0A2E),
-                            coverColor2 = Color(0xFF4A1060),
-                            description = snapshot.getString("description") ?: "",
-                            organizer = snapshot.getString("organizer") ?: "Unknown",
-                            organizerEmoji = snapshot.getString("organizerEmoji") ?: "👤",
-                            organizerTime = snapshot.getString("organizerTime") ?: "now",
-                            ownerId = snapshot.getString("ownerId") ?: snapshot.getString("authorId") ?: "",
-                            createdAt = when (val value = snapshot.get("createdAt")) {
-                                is Number -> value.toLong()
-                                is com.google.firebase.Timestamp -> value.toDate().time
-                                else -> null
-                            },
-                            imageUrl = snapshot.getString("imageUrl") ?: snapshot.getString("coverImageUrl"),
-                            isPinned = snapshot.getBoolean("isPinned") ?: false,
-                        )
-                    } catch (e: Exception) {
-                        null
-                    }
-                } else null
 
-                trySend(Result.success(event))
+                        is PostgresAction.Update -> action.decodeRecordOrNull<Event>()?.let { record ->
+                            cache[record.cacheKey()] = record
+                            trySend(Result.success(cache.values.toList()))
+                        }
+
+                        is PostgresAction.Delete -> action.decodeOldRecordOrNull<Event>()?.let { record ->
+                            cache.remove(record.cacheKey())
+                            trySend(Result.success(cache.values.toList()))
+                        }
+
+                        is PostgresAction.Select -> action.decodeRecordOrNull<Event>()?.let { record ->
+                            cache[record.cacheKey()] = record
+                            trySend(Result.success(cache.values.toList()))
+                        }
+                    }
+                }
             }
 
-        awaitClose { listener.remove() }
+            launch {
+                channel.subscribe(true)
+            }
+
+            awaitClose {
+                collectJob.cancel()
+                launch {
+                    supabase.realtime.removeChannel(channel)
+                }
+            }
+        }.catch { error ->
+            emit(Result.failure(error))
+        }
+    }
+
+    override suspend fun createEvent(event: Event): Result<Event> = try {
+        Log.d("EventRepositoryImpl", "Inserting event into table=$tableName title=${event.title}")
+        val inserted = supabase
+            .from(tableName)
+            .insert(event) { select() }
+            .decodeSingle<Event>()
+
+        Log.d("EventRepositoryImpl", "Insert returned id=${inserted.id}")
+        Result.success(inserted)
+    } catch (e: Exception) {
+        Log.e("EventRepositoryImpl", "createEvent failed: ${e.message}", e)
+        Result.failure(e)
+    }
+
+    override suspend fun updateEvent(eventId: String, event: Event): Result<Event> = try {
+        val updated = supabase
+            .from(tableName)
+            .update(event) {
+                select()
+                filter {
+                    eq("id", eventId)
+                }
+            }
+            .decodeSingle<Event>()
+
+        Result.success(updated)
+    } catch (e: Exception) {
+        Log.e("EventRepositoryImpl", "updateEvent failed: ${e.message}", e)
+        Result.failure(e)
+    }
+
+    override suspend fun deleteEvent(eventId: String): Result<Unit> = try {
+        supabase
+            .from(tableName)
+            .delete {
+                filter {
+                    eq("id", eventId)
+                }
+            }
+
+        Result.success(Unit)
+    } catch (e: Exception) {
+        Log.e("EventRepositoryImpl", "deleteEvent failed: ${e.message}", e)
+        Result.failure(e)
+    }
+
+    @OptIn(SupabaseExperimental::class)
+    override fun getEventById(eventId: String): Flow<Result<Event?>> {
+        return flow {
+            try {
+                val event = supabase
+                    .from(tableName)
+                    .select {
+                        filter {
+                            eq("id", eventId)
+                        }
+                    }
+                    .decodeList<Event>()
+                    .firstOrNull()
+
+                emit(Result.success(event))
+            } catch (e: Exception) {
+                emit(Result.failure(e))
+            }
+        }
     }
 }

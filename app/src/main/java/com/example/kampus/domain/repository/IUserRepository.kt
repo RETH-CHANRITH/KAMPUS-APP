@@ -36,11 +36,15 @@ interface  IUserRepository {
     suspend fun rejectFriendRequest(requestId: String): Result<Unit>
         suspend fun cancelFriendRequest(requestId: String): Result<Unit>
     suspend fun removeFriend(userId: String, friendId: String): Result<Unit>
+    // Follow / unfollow shortcuts
+    suspend fun followUser(fromUserId: String, toUserId: String): Result<Unit>
+    suspend fun isUserPrivate(userId: String): Result<Boolean>
     
     // Profile updates
     suspend fun updateProfile(user: User): Result<Unit>
     suspend fun updateProfileImage(userId: String, imageUrl: String): Result<Unit>
     suspend fun updateCoverImage(userId: String, imageUrl: String): Result<Unit>
+    suspend fun syncProfileStats(userId: String): Result<Unit>
     
     // Search
     fun searchUsers(query: String): Flow<Result<List<User>>>

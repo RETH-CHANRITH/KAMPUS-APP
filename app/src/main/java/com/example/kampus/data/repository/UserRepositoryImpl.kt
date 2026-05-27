@@ -10,6 +10,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import android.util.Log
 import com.google.firebase.firestore.DocumentReference
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -326,88 +327,146 @@ class UserRepositoryImpl(
 
     override suspend fun sendFriendRequest(fromUserId: String, toUserId: String): Result<Unit> {
         return try {
-        if (fromUserId == toUserId) {
-            Result.failure(Exception("Cannot send friend request to yourself"))
-        } else {
+            if (fromUserId == toUserId) {
+                Result.failure(Exception("Cannot send friend request to yourself"))
+            } else {
+                val existingOutgoing = firestore.collection("users").document(fromUserId)
+                    .collection("outgoingFriendRequests")
+                    .whereEqualTo("toUserId", toUserId)
+                    .whereEqualTo("status", "PENDING")
+                    .limit(1)
+                    .get()
+                    .await()
 
-        val existingOutgoing = firestore.collection("users").document(fromUserId)
-            .collection("outgoingFriendRequests")
-            .whereEqualTo("toUserId", toUserId)
-            .whereEqualTo("status", "PENDING")
-            .limit(1)
-            .get()
-            .await()
+                if (!existingOutgoing.isEmpty) {
+                    Result.success(Unit)
+                } else {
+                    val existingIncoming = firestore.collection("users").document(fromUserId)
+                        .collection("friendRequests")
+                        .whereEqualTo("fromUserId", toUserId)
+                        .whereEqualTo("status", "PENDING")
+                        .limit(1)
+                        .get()
+                        .await()
 
-        if (!existingOutgoing.isEmpty) {
-            Result.success(Unit)
-        } else {
+                    if (!existingIncoming.isEmpty) {
+                        Result.success(Unit)
+                    } else {
+                        val requestId = firestore.collection("users").document(toUserId)
+                            .collection("friendRequests")
+                            .document().id
 
-        val existingIncoming = firestore.collection("users").document(fromUserId)
-            .collection("friendRequests")
-            .whereEqualTo("fromUserId", toUserId)
-            .whereEqualTo("status", "PENDING")
-            .limit(1)
-            .get()
-            .await()
+                        val fromUser = firestore.collection("users").document(fromUserId).get().await()
+                        val toUser = firestore.collection("users").document(toUserId).get().await()
 
-        if (!existingIncoming.isEmpty) {
-            Result.success(Unit)
-        } else {
+                        val requestData = mapOf(
+                            "id" to requestId,
+                            "fromUserId" to fromUserId,
+                            "fromUserName" to (fromUser.getString("displayName") ?: ""),
+                            "fromUserHandle" to (fromUser.getString("handle") ?: ""),
+                            "fromUserAvatar" to (fromUser.getString("avatarEmoji") ?: "👤"),
+                            "fromUserProfileImageUrl" to (fromUser.getString("profileImageUrl") ?: ""),
+                            "toUserId" to toUserId,
+                            "toUserName" to (toUser.getString("displayName") ?: ""),
+                            "toUserHandle" to (toUser.getString("handle") ?: ""),
+                            "toUserAvatar" to (toUser.getString("avatarEmoji") ?: "👤"),
+                            "toUserProfileImageUrl" to (toUser.getString("profileImageUrl") ?: ""),
+                            "status" to "PENDING",
+                            "createdAt" to System.currentTimeMillis(),
+                        )
 
-        val alreadyFriends = firestore.collection("users").document(fromUserId)
-            .collection("friends")
-            .document(toUserId)
-            .get()
-            .await()
+                        val batch = firestore.batch()
+                        batch.set(
+                            firestore.collection("users").document(toUserId)
+                                .collection("friendRequests").document(requestId),
+                            requestData,
+                        )
+                        batch.set(
+                            firestore.collection("users").document(fromUserId)
+                                .collection("outgoingFriendRequests").document(requestId),
+                            requestData,
+                        )
+                        batch.commit().await()
 
-        if (alreadyFriends.exists()) {
-            Result.success(Unit)
-        } else {
+                        Result.success(Unit)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 
-        val requestId = firestore.collection("users").document(toUserId)
-            .collection("friendRequests")
-            .document().id
+    override suspend fun followUser(fromUserId: String, toUserId: String): Result<Unit> {
+        try {
+            if (fromUserId == toUserId) return Result.failure(Exception("Cannot follow yourself"))
 
         val fromUser = firestore.collection("users").document(fromUserId).get().await()
         val toUser = firestore.collection("users").document(toUserId).get().await()
 
-        val requestData = mapOf(
-            "id" to requestId,
-            "fromUserId" to fromUserId,
-            "fromUserName" to (fromUser.getString("displayName") ?: ""),
-            "fromUserHandle" to (fromUser.getString("handle") ?: ""),
-            "fromUserAvatar" to (fromUser.getString("avatarEmoji") ?: "👤"),
-            "fromUserProfileImageUrl" to (fromUser.getString("profileImageUrl") ?: ""),
-            "toUserId" to toUserId,
-            "toUserName" to (toUser.getString("displayName") ?: ""),
-            "toUserHandle" to (toUser.getString("handle") ?: ""),
-            "toUserAvatar" to (toUser.getString("avatarEmoji") ?: "👤"),
-            "toUserProfileImageUrl" to (toUser.getString("profileImageUrl") ?: ""),
-            "status" to "PENDING",
-            "createdAt" to com.google.firebase.Timestamp.now(),
+        val followerData = mapOf(
+            "userId" to fromUserId,
+            "displayName" to (fromUser.getString("displayName") ?: ""),
+            "handle" to (fromUser.getString("handle") ?: ""),
+            "avatarEmoji" to (fromUser.getString("avatarEmoji") ?: "👤"),
+            "profileImageUrl" to (fromUser.getString("profileImageUrl") ?: ""),
+            "isOnline" to false,
+            "isMutual" to false,
+            "createdAt" to System.currentTimeMillis(),
+        )
+
+        val followingData = mapOf(
+            "userId" to toUserId,
+            "displayName" to (toUser.getString("displayName") ?: ""),
+            "handle" to (toUser.getString("handle") ?: ""),
+            "avatarEmoji" to (toUser.getString("avatarEmoji") ?: "👤"),
+            "profileImageUrl" to (toUser.getString("profileImageUrl") ?: ""),
+            "isOnline" to false,
+            "isMutual" to false,
+            "createdAt" to System.currentTimeMillis(),
         )
 
         val batch = firestore.batch()
         batch.set(
             firestore.collection("users").document(toUserId)
-                .collection("friendRequests").document(requestId),
-            requestData,
+                .collection("followers").document(fromUserId),
+            followerData,
         )
         batch.set(
             firestore.collection("users").document(fromUserId)
-                .collection("outgoingFriendRequests").document(requestId),
-            requestData,
+                .collection("following").document(toUserId),
+            followingData,
         )
         batch.commit().await()
-        
-        Result.success(Unit)
+
+        runCatching {
+            firestore.collection("users").document(toUserId)
+                .update("stats.followers", FieldValue.increment(1))
+                .await()
         }
+        runCatching {
+            firestore.collection("users").document(fromUserId)
+                .update("stats.following", FieldValue.increment(1))
+                .await()
         }
+
+            return Result.success(Unit)
+        } catch (e: Exception) {
+            return Result.failure(e)
         }
-        }
-    } catch (e: Exception) {
-        Result.failure(e)
     }
+
+    override suspend fun isUserPrivate(userId: String): Result<Boolean> {
+        try {
+            val doc = firestore.collection("users").document(userId).get().await()
+            if (!doc.exists()) return Result.failure(Exception("User not found"))
+            val privacy = (doc.get("privacySettings") as? Map<*, *>)?.get("privateAccount") as? Boolean
+            val explicit = doc.getBoolean("privateAccount")
+            val isPrivate = privacy ?: explicit ?: false
+            return Result.success(isPrivate)
+        } catch (e: Exception) {
+            return Result.failure(e)
+        }
     }
 
     override suspend fun acceptFriendRequest(requestId: String): Result<Unit> = try {
@@ -463,7 +522,7 @@ class UserRepositoryImpl(
                         "profileImageUrl" to (incomingDoc.getString("fromUserProfileImageUrl") ?: ""),
                         "isOnline" to false,
                         "isMutual" to false,
-                        "addedAt" to com.google.firebase.Timestamp.now(),
+                        "createdAt" to System.currentTimeMillis(),
                     ),
                 )
                 .await()
@@ -483,7 +542,7 @@ class UserRepositoryImpl(
                         "profileImageUrl" to (incomingDoc.getString("toUserProfileImageUrl") ?: ""),
                         "isOnline" to false,
                         "isMutual" to false,
-                        "addedAt" to com.google.firebase.Timestamp.now(),
+                        "createdAt" to System.currentTimeMillis(),
                     ),
                 )
                 .await()
@@ -509,7 +568,7 @@ class UserRepositoryImpl(
                         "toUserAvatar" to (incomingDoc.getString("toUserAvatar") ?: "👤"),
                         "toUserProfileImageUrl" to (incomingDoc.getString("toUserProfileImageUrl") ?: ""),
                         "status" to "ACCEPTED",
-                        "createdAt" to com.google.firebase.Timestamp.now(),
+                        "createdAt" to System.currentTimeMillis(),
                     ),
                 )
                 .await()
@@ -535,6 +594,17 @@ class UserRepositoryImpl(
             }
         }.onFailure { e ->
             Log.w(TAG, "acceptFriendRequest: sender outgoing sync skipped due rules: ${e.message}")
+        }
+
+        runCatching {
+            firestore.collection("users").document(currentUserId)
+                .update("stats.followers", FieldValue.increment(1))
+                .await()
+        }
+        runCatching {
+            firestore.collection("users").document(fromUserId)
+                .update("stats.following", FieldValue.increment(1))
+                .await()
         }
         
         Result.success(Unit)
@@ -596,7 +666,7 @@ class UserRepositoryImpl(
                         "toUserAvatar" to (incomingDoc.getString("toUserAvatar") ?: "👤"),
                         "toUserProfileImageUrl" to (incomingDoc.getString("toUserProfileImageUrl") ?: ""),
                         "status" to "REJECTED",
-                        "createdAt" to com.google.firebase.Timestamp.now(),
+                        "createdAt" to System.currentTimeMillis(),
                     ),
                 )
                 .await()
@@ -675,6 +745,17 @@ class UserRepositoryImpl(
                 .delete()
                 .await()
         }
+
+        runCatching {
+            firestore.collection("users").document(userId)
+                .update("stats.following", FieldValue.increment(-1))
+                .await()
+        }
+        runCatching {
+            firestore.collection("users").document(friendId)
+                .update("stats.followers", FieldValue.increment(-1))
+                .await()
+        }
         
         Result.success(Unit)
     } catch (e: Exception) {
@@ -692,7 +773,7 @@ class UserRepositoryImpl(
             "year" to user.year,
             "location" to user.location,
             "avatarEmoji" to user.avatarEmoji,
-            "updatedAt" to com.google.firebase.Timestamp.now(),
+            "updatedAt" to System.currentTimeMillis(),
         )
         
         firestore.collection("users").document(user.id)
@@ -707,7 +788,7 @@ class UserRepositoryImpl(
     override suspend fun updateProfileImage(userId: String, imageUrl: String): Result<Unit> = try {
         val userData = mapOf(
             "profileImageUrl" to imageUrl,
-            "updatedAt" to com.google.firebase.Timestamp.now(),
+            "updatedAt" to System.currentTimeMillis(),
         )
         
         firestore.collection("users").document(userId)
@@ -722,13 +803,93 @@ class UserRepositoryImpl(
     override suspend fun updateCoverImage(userId: String, imageUrl: String): Result<Unit> = try {
         val userData = mapOf(
             "coverImageUrl" to imageUrl,
-            "updatedAt" to com.google.firebase.Timestamp.now(),
+            "updatedAt" to System.currentTimeMillis(),
         )
         
         firestore.collection("users").document(userId)
             .update(userData)
             .await()
         
+        Result.success(Unit)
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    override suspend fun syncProfileStats(userId: String): Result<Unit> = try {
+        val followersSnapshot = firestore.collection("users").document(userId)
+            .collection("followers")
+            .get()
+            .await()
+
+        val followingSnapshot = firestore.collection("users").document(userId)
+            .collection("following")
+            .get()
+            .await()
+
+        val friendsSnapshot = firestore.collection("users").document(userId)
+            .collection("friends")
+            .get()
+            .await()
+
+        val postsSnapshot = firestore.collection("posts")
+            .get()
+            .await()
+
+        val followerCount = followersSnapshot.size()
+        val followingCount = followingSnapshot.size()
+        val friendsCount = friendsSnapshot.size()
+        val postCount = postsSnapshot.documents.count { doc ->
+            val authorId = doc.getString("authorId") ?: doc.getString("userId") ?: ""
+            authorId == userId
+        }
+
+        if (friendsCount > 0) {
+            val mirrorBatch = firestore.batch()
+            friendsSnapshot.documents.forEach { friendDoc ->
+                val friendId = friendDoc.getString("userId") ?: friendDoc.id
+                val friendData = mapOf(
+                    "userId" to friendId,
+                    "displayName" to (friendDoc.getString("displayName") ?: ""),
+                    "handle" to (friendDoc.getString("handle") ?: ""),
+                    "avatarEmoji" to (friendDoc.getString("avatarEmoji") ?: "👤"),
+                    "profileImageUrl" to (friendDoc.getString("profileImageUrl") ?: ""),
+                    "isOnline" to (friendDoc.getBoolean("isOnline") ?: false),
+                    "isMutual" to true,
+                    "createdAt" to System.currentTimeMillis(),
+                )
+
+                mirrorBatch.set(
+                    firestore.collection("users").document(userId)
+                        .collection("followers")
+                        .document(friendId),
+                    friendData,
+                    SetOptions.merge()
+                )
+                mirrorBatch.set(
+                    firestore.collection("users").document(userId)
+                        .collection("following")
+                        .document(friendId),
+                    friendData,
+                    SetOptions.merge()
+                )
+            }
+            mirrorBatch.commit().await()
+        }
+
+        val normalizedFollowers = if (followerCount == 0 && friendsCount > 0) friendsCount else followerCount
+        val normalizedFollowing = if (followingCount == 0 && friendsCount > 0) friendsCount else followingCount
+
+        firestore.collection("users").document(userId)
+            .update(
+                mapOf(
+                    "stats.posts" to postCount,
+                    "stats.followers" to normalizedFollowers,
+                    "stats.following" to normalizedFollowing,
+                    "updatedAt" to System.currentTimeMillis(),
+                )
+            )
+            .await()
+
         Result.success(Unit)
     } catch (e: Exception) {
         Result.failure(e)

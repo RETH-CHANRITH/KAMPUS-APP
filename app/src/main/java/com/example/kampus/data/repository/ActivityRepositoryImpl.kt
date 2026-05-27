@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
 import java.util.UUID
+import com.example.kampus.utils.NotificationLogger
 
 /**
  * Repository for managing user activities with realtime Firestore sync
@@ -304,6 +305,11 @@ class ActivityRepositoryImpl(private val firestore: FirebaseFirestore) {
         userId: String,
         reactionType: String = "like"
     ): Result<Unit> = try {
+        val activitySnapshot = firestore.collection(ACTIVITIES_COLLECTION)
+            .document(activityId)
+            .get()
+            .await()
+
         firestore.collection(ACTIVITIES_COLLECTION)
             .document(activityId)
             .update(mapOf<String, Any>(
@@ -322,6 +328,18 @@ class ActivityRepositoryImpl(private val firestore: FirebaseFirestore) {
                 "createdAt" to System.currentTimeMillis()
             ))
             .await()
+
+        val ownerId = activitySnapshot.getString("userId").orEmpty()
+        val activityTitle = activitySnapshot.getString("title").orEmpty().ifBlank { "your post" }
+        runCatching {
+            NotificationLogger.notifyUser(
+                toUserId = ownerId,
+                type = reactionType.ifBlank { "reaction" },
+                title = "New ${reactionType.ifBlank { "reaction" }}",
+                body = "Someone reacted to $activityTitle",
+                targetId = activityId,
+            )
+        }
 
         Result.success(Unit)
     } catch (e: Exception) {
@@ -414,6 +432,11 @@ class ActivityRepositoryImpl(private val firestore: FirebaseFirestore) {
         activityId: String,
         comment: ActivityComment
     ): Result<String> = try {
+        val activitySnapshot = firestore.collection(ACTIVITIES_COLLECTION)
+            .document(activityId)
+            .get()
+            .await()
+
         val ref = firestore.collection(ACTIVITIES_COLLECTION)
             .document(activityId)
             .collection(COMMENTS_COLLECTION)
@@ -425,6 +448,18 @@ class ActivityRepositoryImpl(private val firestore: FirebaseFirestore) {
             .document(activityId)
             .update(mapOf<String, Any>("comments" to com.google.firebase.firestore.FieldValue.increment(1)))
             .await()
+
+        val ownerId = activitySnapshot.getString("userId").orEmpty()
+        val activityTitle = activitySnapshot.getString("title").orEmpty().ifBlank { "your post" }
+        runCatching {
+            NotificationLogger.notifyUser(
+                toUserId = ownerId,
+                type = "comment",
+                title = "New comment",
+                body = "${comment.username.ifBlank { "Someone" }} commented on $activityTitle",
+                targetId = ref.id,
+            )
+        }
 
         Result.success(ref.id)
     } catch (e: Exception) {

@@ -53,6 +53,9 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.painter.ColorPainter
+import coil.request.ImageRequest
 import com.example.kampus.ui.localization.rememberUiStrings
 import com.example.kampus.ui.theme.ThemeController
 
@@ -249,8 +252,13 @@ private fun ProfileHeader(
                 contentAlignment = Alignment.Center,
             ) {
                 if (profileImageUrl.isNotBlank()) {
+                    val ctx = LocalContext.current
                     AsyncImage(
-                        model = profileImageUrl,
+                        model = ImageRequest.Builder(ctx)
+                            .data(profileImageUrl)
+                            .crossfade(true)
+                            .build(),
+                        placeholder = ColorPainter(Color.White.copy(alpha = 0.12f)),
                         contentDescription = "Profile Image",
                         contentScale = ContentScale.Crop,
                         modifier = Modifier

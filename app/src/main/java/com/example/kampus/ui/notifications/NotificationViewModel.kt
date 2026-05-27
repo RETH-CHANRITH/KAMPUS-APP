@@ -41,15 +41,16 @@ class NotificationViewModel : ViewModel() {
 			result.onSuccess { rows ->
 				val mapped = rows.map {
 					AppNotification(
-						id = it["id"] as String,
-						type = it["type"] as String,
-						title = it["title"] as String,
-						body = it["body"] as String,
-						actorUserId = it["actorUserId"] as String,
-						actorDisplayName = it["actorDisplayName"] as String,
-						targetId = it["targetId"] as String,
-						createdAt = it["createdAt"] as Long,
-						isRead = it["isRead"] as Boolean,
+						id = it["id"] as? String ?: "",
+						type = it["type"] as? String ?: "system",
+						title = it["title"] as? String ?: "Notification",
+						body = it["body"] as? String ?: "",
+						toUserId = it["toUserId"] as? String ?: "",
+						actorUserId = it["actorUserId"] as? String ?: "",
+						actorDisplayName = it["actorDisplayName"] as? String ?: "",
+						targetId = it["targetId"] as? String ?: "",
+						createdAt = it["createdAt"] as? Long ?: 0L,
+						isRead = it["isRead"] as? Boolean ?: false,
 					)
 				}
 				_uiState.update { state -> state.copy(notifications = mapped, isLoading = false, error = null) }

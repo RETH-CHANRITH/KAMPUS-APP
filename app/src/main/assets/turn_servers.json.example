@@ -1,0 +1,11 @@
+[
+  {
+    "url": "turn:turn.example.com:3478",
+    "username": "TURN_USER",
+    "credential": "TURN_PASSWORD"
+  }
+]
+
+// Copy this file to app/src/main/assets/turn_servers.json and replace with
+// real TURN credentials supplied by your TURN provider. The app will load
+// that file at startup and populate `CallConfig` for runtime ICE use.

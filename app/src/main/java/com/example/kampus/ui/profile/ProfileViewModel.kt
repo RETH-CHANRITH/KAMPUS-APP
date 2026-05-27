@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import com.example.kampus.ui.feed.PostItem
+import kotlin.math.max
 
 data class ProfileUiState(
 	val userId: String = "",
@@ -161,6 +162,28 @@ class ProfileViewModel(
 	private fun initializeRealTimeUpdates() {
 		currentUserId?.let { userId ->
 			// Don't show loading - data comes from real-time listeners
+
+			var latestPostsCount = 0
+			var latestFollowersCount = 0
+			var latestFollowingCount = 0
+			var latestFriendsCount = 0
+
+			fun publishStats() {
+				val relationshipFallback = max(latestFriendsCount, max(latestFollowersCount, latestFollowingCount))
+				_uiState.update { state ->
+					state.copy(
+						stats = state.stats.copy(
+							posts = max(state.stats.posts, latestPostsCount),
+							followers = max(state.stats.followers, relationshipFallback),
+							following = max(state.stats.following, relationshipFallback),
+						),
+					)
+				}
+			}
+
+			viewModelScope.launch {
+				userRepository.syncProfileStats(userId)
+			}
 			
 			fun isLegacyDemoProfile(user: User): Boolean {
 				return user.bio == "Computer Science student. Building KAMPUS one screen at a time." ||
@@ -206,15 +229,21 @@ class ProfileViewModel(
 								coverImageUrl = sanitizedUser.coverImageUrl,
 								isOnline = sanitizedUser.isOnline,
 								stats = ProfileStats(
-									posts = sanitizedUser.stats.posts,
-									// Keep live counters sourced from dedicated real-time listeners.
-									followers = it.stats.followers,
-									following = it.stats.following,
+									posts = max(sanitizedUser.stats.posts, it.stats.posts),
+									// Keep live counters sourced from dedicated real-time listeners, but never
+									// throw away a populated server-side snapshot during startup.
+									followers = max(it.stats.followers, sanitizedUser.stats.followers),
+									following = max(it.stats.following, sanitizedUser.stats.following),
 									friendRequests = it.stats.friendRequests,
 								),
 								isLoading = false,
 							)
 						}
+
+							latestPostsCount = max(latestPostsCount, sanitizedUser.stats.posts)
+							latestFollowersCount = max(latestFollowersCount, sanitizedUser.stats.followers)
+							latestFollowingCount = max(latestFollowingCount, sanitizedUser.stats.following)
+							publishStats()
 
 						if (sanitizedUser != user) {
 							viewModelScope.launch {
@@ -252,7 +281,9 @@ class ProfileViewModel(
 			viewModelScope.launch {
 				userRepository.getFriends(userId).collect { result ->
 					result.onSuccess { friends ->
+						latestFriendsCount = friends.size
 						_uiState.update { it.copy(friends = friends) }
+						publishStats()
 					}
 				}
 			}
@@ -261,12 +292,22 @@ class ProfileViewModel(
 			viewModelScope.launch {
 				userRepository.getFollowers(userId).collect { result ->
 					result.onSuccess { followers ->
+						latestFollowersCount = followers.size
 						_uiState.update {
 							it.copy(
 								followers = followers,
-								stats = it.stats.copy(followers = followers.size),
 							)
 						}
+						publishStats()
+					}
+				}
+			}
+
+			viewModelScope.launch {
+				userRepository.getFollowersCount(userId).collect { result ->
+					result.onSuccess { count ->
+						latestFollowersCount = count
+						publishStats()
 					}
 				}
 			}
@@ -275,12 +316,31 @@ class ProfileViewModel(
 			viewModelScope.launch {
 				userRepository.getFollowing(userId).collect { result ->
 					result.onSuccess { following ->
+						latestFollowingCount = following.size
 						_uiState.update {
 							it.copy(
 								following = following,
-								stats = it.stats.copy(following = following.size),
 							)
 						}
+						publishStats()
+					}
+				}
+			}
+
+			viewModelScope.launch {
+				userRepository.getFollowingCount(userId).collect { result ->
+					result.onSuccess { count ->
+						latestFollowingCount = count
+						publishStats()
+					}
+				}
+			}
+
+			viewModelScope.launch {
+				userRepository.getFriendsCount(userId).collect { result ->
+					result.onSuccess { count ->
+						latestFriendsCount = count
+						publishStats()
 					}
 				}
 			}
@@ -344,7 +404,12 @@ class ProfileViewModel(
 								.thenByDescending { it.id }
 						)
 						.take(30)
-					_uiState.update { it.copy(timelinePosts = profilePosts) }
+					_uiState.update {
+						it.copy(
+							timelinePosts = profilePosts,
+							stats = it.stats.copy(posts = profilePosts.size),
+						)
+					}
 				}
 				result.onFailure { error ->
 					_uiState.update { it.copy(error = error.message ?: "Failed to load profile timeline") }
@@ -785,23 +850,55 @@ class ProfileViewModel(
 	fun sendFriendRequest(toUserId: String) {
 		currentUserId?.let { userId ->
 			viewModelScope.launch {
-				android.util.Log.d("ProfileViewModel", "Sending friend request from $userId to $toUserId")
-				val result = userRepository.sendFriendRequest(userId, toUserId)
-				result.onSuccess {
-					android.util.Log.d("ProfileViewModel", "Friend request sent successfully from $userId to $toUserId")
-					runCatching {
-						NotificationLogger.notifyUser(
-							toUserId = toUserId,
-							type = "friend_request",
-							title = "New Follow Request",
-							body = "Someone sent you a follow request",
-							targetId = userId,
-						)
+				android.util.Log.d("ProfileViewModel", "Processing follow/request from $userId to $toUserId")
+				// Check if target is a private account. If not, perform immediate follow to keep UX fast.
+				val privacyRes = userRepository.isUserPrivate(toUserId)
+				privacyRes.onSuccess { isPrivate ->
+					if (!isPrivate) {
+						// Public account: follow immediately
+						val followRes = userRepository.followUser(userId, toUserId)
+						followRes.onSuccess {
+							android.util.Log.d("ProfileViewModel", "Followed user directly: $userId -> $toUserId")
+							runCatching {
+								NotificationLogger.notifyUser(
+									toUserId = toUserId,
+									type = "follow",
+									title = "New Follower",
+									body = "You have a new follower",
+									targetId = userId,
+								)
+							}
+						}
+						followRes.onFailure { error ->
+							android.util.Log.e("ProfileViewModel", "Error following user: ${error.message}")
+							_uiState.update { it.copy(error = error.message) }
+						}
+					} else {
+						// Private account: send friend request as before
+						val result = userRepository.sendFriendRequest(userId, toUserId)
+						result.onSuccess {
+							android.util.Log.d("ProfileViewModel", "Friend request sent successfully from $userId to $toUserId")
+							runCatching {
+								NotificationLogger.notifyUser(
+									toUserId = toUserId,
+									type = "friend_request",
+									title = "New Follow Request",
+									body = "Someone sent you a follow request",
+									targetId = userId,
+								)
+							}
+						}
+						result.onFailure { error ->
+							android.util.Log.e("ProfileViewModel", "Error sending friend request: ${error.message}")
+							_uiState.update { it.copy(error = error.message) }
+						}
 					}
 				}
-				result.onFailure { error ->
-					android.util.Log.e("ProfileViewModel", "Error sending friend request: ${error.message}")
-					_uiState.update { it.copy(error = error.message) }
+				privacyRes.onFailure { error ->
+					android.util.Log.e("ProfileViewModel", "Failed to check privacy for $toUserId: ${error.message}")
+					// Fallback to sending a request to be safe
+					val result = userRepository.sendFriendRequest(userId, toUserId)
+					result.onFailure { err -> _uiState.update { it.copy(error = err.message) } }
 				}
 			}
 		}

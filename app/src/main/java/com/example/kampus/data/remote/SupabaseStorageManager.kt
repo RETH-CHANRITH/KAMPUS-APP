@@ -202,6 +202,26 @@ class SupabaseStorageManager(
             }
         }
 
+    suspend fun uploadPostCommentImage(userId: String, postId: String, imageUri: Uri): Result<String> =
+        withContext(Dispatchers.IO) {
+            try {
+                val fileName = "comment_${userId}_${System.currentTimeMillis()}.jpg"
+
+                val inputStream = context.contentResolver.openInputStream(imageUri)
+                    ?: throw Exception("Failed to open comment image stream")
+                val byteArray = inputStream.readBytes()
+                inputStream.close()
+
+                supabaseClient.storage
+                    .from(COMMENT_MEDIA_BUCKET)
+                    .upload("post-comments/$postId/$userId/$fileName", byteArray)
+
+                Result.success(getPublicUrl(COMMENT_MEDIA_BUCKET, "post-comments/$postId/$userId/$fileName"))
+            } catch (e: Exception) {
+                Result.failure(Exception("Comment image upload failed: ${e.message}"))
+            }
+        }
+
     suspend fun uploadChatAttachment(
         userId: String,
         chatId: String,

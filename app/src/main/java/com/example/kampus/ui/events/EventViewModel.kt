@@ -190,6 +190,7 @@ class EventViewModel : ViewModel() {
                                         likes = summary.likesCount,
                                         comments = summary.commentsCount,
                                         interested = summary.interestedCount,
+                                        shares = summary.sharesCount,
                                     )
                                 } else {
                                     item
@@ -317,7 +318,13 @@ class EventViewModel : ViewModel() {
                 ActivityLogger.logAction(
                     type = "like_event",
                     text = "Liked event: ${event.title.ifBlank { "Untitled event" }}",
-                    metadata = mapOf("eventId" to event.remoteId),
+                    metadata = mapOf(
+                        "eventId" to event.remoteId,
+                        "previewTitle" to (event.title.ifBlank { "Event" }),
+                        "previewSubtitle" to (event.location.ifBlank { "Event" }),
+                        "previewImageUrl" to (event.coverImageUrl.ifBlank { "" }),
+                        "likeCount" to (event.likes + 1).toString(),
+                    ),
                 )
             }
         }
@@ -352,7 +359,13 @@ class EventViewModel : ViewModel() {
     }
 
     fun shareEvent(event: EventItem) {
-        bumpEventCount(event.remoteId)
+        _uiState.update { state ->
+            state.copy(
+                events = state.events.map { item ->
+                    if (item.remoteId == event.remoteId) item.copy(shares = (item.shares + 1).coerceAtLeast(0)) else item
+                },
+            )
+        }
 
         ActivityLogger.logAction(
             type = "share_event",
@@ -360,12 +373,18 @@ class EventViewModel : ViewModel() {
             metadata = mapOf("eventId" to event.remoteId),
         )
 
-        _uiState.update { state ->
-            state.copy(
-                events = state.events.map { item ->
-                    if (item.remoteId == event.remoteId) item.copy(shares = (item.shares + 1).coerceAtLeast(0)) else item
-                },
-            )
+        viewModelScope.launch {
+            val result = engagementRepository.incrementShare(event.remoteId)
+            if (result.isFailure) {
+                _uiState.update { state ->
+                    state.copy(
+                        events = state.events.map { item ->
+                            if (item.remoteId == event.remoteId) item.copy(shares = (item.shares - 1).coerceAtLeast(0)) else item
+                        },
+                        errorMessage = result.exceptionOrNull()?.message ?: "Failed to update share",
+                    )
+                }
+            }
         }
     }
 
@@ -424,13 +443,16 @@ class EventViewModel : ViewModel() {
 
             createdEventResult.onSuccess { createdEvent ->
                 Log.d("EventViewModel", "createEvent succeeded, id=${createdEvent.id}")
+                val createdItem = createdEvent.toEventItem()
                 _uiState.update {
                     it.copy(
+                        events = listOf(createdItem) + it.events.filterNot { item -> item.remoteId == createdItem.remoteId },
                         isCreating = false,
                         successMessage = "Event created successfully",
                         errorMessage = null,
                     )
                 }
+                ensureEngagementObservers(listOf(createdItem))
                 ActivityLogger.logAction(
                     type = "create_event",
                     text = "Created event: ${data.title.ifBlank { "Untitled" }}",
@@ -500,6 +522,7 @@ class EventViewModel : ViewModel() {
             authorEmoji = currentUserEmoji,
             text = comment,
             imageUrl = imageUrl,
+            eventOwnerId = event.ownerId,
         )
 
         result.onSuccess {
@@ -538,6 +561,7 @@ class EventViewModel : ViewModel() {
             text = reply,
             imageUrl = imageUrl,
             parentCommentId = parentCommentId,
+            eventOwnerId = event.ownerId,
         )
 
         result.onSuccess {

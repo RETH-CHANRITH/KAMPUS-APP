@@ -32,9 +32,11 @@ object NotificationLogger {
         val typeEnabled = when (type) {
             "like" -> (settings?.get("likes") as? Boolean) ?: true
             "comment" -> (settings?.get("comments") as? Boolean) ?: true
+            "love", "reaction" -> (settings?.get("likes") as? Boolean) ?: true
             "follow", "friend_request" -> (settings?.get("newFollowers") as? Boolean) ?: true
             "mention" -> (settings?.get("mentions") as? Boolean) ?: true
             "direct_message" -> (settings?.get("directMessages") as? Boolean) ?: true
+            "chat_message", "call_invite" -> (settings?.get("directMessages") as? Boolean) ?: true
             else -> true
         }
 
@@ -44,6 +46,7 @@ object NotificationLogger {
             "type" to type,
             "title" to title,
             "body" to body,
+            "toUserId" to toUserId,
             "actorUserId" to actorId,
             "actorDisplayName" to (actorProfile?.getString("displayName") ?: "Someone"),
             "targetId" to targetId,
@@ -75,6 +78,7 @@ object NotificationLogger {
                         "type" to (doc.getString("type") ?: "system"),
                         "title" to (doc.getString("title") ?: "Notification"),
                         "body" to (doc.getString("body") ?: ""),
+                        "toUserId" to (doc.getString("toUserId") ?: ""),
                         "actorUserId" to (doc.getString("actorUserId") ?: ""),
                         "actorDisplayName" to (doc.getString("actorDisplayName") ?: ""),
                         "targetId" to (doc.getString("targetId") ?: ""),

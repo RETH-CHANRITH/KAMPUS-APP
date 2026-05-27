@@ -434,7 +434,7 @@ private fun StoryAddTile(
                 .border(1.dp, HBorder.copy(alpha = 0.82f), RoundedCornerShape(22.dp))
                 .clickable(onClick = onLabelClick)
                 .padding(horizontal = 14.dp, vertical = 10.dp),
-        )
+        ) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     text = label,
@@ -511,6 +511,7 @@ private fun StoryAddTile(
             }
         }
     }
+}
 
 @Composable
 private fun StoryTile(story: ChatStory, onClick: () -> Unit) {
@@ -1206,6 +1207,17 @@ private fun ChatPreviewOverlay(
     onDelete: (String) -> Unit,
     onBlock: (String) -> Unit,
 ) {
+    val livePulse = rememberInfiniteTransition(label = "preview-live-pulse")
+    val liveAlpha by livePulse.animateFloat(
+        initialValue = 0.45f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(700, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "preview-live-alpha",
+    )
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
@@ -1232,7 +1244,13 @@ private fun ChatPreviewOverlay(
                         ),
                     )
                     .border(1.dp, HBorder.copy(alpha = 0.7f), RoundedCornerShape(32.dp))
-                    .padding(16.dp),
+                    .padding(16.dp)
+                    .animateContentSize(
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow,
+                        ),
+                    ),
             ) {
                 Column(modifier = Modifier.fillMaxSize()) {
                     Row(
@@ -1265,7 +1283,7 @@ private fun ChatPreviewOverlay(
                                 }
                             }
                             Spacer(Modifier.width(12.dp))
-                            Column {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text(
                                     text = preview.chatName,
                                     color = HWhite,
@@ -1277,6 +1295,28 @@ private fun ChatPreviewOverlay(
                                     color = HGray4,
                                     fontSize = 12.sp,
                                 )
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(999.dp))
+                                        .background(HBlue.copy(alpha = 0.12f))
+                                        .border(1.dp, HBlue.copy(alpha = 0.22f), RoundedCornerShape(999.dp))
+                                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(7.dp)
+                                                .clip(CircleShape)
+                                                .background(HBlue.copy(alpha = liveAlpha)),
+                                        )
+                                        Text(
+                                            text = "Live preview",
+                                            color = HBlue,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                    }
+                                }
                             }
                         }
 
@@ -1305,6 +1345,44 @@ private fun ChatPreviewOverlay(
                         ) {
                             Text(preview.error, color = HGray4, fontSize = 13.sp)
                         }
+                    } else if (preview.messages.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(54.dp)
+                                        .clip(CircleShape)
+                                        .background(HBlue.copy(alpha = 0.12f)),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.ChatBubbleOutline,
+                                        contentDescription = null,
+                                        tint = HBlue,
+                                        modifier = Modifier.size(24.dp),
+                                    )
+                                }
+                                Text(
+                                    text = "No messages yet",
+                                    color = HWhite,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(
+                                    text = "Open the chat to start the conversation",
+                                    color = HGray4,
+                                    fontSize = 12.sp,
+                                )
+                            }
+                        }
                     } else {
                         LazyColumn(
                             modifier = Modifier
@@ -1317,10 +1395,19 @@ private fun ChatPreviewOverlay(
                                 items = preview.messages,
                                 key = { index, message -> "${message.id}-$index" },
                             ) { _, message ->
-                                MessageBubble(
-                                    message = message,
-                                    modifier = Modifier.padding(horizontal = 2.dp),
-                                )
+                                AnimatedVisibility(
+                                    visible = true,
+                                    enter = fadeIn(animationSpec = tween(220)) +
+                                        slideInVertically(
+                                            animationSpec = tween(220),
+                                            initialOffsetY = { it / 4 },
+                                        ),
+                                ) {
+                                    MessageBubble(
+                                        message = message,
+                                        modifier = Modifier.padding(horizontal = 2.dp),
+                                    )
+                                }
                             }
                         }
                     }

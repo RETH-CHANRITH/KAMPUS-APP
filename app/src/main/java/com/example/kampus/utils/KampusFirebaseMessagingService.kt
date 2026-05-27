@@ -96,7 +96,7 @@ class KampusFirebaseMessagingService : FirebaseMessagingService() {
         callType: String,
         callId: String,
     ) {
-        ensureChannel()
+        ensureCallChannel()
 
         val deepLink = Uri.parse("kampus://incoming_call/$chatId/$callType?callId=$callId")
         val intent = Intent(Intent.ACTION_VIEW, deepLink, this, MainActivity::class.java).apply {
@@ -116,9 +116,12 @@ class KampusFirebaseMessagingService : FirebaseMessagingService() {
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setAutoCancel(true)
+            .setOngoing(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setFullScreenIntent(pendingIntent, true)
             .setContentIntent(pendingIntent)
             .build()
 
@@ -126,7 +129,7 @@ class KampusFirebaseMessagingService : FirebaseMessagingService() {
     }
 
     private fun showNotification(notificationId: Int, title: String, body: String, chatId: String) {
-        ensureChannel()
+        ensureCallChannel()
 
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -155,17 +158,17 @@ class KampusFirebaseMessagingService : FirebaseMessagingService() {
         NotificationManagerCompat.from(this).notify(notificationId, notification)
     }
 
-    private fun ensureChannel() {
+    private fun ensureCallChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = getSystemService(NotificationManager::class.java) ?: return
         if (manager.getNotificationChannel(CHANNEL_ID) != null) return
 
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "Messages",
+            "Calls",
             NotificationManager.IMPORTANCE_HIGH,
         ).apply {
-            description = "Chat message notifications"
+            description = "Incoming call notifications"
         }
         manager.createNotificationChannel(channel)
     }
@@ -179,6 +182,6 @@ class KampusFirebaseMessagingService : FirebaseMessagingService() {
     }
 
     companion object {
-        private const val CHANNEL_ID = "kampus_messages"
+        private const val CHANNEL_ID = "kampus_calls"
     }
 }

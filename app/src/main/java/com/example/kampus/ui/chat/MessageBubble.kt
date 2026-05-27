@@ -12,6 +12,7 @@ import android.net.Uri
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -34,17 +35,23 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import coil.request.ImageRequest
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.kampus.ui.chat.Message
 import com.example.kampus.ui.theme.ThemeController
 import coil.compose.AsyncImage
@@ -71,6 +78,18 @@ fun MessageBubble(
     onLongPress: (() -> Unit)? = null,
     onReact: ((remoteMessageId: String, emoji: String) -> Unit)? = null,
 ) {
+    val bubbleEnter = if (message.isSentByMe) {
+        slideInHorizontally(
+            animationSpec = tween(durationMillis = 180),
+            initialOffsetX = { fullWidth -> fullWidth / 4 },
+        ) + fadeIn(animationSpec = tween(durationMillis = 180))
+    } else {
+        slideInHorizontally(
+            animationSpec = tween(durationMillis = 180),
+            initialOffsetX = { fullWidth -> -fullWidth / 4 },
+        ) + fadeIn(animationSpec = tween(durationMillis = 180))
+    }
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -88,11 +107,17 @@ fun MessageBubble(
             ),
         horizontalArrangement = if (message.isSentByMe) Arrangement.End else Arrangement.Start,
     ) {
-        if (message.isVoice) {
-            VoiceBubble(message)
-        } else {
-            TextBubble(message, onLongPress = onLongPress, onReact = onReact)
-        }
+            AnimatedVisibility(
+                visible = true,
+                enter = bubbleEnter,
+                exit = fadeOut(animationSpec = tween(durationMillis = 120)),
+            ) {
+                if (message.isVoice) {
+                    VoiceBubble(message)
+                } else {
+                    TextBubble(message, onLongPress = onLongPress, onReact = onReact)
+                }
+            }
     }
 }
 
@@ -103,91 +128,62 @@ fun MessageGroupWithAvatar(
     isLastInGroup: Boolean = true,
     contactProfileImageUrl: String = "",
     contactAvatarEmoji: String = "",
+    selfProfileImageUrl: String = "",
+    selfAvatarEmoji: String = "",
     modifier: Modifier = Modifier,
     onLongPress: (() -> Unit)? = null,
     onReact: ((remoteMessageId: String, emoji: String) -> Unit)? = null,
 ) {
-    if (message.isSentByMe) {
-        // Sent messages: no avatar needed
-        MessageBubble(message = message, modifier = modifier, onLongPress = onLongPress, onReact = onReact)
+    val avatarModifier = Modifier.size(28.dp)
+    val showAvatar = true
+    val avatarContent = if (message.isSentByMe) {
+        selfProfileImageUrl to selfAvatarEmoji
     } else {
-        // Received messages: show avatar on last message in group
-        Row(
-            modifier = modifier
-                .fillMaxWidth()
-                .then(
-                    if (onLongPress != null && message.isVoice) {
-                        Modifier.combinedClickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = {},
-                            onLongClick = onLongPress,
-                        )
-                    } else {
-                        Modifier
-                    }
-                ),
-            horizontalArrangement = Arrangement.Start,
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            if (isLastInGroup) {
-                Surface(
-                    shape = CircleShape,
-                    tonalElevation = 0.dp,
-                    shadowElevation = 1.dp,
-                    modifier = Modifier
-                        .size(28.dp)
-                        .padding(end = 8.dp),
-                ) {
-                    if (contactProfileImageUrl.isNotBlank()) {
-                        AsyncImage(
-                            model = contactProfileImageUrl,
-                            contentDescription = "Avatar",
-                            modifier = Modifier
-                                .size(28.dp)
-                                .clip(CircleShape),
-                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                        )
-                    } else if (contactAvatarEmoji.isNotBlank()) {
-                        Box(
-                            modifier = Modifier
-                                .size(28.dp)
-                                .background(
-                                    color = if (UiIsDark) Color(0xFF1E2A3B) else Color(0xFFE5E7EB),
-                                    shape = CircleShape
-                                ),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                text = contactAvatarEmoji,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                        }
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .size(28.dp)
-                                .background(
-                                    color = Color(0xFF8B5CF6),
-                                    shape = CircleShape
-                                ),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Image,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(16.dp),
-                            )
-                        }
-                    }
-                }
-            } else {
-                Spacer(modifier = Modifier.width(36.dp))
-            }
+        contactProfileImageUrl to contactAvatarEmoji
+    }
 
-            MessageBubble(message = message, onLongPress = onLongPress, onReact = onReact)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .then(
+                if (onLongPress != null && message.isVoice) {
+                    Modifier.combinedClickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {},
+                        onLongClick = onLongPress,
+                    )
+                } else {
+                    Modifier
+                }
+            ),
+        horizontalArrangement = if (message.isSentByMe) Arrangement.End else Arrangement.Start,
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        if (message.isSentByMe) {
+            MessageBubble(message = message, modifier = Modifier.weight(1f, fill = false), onLongPress = onLongPress, onReact = onReact)
+            Spacer(modifier = Modifier.width(8.dp))
+            if (showAvatar) {
+                MessageAvatar(
+                    profileImageUrl = avatarContent.first,
+                    avatarEmoji = avatarContent.second,
+                    modifier = avatarModifier,
+                )
+            } else {
+                Spacer(modifier = avatarModifier)
+            }
+        } else {
+            if (showAvatar) {
+                MessageAvatar(
+                    profileImageUrl = avatarContent.first,
+                    avatarEmoji = avatarContent.second,
+                    modifier = avatarModifier,
+                )
+            } else {
+                Spacer(modifier = avatarModifier)
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            MessageBubble(message = message, modifier = Modifier.weight(1f, fill = false), onLongPress = onLongPress, onReact = onReact)
         }
     }
 }
@@ -196,13 +192,13 @@ fun MessageGroupWithAvatar(
 @Composable
 private fun TextBubble(message: Message, onLongPress: (() -> Unit)? = null, onReact: ((remoteMessageId: String, emoji: String) -> Unit)? = null) {
     val bubbleColor = if (message.isSentByMe) BubbleSent else BubbleReceived
-    val isImageAttachment = message.mediaType.equals("image", ignoreCase = true) ||
+    val isImageAttachment = message.mediaType.startsWith("image", ignoreCase = true) ||
         (message.mediaType.isBlank() && message.text.equals("Photo", ignoreCase = true))
     val shouldShowAttachment = message.mediaUrl.isNotBlank() || isImageAttachment
     val shape = if (message.isSentByMe)
-        RoundedCornerShape(18.dp, 4.dp, 18.dp, 18.dp)
+        RoundedCornerShape(22.dp, 8.dp, 22.dp, 22.dp)
     else
-        RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp)
+        RoundedCornerShape(8.dp, 22.dp, 22.dp, 22.dp)
 
     Column(
         horizontalAlignment = if (message.isSentByMe) Alignment.End else Alignment.Start,
@@ -210,7 +206,7 @@ private fun TextBubble(message: Message, onLongPress: (() -> Unit)? = null, onRe
     ) {
         Box(
             modifier = Modifier
-                .widthIn(max = 270.dp)
+                .widthIn(max = 280.dp)
                 .combinedClickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
@@ -219,7 +215,8 @@ private fun TextBubble(message: Message, onLongPress: (() -> Unit)? = null, onRe
                 )
                 .clip(shape)
                 .background(bubbleColor)
-                .padding(horizontal = 14.dp, vertical = 10.dp)
+                .border(1.dp, Color.White.copy(alpha = if (message.isSentByMe) 0.04f else 0.06f), shape)
+                .padding(horizontal = 13.dp, vertical = 9.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (shouldShowAttachment) {
@@ -301,6 +298,42 @@ private fun TextBubble(message: Message, onLongPress: (() -> Unit)? = null, onRe
 }
 
 @Composable
+private fun MessageAvatar(
+    profileImageUrl: String,
+    avatarEmoji: String,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        shape = CircleShape,
+        tonalElevation = 0.dp,
+        shadowElevation = 1.dp,
+        modifier = modifier,
+    ) {
+        if (profileImageUrl.isNotBlank()) {
+            AsyncImage(
+                model = profileImageUrl,
+                contentDescription = "Avatar",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(if (UiIsDark) Color(0xFF1E2A3B) else Color(0xFFE5E7EB)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = avatarEmoji.ifBlank { "👤" },
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun ReactionPicker(
     reaction: String,
     isSentByMe: Boolean,
@@ -340,35 +373,77 @@ private fun ReactionPicker(
 
 @Composable
 private fun AttachmentPreview(message: Message) {
+    val context = LocalContext.current
     val mediaType = if (message.mediaType.isBlank() && message.text == "Photo") "image" else message.mediaType.lowercase()
     val previewShape = RoundedCornerShape(14.dp)
     val previewBackground = if (message.isSentByMe) Color.White.copy(alpha = 0.10f) else Color.Black.copy(alpha = 0.06f)
     val attachmentTextColor = if (message.isSentByMe) Color.White else if (UiIsDark) Color.White else Color(0xFF111827)
     val attachmentSubtextColor = if (message.isSentByMe) Color.White.copy(alpha = 0.78f) else if (UiIsDark) Color.White.copy(alpha = 0.78f) else Color(0xFF4B5563)
     val attachmentIconTint = if (message.isSentByMe) Color.White else if (UiIsDark) Color.White else Color(0xFF111827)
+    var showPhotoDialog by remember(message.remoteMessageId, message.mediaUrl) { mutableStateOf(false) }
 
-    when (mediaType) {
-        "image" -> {
+    when {
+        mediaType.startsWith("image", ignoreCase = true) -> {
             Surface(
                 color = previewBackground,
                 shape = previewShape,
                 tonalElevation = 0.dp,
                 shadowElevation = 0.dp,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = message.mediaUrl.isNotBlank()) { showPhotoDialog = true },
             ) {
                 Column(modifier = Modifier.padding(6.dp)) {
                     ProfessionalPhotoDisplay(message = message)
                 }
             }
+            if (showPhotoDialog && message.mediaUrl.isNotBlank()) {
+                Dialog(
+                    onDismissRequest = { showPhotoDialog = false },
+                    properties = DialogProperties(usePlatformDefaultWidth = false),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black)
+                            .clickable { showPhotoDialog = false },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(context)
+                                .data(message.mediaUrl)
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = message.mediaName.ifBlank { "Photo" },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp)
+                                .clip(RoundedCornerShape(16.dp)),
+                            contentScale = ContentScale.Fit,
+                        )
+                    }
+                }
+            }
         }
 
-        "video" -> {
+        mediaType.startsWith("video", ignoreCase = true) -> {
             Surface(
                 color = previewBackground,
                 shape = previewShape,
                 tonalElevation = 0.dp,
                 shadowElevation = 0.dp,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = message.mediaUrl.isNotBlank()) {
+                        try {
+                            val intent = Intent(Intent.ACTION_VIEW)
+                            intent.setDataAndType(Uri.parse(message.mediaUrl), "video/*")
+                            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            context.startActivity(intent)
+                        } catch (e: Exception) {
+                            try { android.widget.Toast.makeText(context, "Unable to open video", android.widget.Toast.LENGTH_SHORT).show() } catch (_: Exception) {}
+                        }
+                    },
             ) {
                 Row(
                     modifier = Modifier.padding(12.dp),
@@ -396,7 +471,7 @@ private fun AttachmentPreview(message: Message) {
             }
         }
 
-        "file" -> {
+        mediaType.startsWith("audio", ignoreCase = true) || mediaType.startsWith("application", ignoreCase = true) -> {
             Surface(
                 color = previewBackground,
                 shape = previewShape,
@@ -430,7 +505,7 @@ private fun AttachmentPreview(message: Message) {
             }
         }
 
-        "location" -> {
+        mediaType.startsWith("location", ignoreCase = true) -> {
             if (message.isLiveLocation && message.locationRemainingSeconds > 0) {
                 LiveLocationDisplay(message = message)
             } else {
@@ -477,6 +552,16 @@ private fun AttachmentPreview(message: Message) {
 // ─── Professional photo display with floating share button ──────────────────
 @Composable
 private fun ProfessionalPhotoDisplay(message: Message) {
+    val context = LocalContext.current
+    val imageModel = remember(message.mediaUrl) {
+        val url = message.mediaUrl.trim()
+        when {
+            url.startsWith("http://") || url.startsWith("https://") -> url
+            url.startsWith("file:") || url.startsWith("content:") -> Uri.parse(url)
+            url.isNotBlank() && java.io.File(url).exists() -> java.io.File(url)
+            else -> url
+        }
+    }
     Box {
         Surface(
             shape = RoundedCornerShape(16.dp),
@@ -493,7 +578,10 @@ private fun ProfessionalPhotoDisplay(message: Message) {
             ) {
                 if (message.mediaUrl.isNotBlank()) {
                     AsyncImage(
-                        model = message.mediaUrl,
+                        model = ImageRequest.Builder(context)
+                            .data(imageModel)
+                            .crossfade(true)
+                            .build(),
                         contentDescription = message.mediaName.ifBlank { "Photo" },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -501,6 +589,9 @@ private fun ProfessionalPhotoDisplay(message: Message) {
                             .clip(RoundedCornerShape(16.dp)),
                         contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                         alpha = 0.98f,
+                        onError = {
+                            android.util.Log.w("MessageBubble", "Photo load failed for ${message.mediaUrl}", it.result.throwable)
+                        },
                     )
                 } else {
                     // Placeholder when URL missing — looks clean and offers retry affordance
@@ -549,7 +640,12 @@ private fun ProfessionalPhotoDisplay(message: Message) {
 @Composable
 private fun VoiceBubble(message: Message) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val playbackSource = remember(message.voiceUrl, message.mediaUrl) {
+        message.voiceUrl.ifBlank { message.mediaUrl }
+    }
     var playing by remember { mutableStateOf(false) }
+    var preparing by remember { mutableStateOf(false) }
     var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
     var currentPosition by remember { mutableStateOf(0f) }
     var duration by remember { mutableStateOf(0f) }
@@ -620,25 +716,16 @@ private fun VoiceBubble(message: Message) {
                             else 
                                 Color(0xFF60A5FA)
                         )
-                        .clickable(enabled = message.voiceUrl.isNotBlank()) {
-                            if (message.voiceUrl.isNotBlank()) {
+                        .clickable(enabled = playbackSource.isNotBlank() && !preparing) {
                                 if (playing) {
-                                    try {
-                                        mediaPlayer?.stop()
-                                    } catch (_: Exception) {
-                                    }
-                                    try {
-                                        mediaPlayer?.release()
-                                    } catch (_: Exception) {
-                                    }
+                                    try { mediaPlayer?.stop() } catch (_: Exception) {}
+                                    try { mediaPlayer?.release() } catch (_: Exception) {}
                                     mediaPlayer = null
                                     playing = false
                                 } else {
-                                    android.util.Log.d("VoicePlayback", "🎵 Starting playback: url=${message.voiceUrl}")
-                                    try {
-                                        mediaPlayer?.release()
-                                    } catch (_: Exception) {
-                                    }
+                                    preparing = true
+                                    android.util.Log.d("VoicePlayback", "🎵 Starting playback: url=$playbackSource")
+                                    try { mediaPlayer?.release() } catch (_: Exception) {}
                                     val player = MediaPlayer()
                                     player.setAudioAttributes(
                                         AudioAttributes.Builder()
@@ -652,93 +739,118 @@ private fun VoiceBubble(message: Message) {
                                             mp.start()
                                             android.util.Log.d("VoicePlayback", "▶️ Playback started (prepared)")
                                             playing = true
+                                            preparing = false
                                         } catch (e: Exception) {
                                             android.util.Log.e("VoicePlayback", "❌ Start after prepared failed: ${e.message}")
+                                            preparing = false
                                         }
                                     }
 
                                     player.setOnCompletionListener { mp ->
                                         android.util.Log.d("VoicePlayback", "✅ Playback completed")
                                         playing = false
-                                        try {
-                                            mp.release()
-                                        } catch (_: Exception) {
-                                        }
+                                        preparing = false
+                                        try { mp.release() } catch (_: Exception) {}
                                         mediaPlayer = null
                                     }
 
                                     player.setOnErrorListener { mp, what, extra ->
                                         android.util.Log.e("VoicePlayback", "❌ Playback error: what=$what extra=$extra")
                                         playing = false
-                                        try {
-                                            mp.release()
-                                        } catch (_: Exception) {
-                                        }
+                                        preparing = false
+                                        try { mp.release() } catch (_: Exception) {}
                                         mediaPlayer = null
                                         true
                                     }
 
+                                    // Try direct URL first; if that fails, download on IO dispatcher and play local file
                                     try {
-                                        player.setDataSource(message.voiceUrl)
-                                        player.prepareAsync()
-                                    } catch (e: Exception) {
-                                        android.util.Log.w("VoicePlayback", "⚠️ URL playback failed, trying cache fallback: ${e.message}")
-                                        try {
-                                            val cacheFile = java.io.File(
-                                                context.cacheDir,
-                                                "voice_${message.remoteMessageId}_${message.timestampMillis}.m4a"
-                                            )
-                                            if (!cacheFile.exists()) {
-                                                android.util.Log.d("VoicePlayback", "📥 Downloading to cache: ${cacheFile.absolutePath}")
-                                                java.net.URL(message.voiceUrl).openStream().use { input ->
-                                                    java.io.FileOutputStream(cacheFile).use { output ->
-                                                        input.copyTo(output)
+                                        // Accept file:// URIs, http(s) URLs, or plain file paths
+                                        when {
+                                            playbackSource.startsWith("file:") -> {
+                                                val localFile = java.io.File(Uri.parse(playbackSource).path.orEmpty())
+                                                if (!localFile.exists()) {
+                                                    if (message.mediaUrl.isNotBlank() && message.mediaUrl.startsWith("http")) {
+                                                        player.setDataSource(message.mediaUrl)
+                                                    } else {
+                                                        android.widget.Toast.makeText(context, "Voice file is no longer available", android.widget.Toast.LENGTH_SHORT).show()
+                                                        try { player.release() } catch (_: Exception) {}
+                                                        return@clickable
                                                     }
+                                                } else {
+                                                    player.setDataSource(localFile.absolutePath)
                                                 }
-                                                android.util.Log.d("VoicePlayback", "✅ Downloaded: ${cacheFile.length()} bytes")
                                             }
-
-                                            val cachePlayer = MediaPlayer()
-                                            cachePlayer.setAudioAttributes(
-                                                AudioAttributes.Builder()
-                                                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                                                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                                                    .build()
-                                            )
-                                            cachePlayer.setOnPreparedListener { mp ->
+                                            playbackSource.startsWith("http") -> {
+                                                player.setDataSource(playbackSource)
+                                            }
+                                            else -> {
+                                                val localFile = java.io.File(playbackSource)
+                                                if (!localFile.exists()) {
+                                                    if (message.mediaUrl.isNotBlank() && message.mediaUrl.startsWith("http")) {
+                                                        player.setDataSource(message.mediaUrl)
+                                                    } else {
+                                                        android.widget.Toast.makeText(context, "Voice file is no longer available", android.widget.Toast.LENGTH_SHORT).show()
+                                                        try { player.release() } catch (_: Exception) {}
+                                                        return@clickable
+                                                    }
+                                                } else {
+                                                    player.setDataSource(localFile.absolutePath)
+                                                }
+                                            }
+                                        }
+                                        player.prepareAsync()
+                                        mediaPlayer = player
+                                    } catch (e: Exception) {
+                                        android.util.Log.w("VoicePlayback", "⚠️ URL/file playback failed, scheduling cache download if remote: ${e.message}")
+                                        // Only attempt HTTP download fallback for remote URLs
+                                        if (playbackSource.startsWith("http")) {
+                                            scope.launch(Dispatchers.IO) {
                                                 try {
-                                                    mp.start()
-                                                    android.util.Log.d("VoicePlayback", "▶️ Playback started from cache (prepared)")
-                                                    playing = true
-                                                } catch (pe: Exception) {
-                                                    android.util.Log.e("VoicePlayback", "❌ Start from cache failed: ${pe.message}")
+                                                    val cacheFile = java.io.File(context.cacheDir, "voice_${message.remoteMessageId}_${message.timestampMillis}.m4a")
+                                                    if (!cacheFile.exists()) {
+                                                        android.util.Log.d("VoicePlayback", "📥 Downloading to cache (bg): ${cacheFile.absolutePath}")
+                                                        java.net.URL(playbackSource).openStream().use { input ->
+                                                            java.io.FileOutputStream(cacheFile).use { output -> input.copyTo(output) }
+                                                        }
+                                                        android.util.Log.d("VoicePlayback", "✅ Downloaded (bg): ${cacheFile.length()} bytes")
+                                                    }
+
+                                                    withContext(Dispatchers.Main) {
+                                                        try {
+                                                            val cachePlayer = MediaPlayer()
+                                                            cachePlayer.setAudioAttributes(
+                                                                AudioAttributes.Builder()
+                                                                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                                                                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                                                                    .build()
+                                                            )
+                                                            cachePlayer.setOnPreparedListener { mp -> try { mp.start(); playing = true } catch (_: Exception) {} }
+                                                            cachePlayer.setOnPreparedListener { mp -> try { mp.start(); playing = true; preparing = false } catch (_: Exception) { preparing = false } }
+                                                            cachePlayer.setOnCompletionListener { mp -> try { mp.release() } catch (_: Exception) {}; mediaPlayer = null; playing = false; preparing = false }
+                                                            cachePlayer.setOnErrorListener { mp, what, extra -> try { mp.release() } catch (_: Exception) {}; mediaPlayer = null; playing = false; preparing = false; true }
+                                                            cachePlayer.setDataSource(cacheFile.absolutePath)
+                                                            mediaPlayer = cachePlayer
+                                                            cachePlayer.prepareAsync()
+                                                        } catch (pe: Exception) {
+                                                            android.util.Log.e("VoicePlayback", "❌ Start from cache failed: ${pe.message}")
+                                                            preparing = false
+                                                            try { player.release() } catch (_: Exception) {}
+                                                        }
+                                                    }
+                                                } catch (fallbackE: Exception) {
+                                                    android.util.Log.e("VoicePlayback", "❌ Background fallback failed: ${fallbackE.message}")
+                                                    preparing = false
+                                                    try { player.release() } catch (_: Exception) {}
                                                 }
                                             }
-                                            cachePlayer.setOnCompletionListener { mp ->
-                                                android.util.Log.d("VoicePlayback", "✅ Cache playback completed")
-                                                playing = false
-                                                try { mp.release() } catch (_: Exception) {}
-                                                mediaPlayer = null
-                                            }
-                                            cachePlayer.setOnErrorListener { mp, what, extra ->
-                                                android.util.Log.e("VoicePlayback", "❌ Cache playback error: what=$what extra=$extra")
-                                                playing = false
-                                                try { mp.release() } catch (_: Exception) {}
-                                                mediaPlayer = null
-                                                true
-                                            }
-
-                                            cachePlayer.setDataSource(cacheFile.absolutePath)
-                                            cachePlayer.prepareAsync()
-                                            mediaPlayer = cachePlayer
-                                        } catch (fallbackE: Exception) {
-                                            android.util.Log.e("VoicePlayback", "❌ Fallback failed: ${fallbackE.message}")
+                                        } else {
+                                            android.util.Log.w("VoicePlayback", "Not attempting download fallback because voiceUrl is not remote: $playbackSource")
+                                            preparing = false
+                                            try { player.release() } catch (_: Exception) {}
                                         }
                                     }
-
-                                    mediaPlayer = player
                                 }
-                            }
                         },
                     contentAlignment = Alignment.Center,
                 ) {

@@ -129,8 +129,19 @@ object E2EEManager {
     ): Result<EncryptedChatMessage> {
         return withContext(Dispatchers.Default) {
             try {
-                ensureDirectChatSecret(chatId, senderId, recipientId).getOrThrow()
-                val secretKey = getSharedChatSecret(chatId, senderId).getOrThrow()
+                val secretKey = chatSecretCache[chatId] ?: getSoftwareChatSecret(chatId)?.let { localSecretBase64 ->
+                    try {
+                        val secretBytes = Base64.decode(localSecretBase64, Base64.DEFAULT)
+                        val secretKey = SecretKeySpec(secretBytes, 0, secretBytes.size, "AES")
+                        chatSecretCache[chatId] = secretKey
+                        secretKey
+                    } catch (_: Exception) {
+                        null
+                    }
+                } ?: run {
+                    ensureDirectChatSecret(chatId, senderId, recipientId).getOrThrow()
+                    getSharedChatSecret(chatId, senderId).getOrThrow()
+                }
                 val encrypted = CryptoManager.encryptMessage(plaintext, secretKey)
 
                 // Messenger-style: store only encryptedPayload and IV
@@ -178,11 +189,6 @@ object E2EEManager {
                 )
                 Result.success(plaintext)
             } catch (e: Exception) {
-                android.util.Log.e(
-                    "E2EEManager",
-                    "decryptReceivedMessage failed userId=$userId senderId=$senderId msg=${e.message}",
-                    e,
-                )
                 Result.failure(e)
             }
         }
@@ -207,17 +213,15 @@ object E2EEManager {
 
             // Second attempt: clear cache and retry
             try {
-                android.util.Log.d("E2EEManager", "Initial decrypt failed, clearing cache and retrying...")
                 chatSecretCache.remove(chatId)
                 encryptedPrefs?.edit()?.remove("software_chat_secret_$chatId")?.apply()
                 
                 val retryResult = decryptReceivedMessage(chatId, userId, senderId, encryptedMessage)
                 if (retryResult.isSuccess) {
-                    android.util.Log.d("E2EEManager", "✓ Retry decrypt succeeded after cache clear")
                     return@withContext retryResult
                 }
             } catch (e: Exception) {
-                android.util.Log.e("E2EEManager", "Fallback decrypt failed: ${e.message}")
+                return@withContext initialResult
             }
 
             // Return original error
@@ -676,8 +680,7 @@ private suspend fun loadSecretFromFirestore(chatId: String, userId: String): Res
             // Cache in memory AND persist locally so both users derive the same key
             chatSecretCache[chatId] = secretKey
             setSoftwareChatSecret(chatId, derivedBase64)
-            
-            Log.d("E2EEManager", "✓ Derived shared secret from chat metadata for chat=$chatId")
+
             Result.success(secretKey)
         } catch (e: Exception) {
             Log.e("E2EEManager", "Failed to load secret from Firestore for chat=$chatId: ${e.message}", e)
@@ -740,7 +743,6 @@ private suspend fun loadSecretFromFirestore(chatId: String, userId: String): Res
     private fun setSoftwareChatSecret(chatId: String, secretBase64: String) {
         try {
             encryptedPrefs?.edit()?.putString("software_chat_secret_$chatId", secretBase64)?.apply()
-            android.util.Log.d("E2EEManager", "✓ Stored software chat secret locally for chat=$chatId")
         } catch (e: Exception) {
             android.util.Log.w("E2EEManager", "Failed to store software chat secret for $chatId: ${e.message}")
         }
@@ -770,12 +772,6 @@ private suspend fun loadSecretFromFirestore(chatId: String, userId: String): Res
 
         val digest = MessageDigest.getInstance("SHA-256").digest(material.toByteArray(Charsets.UTF_8))
         val secretBase64 = Base64.encodeToString(digest, Base64.NO_WRAP)
-        
-        Log.d("E2EEManager", "🔑 KEY DERIVATION LOG:" +
-            "\n  chatId=$chatId" +
-            "\n  participants=${normalizedParticipants}" +
-            "\n  material=$material" +
-            "\n  derivedKey=${secretBase64.take(16)}...")
         
         return secretBase64
     }

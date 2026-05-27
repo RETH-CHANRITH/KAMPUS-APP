@@ -1,10 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<inset xmlns:android="http://schemas.android.com/apk/res/android"
-    android:insetLeft="34dp"
-    android:insetTop="34dp"
-    android:insetRight="34dp"
-    android:insetBottom="34dp">
-    <bitmap
-        android:gravity="center"
-    android:src="@drawable/logo_app" />
-</inset>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Circular navy background to match app brand -->
+    <item android:gravity="center">
+        <shape android:shape="oval">
+            <size android:width="120dp" android:height="120dp" />
+            <solid android:color="#081F3A" />
+        </shape>
+    </item>
+
+    <!-- Centered full logo on top of the circle. Size chosen to leave padding. -->
+    <item android:gravity="center" android:width="92dp" android:height="92dp">
+        <bitmap
+            android:gravity="center"
+            android:src="@drawable/logo_app"
+            android:antialias="true" />
+    </item>
+</layer-list>

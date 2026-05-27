@@ -17,6 +17,7 @@ import kotlinx.coroutines.tasks.await
 
 data class FriendsUiState(
     val friends: List<FriendItemData> = emptyList(),
+    val legacyFriends: List<FriendItemData> = emptyList(),
     val followers: List<FriendItemData> = emptyList(),
     val following: List<FriendItemData> = emptyList(),
     val isLoading: Boolean = false,
@@ -46,6 +47,7 @@ class FriendsViewModel : ViewModel() {
     private var friendProfileListeners: List<ListenerRegistration> = emptyList()
     private var followerProfileListeners: List<ListenerRegistration> = emptyList()
     private var followingProfileListeners: List<ListenerRegistration> = emptyList()
+    private var legacyFriendsListener: ListenerRegistration? = null
     private val mutualGraphListeners: MutableMap<String, List<ListenerRegistration>> = mutableMapOf()
     
     init {
@@ -60,6 +62,27 @@ class FriendsViewModel : ViewModel() {
         }
         
         _uiState.update { it.copy(isLoading = true) }
+
+        legacyFriendsListener?.remove()
+        legacyFriendsListener = firestore.collection("users")
+            .document(currentUserId!!)
+            .collection("friends")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    _uiState.update { state -> state.copy(error = error.message) }
+                    return@addSnapshotListener
+                }
+
+                val legacyFriends = snapshot?.documents?.mapNotNull { doc ->
+                    doc.toFriendItemData()
+                } ?: emptyList()
+
+                _uiState.update { state ->
+                    state.copy(legacyFriends = legacyFriends).withComputedFriends()
+                }
+                observeFriendProfiles(legacyFriends.map { it.userId })
+                calculateMutualFriends(legacyFriends, isFriends = true)
+            }
         
         // Observe followers
         viewModelScope.launch {
@@ -80,6 +103,7 @@ class FriendsViewModel : ViewModel() {
                         val updated = state.copy(followers = followersWithMutuals, isLoading = false)
                         updated.withComputedFriends()
                     }
+                    observeFriendProfiles((_uiState.value.friends + followersWithMutuals).map { it.userId })
                     syncMutualGraphListeners()
                     observeFollowerProfiles(followersWithMutuals.map { it.userId })
                     calculateMutualFriends(followersWithMutuals, isFriends = false)
@@ -109,6 +133,7 @@ class FriendsViewModel : ViewModel() {
                         val updated = state.copy(following = followingWithMutuals, isLoading = false)
                         updated.withComputedFriends()
                     }
+                    observeFriendProfiles((_uiState.value.friends + followingWithMutuals).map { it.userId })
                     syncMutualGraphListeners()
                     observeFollowingProfiles(followingWithMutuals.map { it.userId })
                     calculateMutualFriends(followingWithMutuals, isFollowing = true)
@@ -300,7 +325,7 @@ class FriendsViewModel : ViewModel() {
                     .get()
                     .await()
 
-                val now = com.google.firebase.Timestamp.now()
+                val now = System.currentTimeMillis()
                 val followingData = mapOf(
                     "userId" to followerUserId,
                     "displayName" to followerData.name,
@@ -309,7 +334,7 @@ class FriendsViewModel : ViewModel() {
                     "profileImageUrl" to followerData.profileImageUrl,
                     "isOnline" to followerData.isOnline,
                     "isMutual" to true,
-                    "addedAt" to now,
+                    "createdAt" to now,
                 )
                 val followerDataForTarget = mapOf(
                     "userId" to currentUserId!!,
@@ -319,7 +344,7 @@ class FriendsViewModel : ViewModel() {
                     "profileImageUrl" to (currentUserDoc.getString("profileImageUrl") ?: ""),
                     "isOnline" to (currentUserDoc.getBoolean("isOnline") ?: false),
                     "isMutual" to true,
-                    "addedAt" to now,
+                    "createdAt" to now,
                 )
 
                 runCatching {
@@ -407,7 +432,7 @@ class FriendsViewModel : ViewModel() {
 
                 val blockedData = mapOf(
                     "userId" to userId,
-                    "blockedAt" to com.google.firebase.Timestamp.now(),
+                    "blockedAt" to System.currentTimeMillis(),
                 )
 
                 firestore.collection("users")
@@ -446,6 +471,7 @@ class FriendsViewModel : ViewModel() {
 
     override fun onCleared() {
         super.onCleared()
+        legacyFriendsListener?.remove()
         friendProfileListeners.forEach { it.remove() }
         followerProfileListeners.forEach { it.remove() }
         followingProfileListeners.forEach { it.remove() }
@@ -465,8 +491,25 @@ class FriendsViewModel : ViewModel() {
                 isOnline = followingItem.isOnline || follower.isOnline,
             )
         }
-        allFriendsIds = mutual.map { it.userId }.toSet()
-        return copy(friends = mutual.distinctBy { it.userId })
+        val combinedFriends = (mutual + legacyFriends).distinctBy { it.userId }
+        allFriendsIds = combinedFriends.map { it.userId }.toSet()
+        return copy(friends = combinedFriends)
+    }
+
+    private fun com.google.firebase.firestore.DocumentSnapshot.toFriendItemData(): FriendItemData? {
+        return try {
+            FriendItemData(
+                userId = getString("userId") ?: id,
+                name = getString("displayName") ?: "",
+                handle = getString("handle") ?: "",
+                mutualFriendsCount = 0,
+                avatarEmoji = getString("avatarEmoji") ?: "👤",
+                profileImageUrl = getString("profileImageUrl") ?: "",
+                isOnline = getBoolean("isOnline") ?: false,
+            )
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun FriendItemData.fromUser(user: User): FriendItemData {

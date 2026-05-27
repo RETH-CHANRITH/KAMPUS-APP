@@ -5,6 +5,7 @@ data class AppNotification(
 	val type: String,
 	val title: String,
 	val body: String,
+	val toUserId: String = "",
 	val actorUserId: String = "",
 	val actorDisplayName: String = "",
 	val targetId: String = "",

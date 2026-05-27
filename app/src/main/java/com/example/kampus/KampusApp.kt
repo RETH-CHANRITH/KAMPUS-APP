@@ -8,6 +8,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.example.kampus.di.SupabaseModule
+import com.example.kampus.call.CallManager
 import com.example.kampus.utils.FcmTokenManager
 import com.example.kampus.utils.E2EEManager
 import com.example.kampus.utils.PresenceManager
@@ -18,6 +19,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import java.io.BufferedReader
 
 class KampusApp : Application() {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -40,6 +43,33 @@ class KampusApp : Application() {
 
         // Initialize Supabase for image uploads
         SupabaseModule.initSupabase(this)
+
+        // Initialize WebRTC call stack once at app start
+        CallManager.initialize(this)
+
+        // Attempt to load optional TURN servers from assets/turn_servers.json
+        runCatching {
+            val assetName = "turn_servers.json"
+            val stream = assets.open(assetName)
+            val reader = BufferedReader(stream.reader())
+            val json = reader.use { it.readText() }
+            val arr = JSONArray(json)
+            val servers = mutableListOf<com.example.kampus.call.CallConfig.TurnServer>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                val url = obj.optString("url")
+                val user = obj.optString("username")
+                val cred = obj.optString("credential")
+                if (url.isNotBlank()) {
+                    servers.add(com.example.kampus.call.CallConfig.TurnServer(url, user, cred))
+                }
+            }
+            if (servers.isNotEmpty()) {
+                com.example.kampus.call.CallConfig.setTurnServers(servers)
+            }
+        }.onFailure {
+            // No asset or parse failure is acceptable; TURN remains empty until configured.
+        }
 
         // Initialize E2EE manager used by chat send flow
         initializeE2EEManager()

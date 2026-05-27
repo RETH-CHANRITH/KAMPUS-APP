@@ -4,6 +4,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -22,6 +23,8 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Place
@@ -77,6 +80,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Date
+import com.google.firebase.auth.FirebaseAuth
 import java.util.Locale
 import kotlin.collections.isNotEmpty
 import kotlin.math.max
@@ -102,22 +106,27 @@ fun ChatScreen(
     onOpenProfile: (String) -> Unit = {},
     onVoiceCallClick: () -> Unit = {},
     onVideoCallClick: () -> Unit = {},
+    onCallAgainClick: (String, String) -> Unit = { _, _ -> },
     onDiagnosticsClick: () -> Unit = {},
     onRotateKeysClick: () -> Unit = {},
     chatViewModel : ChatViewModel = viewModel(),
 ) {
     LaunchedEffect(chatId) { chatViewModel.openChat(chatId) }
     val state        by chatViewModel.chatState.collectAsStateWithLifecycle()
+    val chatListState by chatViewModel.chatListState.collectAsStateWithLifecycle()
     val listState    = rememberLazyListState()
     val scope        = rememberCoroutineScope()
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
     val snackbarHostState = remember { SnackbarHostState() }
-    val pendingDeleteMessages = remember { mutableStateMapOf<Int, Message>() }
-    val pendingDeleteJobs = remember { mutableStateMapOf<Int, Job>() }
-    val messageRenderVersions = remember { mutableStateMapOf<Int, Int>() }
-    val visibleMessages = remember(state.messages, pendingDeleteMessages.size) {
-        state.messages.filterNot { pendingDeleteMessages.containsKey(it.id) }
+    val pendingDeleteMessages = remember { mutableStateMapOf<String, Message>() }
+    val pendingDeleteJobs = remember { mutableStateMapOf<String, Job>() }
+    val messageRenderVersions = remember { mutableStateMapOf<String, Int>() }
+    val currentUserId = FirebaseAuth.getInstance().currentUser?.uid
+    val visibleMessages = remember(state.messages, pendingDeleteMessages.size, currentUserId) {
+        state.messages.filterNot {
+            pendingDeleteMessages.containsKey(it.id) || (currentUserId != null && it.deletedForUsers.contains(currentUserId))
+        }
     }
     var shouldAutoScroll by remember { mutableStateOf(true) }
     var hasScrolledToBottomOnOpen by remember { mutableStateOf(false) }
@@ -125,24 +134,30 @@ fun ChatScreen(
     var editTargetMessage by remember { mutableStateOf<Message?>(null) }
     var editText by remember { mutableStateOf("") }
     var isRecording by remember { mutableStateOf(false) }
+    var isRecordingPaused by remember { mutableStateOf(false) }
     var recorder by remember { mutableStateOf<MediaRecorder?>(null) }
     var recordingFile by remember { mutableStateOf<File?>(null) }
     var recordingStartedAt by remember { mutableStateOf(0L) }
     var recordingElapsedMs by remember { mutableStateOf(0L) }
+    var recordingPausedAt by remember { mutableStateOf(0L) }
+    var recordingPausedAccumulatedMs by remember { mutableStateOf(0L) }
     var hasAudioPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         )
     }
 
-    LaunchedEffect(isRecording, recordingStartedAt) {
+    LaunchedEffect(isRecording, recordingStartedAt, isRecordingPaused, recordingPausedAt, recordingPausedAccumulatedMs) {
         if (!isRecording) {
             recordingElapsedMs = 0L
             return@LaunchedEffect
         }
 
         while (isRecording) {
-            recordingElapsedMs = System.currentTimeMillis() - recordingStartedAt
+            val pauseAdjustment = recordingPausedAccumulatedMs + if (isRecordingPaused && recordingPausedAt > 0L) {
+                System.currentTimeMillis() - recordingPausedAt
+            } else 0L
+            recordingElapsedMs = System.currentTimeMillis() - recordingStartedAt - pauseAdjustment
             delay(250)
         }
     }
@@ -157,6 +172,9 @@ fun ChatScreen(
                     recorder = mediaRecorder
                     recordingStartedAt = startedAt
                     recordingElapsedMs = 0L
+                    recordingPausedAt = 0L
+                    recordingPausedAccumulatedMs = 0L
+                    isRecordingPaused = false
                     isRecording = true
                 }
             }
@@ -306,10 +324,16 @@ fun ChatScreen(
     fun stopAndSendVoice() {
         val file = recordingFile ?: return
         val startedAt = recordingStartedAt
+        val adjustedPauseMs = recordingPausedAccumulatedMs + if (isRecordingPaused && recordingPausedAt > 0L) {
+            System.currentTimeMillis() - recordingPausedAt
+        } else 0L
         val currentRecorder = recorder
         recorder = null
         recordingFile = null
         isRecording = false
+        isRecordingPaused = false
+        recordingPausedAt = 0L
+        recordingPausedAccumulatedMs = 0L
 
         try {
             currentRecorder?.stop()
@@ -321,10 +345,32 @@ fun ChatScreen(
             }
         }
 
-        val durationSeconds = max(1L, ((System.currentTimeMillis() - startedAt) / 1000L))
+        val durationSeconds = max(1L, ((System.currentTimeMillis() - startedAt - adjustedPauseMs) / 1000L))
         val fileSizeKb = (file.length() / 1024).coerceAtLeast(1)
         android.util.Log.d("VoiceRecording", "🎙️  Recording stopped: duration=${durationSeconds}s, fileSize=${fileSizeKb}KB")
         chatViewModel.sendVoiceMessage(file, formatVoiceDuration(durationSeconds))
+    }
+
+    fun toggleVoicePauseResume() {
+        val currentRecorder = recorder ?: return
+        if (!isRecording || Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
+
+        try {
+            if (isRecordingPaused) {
+                currentRecorder.resume()
+                recordingPausedAccumulatedMs += if (recordingPausedAt > 0L) {
+                    System.currentTimeMillis() - recordingPausedAt
+                } else 0L
+                recordingPausedAt = 0L
+                isRecordingPaused = false
+            } else {
+                currentRecorder.pause()
+                recordingPausedAt = System.currentTimeMillis()
+                isRecordingPaused = true
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("VoiceRecording", "Pause/resume failed: ${e.message}")
+        }
     }
 
     fun queueDeleteMessage(message: Message) {
@@ -370,6 +416,9 @@ fun ChatScreen(
         pendingDeleteMessages[message.id] = message
         scope.launch {
             val result = chatViewModel.deleteMessageForMe(message)
+            result.onSuccess {
+                pendingDeleteMessages.remove(message.id)
+            }
             result.onFailure { error ->
                 pendingDeleteMessages.remove(message.id)
                 snackbarHostState.showSnackbar(error.message ?: "Failed to delete message")
@@ -441,12 +490,15 @@ fun ChatScreen(
         }
     }
 
-    // Scroll to bottom only when user is already near bottom (for subsequent messages).
+    // Scroll to bottom only when user is already near bottom (for incoming messages).
+    // OR when current user sends a message (always scroll to show sent message).
     LaunchedEffect(visibleMessages.size, shouldAutoScroll) {
-        if (visibleMessages.isNotEmpty() && shouldAutoScroll && hasScrolledToBottomOnOpen) {
-            // Only auto-scroll for new messages arriving after initial load
-            scope.launch {
-                listState.animateScrollToItem(visibleMessages.size - 1)
+        if (visibleMessages.isNotEmpty() && hasScrolledToBottomOnOpen) {
+            val isLatestFromCurrentUser = visibleMessages.lastOrNull()?.isSentByMe == true
+            if (shouldAutoScroll || isLatestFromCurrentUser) {
+                scope.launch {
+                    listState.scrollToItem(visibleMessages.size - 1)
+                }
             }
         }
     }
@@ -509,6 +561,8 @@ fun ChatScreen(
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             val timelineMessages = visibleMessages.sortedBy { it.timestampMillis }
+            val regularMessages = timelineMessages.filter { !it.isCallInvite }
+            val firstUnreadIncomingIndex = timelineMessages.indexOfFirst { !it.isSentByMe && !it.isRead }
             var lastDateKey: String? = null
 
             timelineMessages.forEachIndexed { index, msg ->
@@ -520,17 +574,22 @@ fun ChatScreen(
                     lastDateKey = dateKey
                 }
 
+                if (index == firstUnreadIncomingIndex) {
+                    item(key = "unread_${msg.id}") {
+                        UnreadMessagesSeparator()
+                    }
+                }
+
                 if (msg.isCallInvite) {
                     item(key = "call_${msg.id}:${messageRenderVersions[msg.id] ?: 0}") {
                         CallHistoryCard(
                             message = msg,
                             onCallBack = { callType ->
-                                chatViewModel.initiateCallBack(chatId, callType)
+                                onCallAgainClick(chatId, callType)
                             },
                         )
                     }
                 } else {
-                    val regularMessages = timelineMessages.filter { !it.isCallInvite }
                     val regularIndex = regularMessages.indexOfFirst { it.id == msg.id }
                     val isLastInGroup = regularIndex == regularMessages.lastIndex ||
                         regularMessages.getOrNull(regularIndex + 1)?.isSentByMe != msg.isSentByMe
@@ -541,6 +600,8 @@ fun ChatScreen(
                             isLastInGroup = isLastInGroup,
                             contactProfileImageUrl = state.contactProfileImageUrl,
                             contactAvatarEmoji = state.contactAvatarEmoji,
+                            selfProfileImageUrl = chatListState.currentUserProfileImageUrl,
+                            selfAvatarEmoji = chatListState.currentUserAvatarEmoji,
                             onDelete = { queueDeleteMessage(msg) },
                             onLongPress = {
                                 actionMessage = msg
@@ -553,6 +614,18 @@ fun ChatScreen(
         }
 
         // ── Input bar ──────────────────────────────────────────────────────
+            when (val uploadState = state.voiceUploadState) {
+                is VoiceUploadState.Uploading -> VoiceUploadStatusBanner(
+                    state = uploadState,
+                    onRetry = { chatViewModel.retryVoiceUpload() },
+                )
+                is VoiceUploadState.Failed -> VoiceUploadStatusBanner(
+                    state = uploadState,
+                    onRetry = { chatViewModel.retryVoiceUpload() },
+                )
+                VoiceUploadState.Idle -> Unit
+            }
+
             ChatInputBar(
                 text = state.inputText,
                 onTextChange = chatViewModel::onInputChange,
@@ -588,6 +661,9 @@ fun ChatScreen(
                             recorder = mediaRecorder
                             recordingStartedAt = startedAt
                             recordingElapsedMs = 0L
+                            recordingPausedAt = 0L
+                            recordingPausedAccumulatedMs = 0L
+                            isRecordingPaused = false
                             isRecording = true
                         }
                     }
@@ -605,12 +681,16 @@ fun ChatScreen(
                     recorder = null
                     recordingFile = null
                     recordingElapsedMs = 0L
+                    recordingPausedAt = 0L
+                    recordingPausedAccumulatedMs = 0L
+                    isRecordingPaused = false
                     isRecording = false
                 },
                 isRecording = isRecording,
+                isRecordingPaused = isRecordingPaused,
+                onMicPauseResume = { toggleVoicePauseResume() },
                 recordingDurationText = if (isRecording) formatVoiceDuration(max(1L, recordingElapsedMs / 1000L)) else "",
             )
-    }
     }
 
     if (showAttachmentSheet) {
@@ -898,6 +978,7 @@ fun ChatScreen(
         )
     }
 }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -906,6 +987,8 @@ private fun SwipeToDeleteMessageRow(
     isLastInGroup: Boolean = true,
     contactProfileImageUrl: String = "",
     contactAvatarEmoji: String = "",
+    selfProfileImageUrl: String = "",
+    selfAvatarEmoji: String = "",
     onDelete: () -> Unit,
     onLongPress: () -> Unit,
     onReact: ((remoteMessageId: String, emoji: String) -> Unit)? = null,
@@ -919,6 +1002,8 @@ private fun SwipeToDeleteMessageRow(
             isLastInGroup = isLastInGroup,
             contactProfileImageUrl = contactProfileImageUrl,
             contactAvatarEmoji = contactAvatarEmoji,
+            selfProfileImageUrl = selfProfileImageUrl,
+            selfAvatarEmoji = selfAvatarEmoji,
             onLongPress = onLongPress,
             onReact = onReact
         )
@@ -936,6 +1021,7 @@ private fun SwipeToDeleteMessageRow(
         if (!deleteTriggered && dismissState.currentValue == SwipeToDismissBoxValue.EndToStart) {
             deleteTriggered = true
             onDelete()
+            dismissState.reset()
         }
     }
 
@@ -1015,6 +1101,8 @@ private fun SwipeToDeleteMessageRow(
                 isLastInGroup = isLastInGroup,
                 contactProfileImageUrl = contactProfileImageUrl,
                 contactAvatarEmoji = contactAvatarEmoji,
+                selfProfileImageUrl = selfProfileImageUrl,
+                selfAvatarEmoji = selfAvatarEmoji,
                 onLongPress = onLongPress,
                 onReact = onReact
             )
@@ -1119,27 +1207,57 @@ private fun ChatTopBar(
                 fontSize   = 16.sp,
                 fontWeight = FontWeight.SemiBold,
             )
-            AnimatedContent(targetState = isTyping, label = "chat-status") { typing ->
-                if (typing) {
-                    TypingStatusRow()
-                } else {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    ) {
-                        if (isOnline) {
-                            Box(
-                                modifier = Modifier
-                                    .size(7.dp)
-                                    .clip(CircleShape)
-                                    .background(OnlineGreen),
+            Box(
+                modifier = Modifier
+                    .padding(top = 2.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(
+                        when {
+                            isTyping -> AccentBlue.copy(alpha = 0.12f)
+                            isOnline -> OnlineGreen.copy(alpha = 0.10f)
+                            else -> Color.Transparent
+                        }
+                    )
+                    .border(
+                        1.dp,
+                        when {
+                            isTyping -> AccentBlue.copy(alpha = 0.28f)
+                            isOnline -> OnlineGreen.copy(alpha = 0.22f)
+                            else -> Color.Transparent
+                        },
+                        RoundedCornerShape(999.dp),
+                    )
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+            ) {
+                AnimatedContent(
+                    targetState = isTyping,
+                    transitionSpec = {
+                        fadeIn(tween(180)) + scaleIn(tween(180), initialScale = 0.96f) togetherWith
+                            fadeOut(tween(120)) + scaleOut(tween(120), targetScale = 0.98f)
+                    },
+                    label = "chat-status",
+                ) { typing ->
+                    if (typing) {
+                        TypingStatusRow()
+                    } else {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            if (isOnline) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(7.dp)
+                                        .clip(CircleShape)
+                                        .background(OnlineGreen),
+                                )
+                            }
+                            Text(
+                                text     = if (isOnline) "Online" else "Offline",
+                                color    = if (isOnline) OnlineGreen else TextSecondary,
+                                fontSize = 12.sp,
                             )
                         }
-                        Text(
-                            text     = if (isOnline) "Online" else "Offline",
-                            color    = if (isOnline) OnlineGreen else TextSecondary,
-                            fontSize = 12.sp,
-                        )
                     }
                 }
             }
@@ -1185,6 +1303,16 @@ private fun ChatTopBar(
 @Composable
 private fun TypingStatusRow() {
     var dotCount by remember { mutableIntStateOf(1) }
+    val pulseTransition = rememberInfiniteTransition(label = "typing-pulse")
+    val pulseAlpha by pulseTransition.animateFloat(
+        initialValue = 0.45f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(650, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "typing-pulse-alpha",
+    )
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -1197,6 +1325,13 @@ private fun TypingStatusRow() {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
+        Box(
+            modifier = Modifier
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(AccentBlue.copy(alpha = pulseAlpha)),
+        )
+        Spacer(Modifier.width(2.dp))
         Text(
             text = "Typing${".".repeat(dotCount)}",
             color = AccentBlue,
@@ -1290,6 +1425,91 @@ private fun createTempChatCapture(context: Context): Uri {
     )
 }
 
+@Composable
+private fun VoiceUploadStatusBanner(
+    state: VoiceUploadState,
+    onRetry: () -> Unit,
+) {
+    val title: String
+    val subtitle: String
+    val accent: Color
+    val actionLabel: String
+
+    when (state) {
+        is VoiceUploadState.Uploading -> {
+            title = "Uploading voice note"
+            subtitle = "Sending audio to Supabase storage…"
+            accent = Color(0xFF60A5FA)
+            actionLabel = "Uploading"
+        }
+        is VoiceUploadState.Failed -> {
+            title = "Voice upload failed"
+            subtitle = state.error.ifBlank { "Tap retry to send again." }
+            accent = Color(0xFFEF4444)
+            actionLabel = "Retry"
+        }
+        VoiceUploadState.Idle -> {
+            title = ""
+            subtitle = ""
+            accent = Color.Transparent
+            actionLabel = ""
+        }
+    }
+
+    if (state is VoiceUploadState.Idle) return
+
+    Surface(
+        color = Color(0xFF111C2C),
+        shape = RoundedCornerShape(16.dp),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+        modifier = Modifier
+            .padding(horizontal = 12.dp)
+            .padding(bottom = 8.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(accent.copy(alpha = 0.18f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = if (state is VoiceUploadState.Uploading) Icons.Default.Mic else Icons.Default.Delete,
+                    contentDescription = title,
+                    tint = accent,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = title, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text(text = subtitle, color = TextSecondary, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+
+            if (state is VoiceUploadState.Failed) {
+                Text(
+                    text = actionLabel,
+                    color = AccentBlue,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .clickableNoRipple { onRetry() }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                )
+            }
+        }
+    }
+}
+
 // ─── Input bar ────────────────────────────────────────────────────────────────
 @Composable
 private fun ChatInputBar(
@@ -1302,6 +1522,8 @@ private fun ChatInputBar(
     onMicRelease: () -> Unit,
     onMicCancel  : () -> Unit,
     isRecording  : Boolean,
+    isRecordingPaused: Boolean,
+    onMicPauseResume: () -> Unit,
     recordingDurationText: String = "",
 ) {
     val waveformTransition = rememberInfiniteTransition(label = "recording_waveform")
@@ -1430,7 +1652,7 @@ private fun ChatInputBar(
             val density = LocalDensity.current
             var dragOffsetX by remember { mutableStateOf(0f) }
             val dragThresholdPx = with(density) { 110.dp.toPx() }
-            Surface(
+            Row(
                 modifier = Modifier
                     .weight(1f)
                     .offset { IntOffset(dragOffsetX.roundToInt(), 0) }
@@ -1454,81 +1676,93 @@ private fun ChatInputBar(
                             },
                         )
                     },
-                color = InputFieldBg,
-                shape = RoundedCornerShape(20.dp),
-                tonalElevation = 0.dp,
-                shadowElevation = 0.dp,
-                border = BorderStroke(1.dp, Color(0xFF26324A)),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Row(
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                        .padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF202B43))
+                        .clickableNoRipple { onMicCancel() },
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(10.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFFEF4444))
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "Discard recording",
+                        tint = AccentBlue,
+                        modifier = Modifier.size(18.dp),
                     )
+                }
 
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.Center,
-                    ) {
-                        Text(
-                            text = "Recording",
-                            color = TextPrimary,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            text = "Slide left to cancel",
-                            color = TextSecondary,
-                            fontSize = 11.sp,
-                        )
-                    }
-
+                Surface(
+                    modifier = Modifier.weight(1f),
+                    color = AccentBlue.copy(alpha = 0.95f),
+                    shape = RoundedCornerShape(999.dp),
+                    tonalElevation = 0.dp,
+                    shadowElevation = 0.dp,
+                ) {
                     Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                            .padding(horizontal = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFEF4444))
+                        )
+
+                        RecordingWaveBars(
+                            amplitudes = listOf(bar1, bar2, bar3, bar4, bar5, bar6),
+                            color = Color.White,
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .size(30.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.10f))
+                                .clickableNoRipple { onMicPauseResume() },
+                            contentAlignment = Alignment.Center,
                         ) {
-                            RecordingWaveBars(
-                                amplitudes = listOf(bar1, bar2, bar3, bar4, bar5, bar6),
-                                color = AccentBlue.copy(alpha = 0.95f),
+                            Icon(
+                                imageVector = if (isRecordingPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                                contentDescription = if (isRecordingPaused) "Resume recording" else "Pause recording",
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp),
                             )
                         }
 
                         Text(
                             text = recordingDurationText.ifBlank { "0:00" },
-                            color = TextPrimary,
+                            color = Color.White,
                             fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f),
+                            textAlign = TextAlign.End,
                         )
-
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF1A2540))
-                                .clickableNoRipple { onMicCancel() },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                Icons.Default.Delete,
-                                contentDescription = "Discard recording",
-                                tint = TextSecondary,
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
                     }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF202B43))
+                        .clickableNoRipple { onMicRelease() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Send,
+                        contentDescription = "Send recording",
+                        tint = AccentBlue,
+                        modifier = Modifier.size(18.dp),
+                    )
                 }
             }
         } else {
@@ -1703,6 +1937,38 @@ private fun DateSeparator(text: String) {
 }
 
 @Composable
+private fun UnreadMessagesSeparator() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            thickness = 1.dp,
+            color = ThemeController.accent.color.copy(alpha = 0.22f),
+        )
+        Text(
+            text = "Unread messages",
+            color = ThemeController.accent.color,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .background(ThemeController.accent.color.copy(alpha = 0.10f))
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+        )
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            thickness = 1.dp,
+            color = ThemeController.accent.color.copy(alpha = 0.22f),
+        )
+    }
+}
+
+@Composable
 private fun CallHistoryCard(
     message: Message,
     onCallBack: (String) -> Unit = {},
@@ -1767,7 +2033,10 @@ private fun CallHistoryCard(
                             isPressed = true
                             tryAwaitRelease()
                             isPressed = false
-                        }
+                            },
+                            onTap = {
+                                onCallBack(if (isVideo) "video" else "audio")
+                            }
                     )
                 },
             shape = RoundedCornerShape(16.dp),

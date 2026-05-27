@@ -21,6 +21,16 @@ service cloud.firestore {
         get(/databases/$(database)/documents/chats/$(chatId)).data.participants.hasAny([request.auth.uid]);
     }
 
+    function isCallParticipant(chatId, callId) {
+      return isChatParticipant(chatId) &&
+        get(/databases/$(database)/documents/chats/$(chatId)/calls/$(callId)).data.callerId is string &&
+        get(/databases/$(database)/documents/chats/$(chatId)/calls/$(callId)).data.calleeId is string &&
+        (
+          request.auth.uid == get(/databases/$(database)/documents/chats/$(chatId)/calls/$(callId)).data.callerId ||
+          request.auth.uid == get(/databases/$(database)/documents/chats/$(chatId)/calls/$(callId)).data.calleeId
+        );
+    }
+
     // ============ USERS ============
     match /users/{userId} {
       allow read: if isSignedIn();
@@ -56,12 +66,14 @@ service cloud.firestore {
 
       match /following/{followingId} {
         allow read: if isSignedIn();
+        // A user may create/delete entries in their own `following` collection.
+        // Document id `followingId` is the id of the user being followed.
         allow create: if isSignedIn() &&
-          request.resource.data.userId == request.auth.uid &&
+          request.auth.uid == userId &&
           request.resource.data.userId == followingId &&
           request.resource.data.createdAt is number;
-        allow delete: if isSignedIn() &&
-          (request.auth.uid == resource.data.userId || isOwner(userId));
+        // Only the owner of the following list may remove entries (unfollow).
+        allow delete: if isSignedIn() && request.auth.uid == userId;
       }
 
       match /friendRequests/{requestId} {
@@ -100,6 +112,30 @@ service cloud.firestore {
           hasRequiredFields(['type', 'text', 'createdAt']);
         allow update, delete: if isOwner(userId);
       }
+
+      match /incomingCalls/{callId} {
+        allow read: if isOwner(userId);
+        allow create: if isSignedIn() &&
+          request.resource.data.callerId is string &&
+          request.resource.data.callerId == request.auth.uid &&
+          request.resource.data.calleeId is string &&
+          request.resource.data.calleeId == userId &&
+          request.resource.data.chatId is string &&
+          request.resource.data.callId is string &&
+          request.resource.data.startedAt is number &&
+          request.resource.data.updatedAt is number &&
+          request.resource.data.status is string &&
+          request.resource.data.status == 'RINGING' &&
+          request.resource.data.chatId is string &&
+          request.resource.data.callType is string &&
+          request.resource.data.callType in ['voice', 'video'];
+        allow update: if isOwner(userId) || (
+          isSignedIn() && request.auth.uid == resource.data.callerId
+        );
+        allow delete: if isOwner(userId) || (
+          isSignedIn() && request.auth.uid == resource.data.callerId
+        );
+      }
     }
 
     // ============ CHATS ============
@@ -130,12 +166,12 @@ service cloud.firestore {
       match /messages/{messageId} {
         allow read: if isChatParticipant(chatId);
 
-        // Create: sender must match auth, chat must exist, message must have encrypted payload
-        allow create: if isSignedIn() && 
-          exists(/databases/$(database)/documents/chats/$(chatId)) &&
-          request.auth.uid == request.resource.data.senderId &&
-          request.resource.data.clientMessageId is string &&
-          request.resource.data.clientMessageId.size() > 0;
+        // Create: sender must be an actual participant in the chat and match auth.
+        // The client writes messages under a deterministic document id, so we only
+        // validate membership and sender identity here.
+        allow create: if isChatParticipant(chatId) &&
+          request.resource.data.senderId is string &&
+          request.resource.data.senderId == request.auth.uid;
 
         // Update cases:
         // 1) read receipts (participants)
@@ -177,6 +213,45 @@ service cloud.firestore {
         // otherwise only sender can delete their own message.
         allow delete: if isChatParticipant(chatId) &&
           (!('senderId' in resource.data) || resource.data.senderId == request.auth.uid);
+      }
+
+      // -------- CALLS --------
+      match /calls/{callId} {
+        allow read: if isSignedIn() && (
+          request.auth.uid == resource.data.callerId ||
+          request.auth.uid == resource.data.calleeId
+        );
+
+        allow create: if isChatParticipant(chatId) &&
+          request.auth.uid == request.resource.data.callerId &&
+          request.resource.data.calleeId is string &&
+          request.resource.data.calleeId.size() > 0 &&
+          request.resource.data.callType in ['voice', 'video'] &&
+          request.resource.data.status == 'RINGING' &&
+          request.resource.data.startedAt is number;
+
+        allow update: if isChatParticipant(chatId) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status', 'updatedAt', 'acceptedAt', 'declinedAt', 'endedAt', 'missedAt',
+            'connectedAt', 'offerSdp', 'offerType', 'answerSdp'
+          ]) && (
+            request.auth.uid == resource.data.callerId ||
+            request.auth.uid == resource.data.calleeId
+          );
+
+        allow delete: if false;
+
+        match /callerCandidates/{candidateId} {
+          allow read: if isCallParticipant(chatId, callId);
+          allow create, update, delete: if isCallParticipant(chatId, callId) &&
+            request.auth.uid == get(/databases/$(database)/documents/chats/$(chatId)/calls/$(callId)).data.callerId;
+        }
+
+        match /calleeCandidates/{candidateId} {
+          allow read: if isCallParticipant(chatId, callId);
+          allow create, update, delete: if isCallParticipant(chatId, callId) &&
+            request.auth.uid == get(/databases/$(database)/documents/chats/$(chatId)/calls/$(callId)).data.calleeId;
+        }
       }
     }
 
@@ -224,7 +299,52 @@ service cloud.firestore {
         request.auth.uid == request.resource.data.authorId &&
         hasRequiredFields(['authorId', 'content', 'timestamp', 'privacy']);
 
-      allow update, delete: if isSignedIn() && resource.data.authorId == request.auth.uid;
+      allow update: if isSignedIn() && (
+        resource.data.authorId == request.auth.uid ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'comments', 'shares', 'likedBy'])
+      );
+
+      allow delete: if isSignedIn() && resource.data.authorId == request.auth.uid;
+
+      match /comments/{commentId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() &&
+          request.resource.data.postId is number &&
+          request.resource.data.userId == request.auth.uid &&
+          request.resource.data.text is string &&
+          request.resource.data.text.size() > 0;
+        allow update: if isSignedIn() && (
+          resource.data.userId == request.auth.uid ||
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likedBy', 'likesCount', 'updatedAt'])
+        );
+        allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      }
+    }
+
+    match /post_comments/{commentId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() &&
+        request.resource.data.postId is number &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.text is string &&
+        request.resource.data.text.size() > 0;
+      allow update: if isSignedIn() && (
+        resource.data.userId == request.auth.uid ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likedBy', 'likesCount', 'updatedAt'])
+      );
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // ============ POST ENGAGEMENTS ==========
+    match /post_engagements/{postId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if false;
+
+      match /members/{userId} {
+        allow read: if isSignedIn();
+        allow create, update, delete: if isOwner(userId);
+      }
     }
 
     // ============ EVENTS ============
@@ -270,21 +390,18 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // ============ FRIENDS ============
-    match /friends/{userId} {
+    // ============ FRIENDS (under users) ============
+    // Allow reading friends lists for signed-in users, and only the user
+    // themselves to add/remove friends in their own list.
+    match /users/{userId}/friends/{friendId} {
       allow read: if isSignedIn();
-      allow write: if isOwner(userId);
-
-      match /friends/{friendId} {
-        allow read, write, delete: if isOwner(userId);
-      }
+      allow create, update, delete: if isOwner(userId);
     }
 
-    // ============ BLOCKED USERS ============
-    match /blockedUsers/{userId} {
-      match /users/{blockedUserId} {
-        allow read, write, delete: if isOwner(userId);
-      }
+    // ============ BLOCKED USERS (under users) ============
+    // Each user's blockedUsers collection is managed only by that user.
+    match /users/{userId}/blockedUsers/{blockedUserId} {
+      allow read, create, update, delete: if isOwner(userId);
     }
 
     // ============ DENY EVERYTHING ELSE ============

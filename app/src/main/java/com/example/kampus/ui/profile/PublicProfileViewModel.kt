@@ -9,11 +9,22 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.distinctUntilChanged
+
+private fun Any?.toLongOrNullValue(): Long? = when (this) {
+    is Number -> toLong()
+    is String -> toLongOrNull()
+    is com.google.firebase.Timestamp -> toDate().time
+    else -> null
+}
 
 data class PublicProfileUiState(
     val userId: String = "",
@@ -53,20 +64,29 @@ class PublicProfileViewModel : ViewModel() {
 
     private var userListener: ListenerRegistration? = null
     private var activityListener: ListenerRegistration? = null
+    private var postsCountListener: ListenerRegistration? = null
     private var followersCountListener: ListenerRegistration? = null
     private var followingCountListener: ListenerRegistration? = null
     private var followingRelationListener: ListenerRegistration? = null
     private var outgoingRequestListener: ListenerRegistration? = null
     private var incomingRequestListener: ListenerRegistration? = null
+    // Raw count flows used for debounce to avoid UI jitter on rapid updates
+    private val followersRaw = MutableStateFlow<Int?>(null)
+    private val followingRaw = MutableStateFlow<Int?>(null)
+    private val postsRaw = MutableStateFlow<Int?>(null)
+    private var countsCollectorJob: Job? = null
+    private var appliedInitialProfileSnapshot = false
 
     fun observeUser(userId: String) {
         userListener?.remove()
         activityListener?.remove()
+        postsCountListener?.remove()
         followersCountListener?.remove()
         followingCountListener?.remove()
         followingRelationListener?.remove()
         outgoingRequestListener?.remove()
         incomingRequestListener?.remove()
+        appliedInitialProfileSnapshot = false
 
         val currentUserId = auth.currentUser?.uid
         val isOwnProfile = currentUserId == userId
@@ -85,6 +105,26 @@ class PublicProfileViewModel : ViewModel() {
             )
         }
 
+        // reset any previous collectors for counts
+        countsCollectorJob?.cancel()
+        countsCollectorJob = viewModelScope.launch {
+            launch {
+                followersRaw.debounce(300).distinctUntilChanged().collect { v ->
+                    v?.let { _uiState.update { s -> s.copy(followers = it) } }
+                }
+            }
+            launch {
+                followingRaw.debounce(300).distinctUntilChanged().collect { v ->
+                    v?.let { _uiState.update { s -> s.copy(following = it) } }
+                }
+            }
+            launch {
+                postsRaw.debounce(300).distinctUntilChanged().collect { v ->
+                    v?.let { _uiState.update { s -> s.copy(posts = it) } }
+                }
+            }
+        }
+
         userListener = firestore.collection("users").document(userId)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
@@ -98,8 +138,8 @@ class PublicProfileViewModel : ViewModel() {
                 }
 
                 val statsMap = snapshot.get("stats") as? Map<*, *>
-                _uiState.update {
-                    it.copy(
+                _uiState.update { state ->
+                    state.copy(
                         userId = userId,
                         displayName = snapshot.getString("displayName").orEmpty(),
                         handle = snapshot.getString("handle").orEmpty(),
@@ -112,13 +152,15 @@ class PublicProfileViewModel : ViewModel() {
                         avatarEmoji = snapshot.getString("avatarEmoji") ?: "👤",
                         profileImageUrl = snapshot.getString("profileImageUrl").orEmpty(),
                         coverImageUrl = snapshot.getString("coverImageUrl").orEmpty(),
-                        posts = (statsMap?.get("posts") as? Number)?.toInt() ?: 0,
-                        // Keep initial fallback from stats map, then override by live listeners below.
-                        followers = (statsMap?.get("followers") as? Number)?.toInt() ?: 0,
-                        following = (statsMap?.get("following") as? Number)?.toInt() ?: 0,
+                        posts = if (!appliedInitialProfileSnapshot) (statsMap?.get("posts") as? Number)?.toInt() ?: 0 else state.posts,
+                        followers = if (!appliedInitialProfileSnapshot) (statsMap?.get("followers") as? Number)?.toInt() ?: 0 else state.followers,
+                        following = if (!appliedInitialProfileSnapshot) (statsMap?.get("following") as? Number)?.toInt() ?: 0 else state.following,
                         isLoading = false,
                         error = null,
                     )
+                }
+                if (!appliedInitialProfileSnapshot) {
+                    appliedInitialProfileSnapshot = true
                 }
             }
 
@@ -134,7 +176,7 @@ class PublicProfileViewModel : ViewModel() {
                     // Keep fallback count from stats when listener cannot read.
                     return@addSnapshotListener
                 }
-                _uiState.update { it.copy(followers = snapshot?.size() ?: 0) }
+                followersRaw.value = snapshot?.size() ?: 0
             }
 
         followingCountListener = firestore.collection("users")
@@ -145,7 +187,16 @@ class PublicProfileViewModel : ViewModel() {
                     // Keep fallback count from stats when listener cannot read.
                     return@addSnapshotListener
                 }
-                _uiState.update { it.copy(following = snapshot?.size() ?: 0) }
+                followingRaw.value = snapshot?.size() ?: 0
+            }
+
+        postsCountListener = firestore.collection("posts")
+            .whereEqualTo("authorId", userId)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    return@addSnapshotListener
+                }
+                postsRaw.value = snapshot?.size() ?: 0
             }
 
         activityListener = firestore.collection("users").document(userId)
@@ -159,22 +210,21 @@ class PublicProfileViewModel : ViewModel() {
                 }
 
                 val activities = snapshot?.documents?.map { doc ->
-                    val createdAt = doc.getTimestamp("createdAt")?.toDate()?.time
-                        ?: (doc.getLong("createdAt") ?: 0L)
+                    val createdAt = doc.get("createdAt").toLongOrNullValue() ?: 0L
 
                     ProfileActivityItem(
                         type = doc.getString("type") ?: "activity",
                         text = doc.getString("text") ?: "Did an activity",
                         createdAt = createdAt,
                         sourceId = doc.id,
-                        eventId = doc.getLong("eventId")?.toInt(),
-                        postId = doc.getLong("postId")?.toInt(),
+                        eventId = doc.get("eventId").toLongOrNullValue()?.toInt(),
+                        postId = doc.get("postId").toLongOrNullValue()?.toInt(),
                         previewTitle = doc.getString("previewTitle") ?: "",
                         previewSubtitle = doc.getString("previewSubtitle") ?: "",
                         previewImageUrl = doc.getString("previewImageUrl") ?: "",
-                        likeCount = doc.getLong("likeCount")?.toInt() ?: 0,
-                        commentCount = doc.getLong("commentCount")?.toInt() ?: 0,
-                        shareCount = doc.getLong("shareCount")?.toInt() ?: 0,
+                        likeCount = doc.get("likeCount").toLongOrNullValue()?.toInt() ?: 0,
+                        commentCount = doc.get("commentCount").toLongOrNullValue()?.toInt() ?: 0,
+                        shareCount = doc.get("shareCount").toLongOrNullValue()?.toInt() ?: 0,
                     )
                 } ?: emptyList()
 

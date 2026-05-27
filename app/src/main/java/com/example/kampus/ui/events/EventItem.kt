@@ -52,29 +52,44 @@ enum class EventCategory(val label: String, val color: Color, val emoji: String)
 //  Domain model
 // ─────────────────────────────────────────────────────────────────────────────
 data class EventItem(
-    val id           : Int,
-    val title        : String,
-    val category     : EventCategory,
-    val date         : String,           // e.g. "March 28, 2026"
-    val time         : String,           // e.g. "6:00 PM – 11:00 PM"
-    val location     : String,
-    val interested   : Int,
-    val likes        : Int,
-    val comments     : Int,
-    val shares       : Int,
-    val coverEmoji   : String,           // large emoji used as cover art
-    val coverColor1  : Color,
-    val coverColor2  : Color,
-    val description  : String,
-    val organizer    : String,
-    val organizerEmoji: String,
-    val organizerTime : String,
-    val isFeatured   : Boolean = false,
-    val isInterested : Boolean = false,
-    val ownerId      : String = "",
-    val createdAt    : Long? = null,
-    val imageUrl     : String? = null,
-    val isPinned     : Boolean = false,
+    val id                   : Int,
+    val title                : String,
+    val category             : EventCategory,
+    val date                 : String,           // e.g. "March 28, 2026"
+    val time                 : String,           // e.g. "6:00 PM – 11:00 PM"
+    val location             : String,
+    val interested           : Int,
+    val likes                : Int,
+    val comments             : Int,
+    val shares               : Int,
+    val coverEmoji           : String,           // large emoji used as cover art
+    val coverColor1          : Color,
+    val coverColor2          : Color,
+    val description          : String,
+    val organizer            : String,
+    val organizerEmoji       : String,
+    val organizerTime        : String,
+    val isFeatured           : Boolean = false,
+    val isInterested         : Boolean = false,
+    // Persistence / backend identifiers
+    val remoteId             : String = "",      // Supabase UUID string id
+    val ownerId              : String = "",
+    val createdAt            : Long? = null,
+    // Cover media
+    val coverImageUrl        : String = "",      // actual image URL from Supabase storage
+    val imageUrl             : String? = null,   // legacy alias kept for Firestore compat
+    val isPinned             : Boolean = false,
+    // Extended event detail fields from Supabase
+    val eventType            : String = "",
+    val capacity             : Int = 0,
+    val registrationDeadline : String = "",
+    val website              : String = "",
+    val onlineEvent          : Boolean = false,
+    val certificateAvailable : Boolean = false,
+    val paidEvent            : Boolean = false,
+    val allowGuest           : Boolean = false,
+    val tags                 : List<String> = emptyList(),
+    val speaker              : String = "",
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

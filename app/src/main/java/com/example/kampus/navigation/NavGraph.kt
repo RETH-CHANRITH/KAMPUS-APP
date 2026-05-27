@@ -278,14 +278,18 @@ fun NavGraph(navController: NavHostController) {
 
         // ── Home ───────────────────────────────────────────────────────────────
         composable(Routes.HOME) {
+            val homeEntry = remember(it) { navController.getBackStackEntry(Routes.HOME) }
+            val feedViewModel: FeedViewModel = viewModel(homeEntry)
             HomeScreen(
                 onCreatePost   = { navController.navigate(Routes.POST_CREATE) },
                 onProfileClick = { navController.navigate(Routes.PROFILE) },
                 onNotifClick   = { navController.navigate(Routes.NOTIFICATIONS) },
                 onSearchClick  = { },
+                onPostClick    = { postId -> navController.navigate(Routes.postDetail(postId)) },
                 onGroupsClick  = { navController.navigate(Routes.GROUP_LIST) },
                 onEventsClick  = { navController.navigate(Routes.EVENT_LIST) },
                 onChatClick    = { navController.navigate(Routes.CHAT_LIST) },
+                viewModel      = feedViewModel,
             )
         }
 
@@ -310,7 +314,6 @@ fun NavGraph(navController: NavHostController) {
                         feelingEmoji = feelingEmoji,
                         location = location,
                     )
-                    navController.popBackStack()
                 },
             )
         }
@@ -404,7 +407,7 @@ fun NavGraph(navController: NavHostController) {
             val openComposer = back.arguments?.getBoolean("openComposer") ?: false
             val listEntry = remember(back) { navController.getBackStackEntry(Routes.EVENT_LIST) }
             val vm: EventViewModel = viewModel(listEntry)
-            val state = vm.uiState.value
+            val state = vm.uiState.collectAsStateWithLifecycle().value
             val event = state.events.firstOrNull { it.id == eventId } ?: return@composable
             EventDetailScreen(
                 event        = event,
@@ -707,6 +710,12 @@ fun NavGraph(navController: NavHostController) {
                 onVideoCallClick = {
                     globalChatViewModel.startOutgoingCall(chatId, "video") { callId ->
                         navController.navigate(Routes.callScreen(chatId, "video", callId))
+                    }
+                },
+                onCallAgainClick = { callChatId, callType ->
+                    val normalizedCallType = if (callType.equals("audio", ignoreCase = true)) "voice" else callType
+                    globalChatViewModel.startOutgoingCall(callChatId, normalizedCallType) { callId ->
+                        navController.navigate(Routes.callScreen(callChatId, normalizedCallType, callId))
                     }
                 },
                 onDiagnosticsClick = { globalChatViewModel.requestDiagnostics() },
