@@ -21,6 +21,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontWeight
+import com.example.kampus.ui.theme.ThemeController
 
 /**
  * Image picker dialog for uploading profile or cover images to Supabase
@@ -85,7 +86,7 @@ fun ImagePickerDialog(
                 Icon(
                     Icons.Filled.Image,
                     contentDescription = "Gallery",
-                    tint = Color(0xFF0D7FFF),
+                    tint = ThemeController.accent.color,
                     modifier = Modifier.size(32.dp)
                 )
                 Column(

@@ -99,7 +99,7 @@ private val Card get() = if (PubIsDark) Color(0xFF252A41) else Color(0xFFFFFFFF)
 private val Border get() = if (PubIsDark) Color(0xFF2C3552) else Color(0xFFD1D5DB)
 private val TextPrimary get() = if (PubIsDark) Color(0xFFFFFFFF) else Color(0xFF111827)
 private val TextSecondary get() = if (PubIsDark) Color(0xFF99A1AF) else Color(0xFF6B7280)
-private val Blue get() = Color(0xFF0D7FFF)
+private val Blue get() = ThemeController.accent.color
 
 @Composable
 fun PublicProfileScreen(
@@ -1060,7 +1060,7 @@ private fun FollowersAvatarStrip(userId: String, onProfileClick: (String) -> Uni
                     Box(modifier = Modifier
                         .size(64.dp)
                         .clip(CircleShape)
-                        .background(Brush.linearGradient(listOf(Color(0xFF0D7FFF), Color(0xFF7C3AED)))), contentAlignment = Alignment.Center) {
+                        .background(Brush.linearGradient(listOf(Blue, Color(0xFF7C3AED)))), contentAlignment = Alignment.Center) {
                         Box(modifier = Modifier
                             .size(58.dp)
                             .clip(CircleShape)

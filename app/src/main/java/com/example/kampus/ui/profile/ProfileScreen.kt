@@ -1188,7 +1188,7 @@ fun ActivityEventCard(
 					modifier = Modifier
 						.fillMaxSize()
 						.background(
-							Brush.linearGradient(listOf(Color(0xFF1A237E), Color(0xFF0D7FFF))),
+							Brush.linearGradient(listOf(Color(0xFF1A237E), Blue)),
 						),
 				)
 			}

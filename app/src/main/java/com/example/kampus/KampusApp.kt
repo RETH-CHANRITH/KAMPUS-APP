@@ -41,38 +41,48 @@ class KampusApp : Application() {
             }
         }
 
-        // Initialize Supabase for image uploads
-        SupabaseModule.initSupabase(this)
-
-        // Initialize WebRTC call stack once at app start
-        CallManager.initialize(this)
-
-        // Attempt to load optional TURN servers from assets/turn_servers.json
-        runCatching {
-            val assetName = "turn_servers.json"
-            val stream = assets.open(assetName)
-            val reader = BufferedReader(stream.reader())
-            val json = reader.use { it.readText() }
-            val arr = JSONArray(json)
-            val servers = mutableListOf<com.example.kampus.call.CallConfig.TurnServer>()
-            for (i in 0 until arr.length()) {
-                val obj = arr.getJSONObject(i)
-                val url = obj.optString("url")
-                val user = obj.optString("username")
-                val cred = obj.optString("credential")
-                if (url.isNotBlank()) {
-                    servers.add(com.example.kampus.call.CallConfig.TurnServer(url, user, cred))
-                }
-            }
-            if (servers.isNotEmpty()) {
-                com.example.kampus.call.CallConfig.setTurnServers(servers)
-            }
-        }.onFailure {
-            // No asset or parse failure is acceptable; TURN remains empty until configured.
+        // Initialize Supabase in background
+        appScope.launch(Dispatchers.Default) {
+            runCatching { SupabaseModule.initSupabase(this@KampusApp) }
         }
 
-        // Initialize E2EE manager used by chat send flow
-        initializeE2EEManager()
+        // Initialize WebRTC call stack once at app start in background
+        appScope.launch(Dispatchers.Default) {
+            runCatching { CallManager.initialize(this@KampusApp) }
+        }
+
+        // Attempt to load optional TURN servers from assets/turn_servers.json in background
+        appScope.launch(Dispatchers.IO) {
+            runCatching {
+                val assetName = "turn_servers.json"
+                val stream = assets.open(assetName)
+                val reader = BufferedReader(stream.reader())
+                val json = reader.use { it.readText() }
+                val arr = JSONArray(json)
+                val servers = mutableListOf<com.example.kampus.call.CallConfig.TurnServer>()
+                for (i in 0 until arr.length()) {
+                    val obj = arr.getJSONObject(i)
+                    val url = obj.optString("url")
+                    val user = obj.optString("username")
+                    val cred = obj.optString("credential")
+                    if (url.isNotBlank()) {
+                        servers.add(com.example.kampus.call.CallConfig.TurnServer(url, user, cred))
+                    }
+                }
+                if (servers.isNotEmpty()) {
+                    com.example.kampus.call.CallConfig.setTurnServers(servers)
+                }
+            }.onFailure {
+                // No asset or parse failure is acceptable; TURN remains empty until configured.
+            }
+        }
+
+        // Initialize E2EE manager in background (using IO dispatcher to prevent Keystore/disk block)
+        appScope.launch(Dispatchers.IO) {
+            runCatching { com.example.kampus.utils.E2EEConfig.initialize(this@KampusApp) }
+            initializeE2EEManager()
+        }
+
         auth.addAuthStateListener(authStateListener)
 
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {

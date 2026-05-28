@@ -39,6 +39,11 @@ object E2EEManager {
     private var encryptedPrefs: SharedPreferences? = null
     private val recipientPublicKeyCache = mutableMapOf<String, String>()
     private val chatSecretCache = mutableMapOf<String, SecretKey>()
+    private val initDeferred = kotlinx.coroutines.CompletableDeferred<Unit>()
+
+    private suspend fun awaitInitialized() {
+        initDeferred.await()
+    }
 
     /**
      * Initialize E2EEManager with encrypted preferences
@@ -46,6 +51,7 @@ object E2EEManager {
      */
     fun initialize(sharedPrefs: SharedPreferences) {
         encryptedPrefs = sharedPrefs
+        initDeferred.complete(Unit)
         android.util.Log.d("E2EEManager", "E2EEManager initialized successfully")
     }
 
@@ -89,6 +95,7 @@ object E2EEManager {
      * Call on login/signup
      */
     suspend fun ensureUserKeys(userId: String): Result<Unit> {
+        awaitInitialized()
         return withContext(Dispatchers.IO) {
             try {
                 val hasAesKey = hasUserAESKey(userId)
@@ -127,6 +134,7 @@ object E2EEManager {
         recipientId: String,
         plaintext: String,
     ): Result<EncryptedChatMessage> {
+        awaitInitialized()
         return withContext(Dispatchers.Default) {
             try {
                 val secretKey = chatSecretCache[chatId] ?: getSoftwareChatSecret(chatId)?.let { localSecretBase64 ->
@@ -175,6 +183,7 @@ object E2EEManager {
         senderId: String,
         encryptedMessage: EncryptedChatMessage,
     ): Result<String> {
+        awaitInitialized()
         return withContext(Dispatchers.Default) {
             try {
                 // Messenger-style: decrypt using ONLY the shared chat secret
@@ -204,6 +213,7 @@ object E2EEManager {
         senderId: String,
         encryptedMessage: EncryptedChatMessage,
     ): Result<String> {
+        awaitInitialized()
         return withContext(Dispatchers.Default) {
             // First attempt: try standard decryption
             val initialResult = decryptReceivedMessage(chatId, userId, senderId, encryptedMessage)
@@ -234,6 +244,7 @@ object E2EEManager {
      * Run in background (Dispatchers.IO)
      */
     suspend fun encryptImageForStorage(userId: String, imageBytes: ByteArray): Result<EncryptedBinary> {
+        awaitInitialized()
         return withContext(Dispatchers.IO) {
             try {
                 // Compress first
@@ -259,6 +270,7 @@ object E2EEManager {
      * Run in background (Dispatchers.IO)
      */
     suspend fun decryptImageFromStorage(userId: String, encryptedBinary: EncryptedBinary): Result<ByteArray> {
+        awaitInitialized()
         return withContext(Dispatchers.IO) {
             try {
                 ensureAESKeyLoaded(userId)
@@ -279,6 +291,7 @@ object E2EEManager {
      * Seed user's keys on first signup
      */
     suspend fun seedKeysForNewUser(userId: String): Result<Unit> {
+        awaitInitialized()
         return withContext(Dispatchers.IO) {
             try {
                 // Generate RSA key pair (stored in Android Keystore)
@@ -307,6 +320,7 @@ object E2EEManager {
      * Get other user's public key from Firestore for hybrid encryption
      */
     suspend fun getOtherUserPublicKey(userId: String): Result<String> {
+        awaitInitialized()
         return withContext(Dispatchers.IO) {
             try {
                 val doc = FirebaseFirestore.getInstance()
@@ -341,6 +355,7 @@ object E2EEManager {
     }
 
     suspend fun preloadRecipientPublicKey(userId: String): Result<Unit> {
+        awaitInitialized()
         return withContext(Dispatchers.IO) {
             try {
                 recipientPublicKeyCache[userId] = getOtherUserPublicKey(userId).getOrElse { throw it }
@@ -356,6 +371,7 @@ object E2EEManager {
      * Useful to call from UI or logs to see why decryption may fail.
      */
     suspend fun getKeyDiagnostics(userId: String): Result<Map<String, Any>> {
+        awaitInitialized()
         return withContext(Dispatchers.IO) {
             try {
                 val hasKeyPair = KeyManager.hasKeyPair(userId)
@@ -471,6 +487,7 @@ object E2EEManager {
     }
 
     suspend fun ensureDirectChatSecret(chatId: String, currentUserId: String, otherUserId: String): Result<Unit> {
+        awaitInitialized()
         return withContext(Dispatchers.IO) {
             try {
                 if (chatId.isBlank() || currentUserId.isBlank() || otherUserId.isBlank()) {
@@ -547,6 +564,7 @@ object E2EEManager {
      * to create a fresh shared secret for a specific chat after rotating keys.
      */
     suspend fun rotateUserKeypair(userId: String): Result<Unit> {
+        awaitInitialized()
         return withContext(Dispatchers.IO) {
             try {
                 // Delete any existing keypair and generate a fresh one
@@ -567,6 +585,7 @@ object E2EEManager {
      * and caches the secret locally so future messages use the new secret.
      */
     suspend fun rotateDirectChatSecret(chatId: String, currentUserId: String, otherUserId: String): Result<Unit> {
+        awaitInitialized()
         return withContext(Dispatchers.IO) {
             try {
                 if (chatId.isBlank() || currentUserId.isBlank() || otherUserId.isBlank()) {
@@ -605,6 +624,7 @@ object E2EEManager {
     // In E2EEManager.kt
 
 suspend fun getSharedChatSecret(chatId: String, userId: String): Result<SecretKey> {
+    awaitInitialized()
     return withContext(Dispatchers.IO) {
         try {
             // 1. In-memory cache (fastest)
@@ -694,6 +714,7 @@ private suspend fun loadSecretFromFirestore(chatId: String, userId: String): Res
      * Used when E2EE_ENABLED=false to allow chat to function in unencrypted mode
      */
     suspend fun createPlaintextMessage(plaintext: String): Result<EncryptedChatMessage> {
+        awaitInitialized()
         return withContext(Dispatchers.Default) {
             try {
                 if (E2EEConfig.isE2EEEnabled()) {
@@ -786,6 +807,7 @@ private suspend fun loadSecretFromFirestore(chatId: String, userId: String): Res
         senderId: String,
         encryptedMessage: EncryptedChatMessage
     ): Result<String> {
+        awaitInitialized()
         return withContext(Dispatchers.Default) {
             // Check if this is a plaintext-mode message (E2EE disabled)
             if (encryptedMessage.iv == "plaintext-mode" || encryptedMessage.encryptedKeyForSender == "plaintext-mode") {

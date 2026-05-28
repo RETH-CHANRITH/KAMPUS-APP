@@ -91,7 +91,7 @@ private data class SocialMetrics(
 private val DpIsDark get() = ThemeController.isDark
 private val DpBg get() = if (DpIsDark) Color(0xFF1A1D2E) else Color(0xFFF3F4F8)
 private val DpCard get() = if (DpIsDark) Color(0xFF252A41) else Color(0xFFFFFFFF)
-private val DpBlue get() = Color(0xFF0D7FFF)
+private val DpBlue get() = ThemeController.accent.color
 private val DpMuted get() = if (DpIsDark) Color(0xFF99A1AF) else Color(0xFF6B7280)
 private val DpTextPrimary get() = if (DpIsDark) Color.White else Color(0xFF111827)
 private val DpTextSecondary get() = if (DpIsDark) Color(0xFFD1D5DC) else Color(0xFF374151)

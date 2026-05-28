@@ -21,14 +21,16 @@ class KampusApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         
-        // Initialize E2EE Configuration (sets plaintext mode by default to work around KeyStore2 issues)
-        com.example.kampus.utils.E2EEConfig.initialize(this)
+        // Initialize E2EE Config and E2EE Manager in background to prevent Keystore/disk block
+        appScope.launch(Dispatchers.IO) {
+            runCatching { com.example.kampus.utils.E2EEConfig.initialize(this@KampusApplication) }
+            initializeE2EEManager()
+        }
         
-        // Initialize Supabase for image uploads
-        SupabaseModule.initSupabase(this)
-
-        // Initialize E2EE Manager with encrypted shared preferences
-        initializeE2EEManager()
+        // Initialize Supabase in background
+        appScope.launch(Dispatchers.Default) {
+            runCatching { SupabaseModule.initSupabase(this@KampusApplication) }
+        }
 
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) {

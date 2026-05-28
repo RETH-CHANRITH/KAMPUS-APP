@@ -9,7 +9,7 @@
     </item>
 
     <!-- Centered full logo on top of the circle. Size chosen to leave padding. -->
-    <item android:gravity="center" android:width="92dp" android:height="92dp">
+    <item android:gravity="center" android:width="104dp" android:height="104dp">
         <bitmap
             android:gravity="center"
             android:src="@drawable/logo_app"

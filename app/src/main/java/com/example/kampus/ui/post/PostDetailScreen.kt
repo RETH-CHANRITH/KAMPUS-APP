@@ -60,6 +60,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.example.kampus.ui.events.rememberMediaPickers
 import com.example.kampus.ui.feed.PostItem
+import com.google.firebase.auth.FirebaseAuth
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import kotlinx.coroutines.launch
 
 @Composable
@@ -80,6 +83,7 @@ fun PostDetailScreen(
     val commentPickers = rememberMediaPickers(onPhotoSelected = { commentImageUri = it })
     val focusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
+    var commentToDelete by remember { mutableStateOf<PostComment?>(null) }
 
     LaunchedEffect(postId) {
         viewModel.observePost(postId)
@@ -95,6 +99,32 @@ fun PostDetailScreen(
             try { focusRequester.requestFocus() } catch (_: Exception) {}
             keyboardController?.show()
         }
+    }
+
+    if (commentToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { commentToDelete = null },
+            title = { Text("Delete Comment") },
+            text = { Text("Are you sure you want to delete this comment? This action cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val comment = commentToDelete!!
+                        commentToDelete = null
+                        scope.launch {
+                            viewModel.deleteComment(postId, comment.id)
+                        }
+                    }
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { commentToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     Surface(modifier = Modifier.fillMaxSize(), color = colors.background) {
@@ -249,6 +279,7 @@ fun PostDetailScreen(
                             items(commentsState, key = { it.id }) { comment ->
                                 CommentThread(
                                     comment = comment,
+                                    postAuthorId = state.post?.authorId.orEmpty(),
                                     onReply = { targetComment ->
                                         replyingToCommentId = targetComment.id
                                         replyingToName = targetComment.username
@@ -283,6 +314,9 @@ fun PostDetailScreen(
                                                 commentsState = previousComments
                                             }
                                         }
+                                    },
+                                    onDelete = { targetComment ->
+                                        commentToDelete = targetComment
                                     },
                                 )
                             }
@@ -436,11 +470,15 @@ private fun CommentComposer(
 @Composable
 private fun CommentThread(
     comment: PostComment,
+    postAuthorId: String,
     onReply: (PostComment) -> Unit,
     onLike: (PostComment) -> Unit,
+    onDelete: (PostComment) -> Unit,
     depth: Int = 0,
 ) {
     val colors = MaterialTheme.colorScheme
+    val currentUserId = FirebaseAuth.getInstance().currentUser?.uid
+    val canDelete = comment.userId == currentUserId || (postAuthorId.isNotEmpty() && postAuthorId == currentUserId)
 
     Column(
         modifier = Modifier
@@ -490,14 +528,19 @@ private fun CommentThread(
                     onClick = { onLike(comment) },
                 )
                 ActionChip(label = "Reply", active = false, onClick = { onReply(comment) })
+                if (canDelete) {
+                    ActionChip(label = "Delete", active = false, onClick = { onDelete(comment) })
+                }
             }
         }
 
         comment.replies.forEach { reply ->
             CommentThread(
                 comment = reply,
+                postAuthorId = postAuthorId,
                 onReply = onReply,
                 onLike = onLike,
+                onDelete = onDelete,
                 depth = depth + 1,
             )
         }

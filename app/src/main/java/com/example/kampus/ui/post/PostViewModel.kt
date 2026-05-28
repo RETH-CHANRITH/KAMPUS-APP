@@ -110,6 +110,7 @@ class PostViewModel : ViewModel() {
                 val post = PostItem(
                     id = doc.getLong("id")?.toInt() ?: doc.id.hashCode(),
                     author = doc.getString("author") ?: "Unknown",
+                    authorId = doc.getString("authorId") ?: doc.getString("userId") ?: "",
                     avatar = doc.getString("avatar") ?: "👤",
                     profileImageUrl = doc.getString("profileImageUrl") ?: "",
                     time = doc.getString("time") ?: "now",
@@ -309,6 +310,64 @@ class PostViewModel : ViewModel() {
 
     suspend fun addReply(postId: Int, parentCommentId: String, text: String, imageUri: Uri? = null): Result<Unit> {
         return addComment(postId = postId, text = text, imageUri = imageUri, parentCommentId = parentCommentId)
+    }
+
+    suspend fun deleteComment(postId: Int, commentId: String): Result<Unit> {
+        return try {
+            val userId = FirebaseAuth.getInstance().currentUser?.uid
+                ?: return Result.failure(IllegalStateException("Sign in to delete comment"))
+
+            val commentRef = firestore.collection("post_comments").document(commentId)
+            val commentDoc = commentRef.get().await()
+            if (!commentDoc.exists()) {
+                return Result.failure(IllegalStateException("Comment not found"))
+            }
+
+            val commentUserId = commentDoc.getString("userId").orEmpty()
+            val parentCommentId = commentDoc.getString("parentCommentId")
+
+            val postQuery = firestore.collection("posts")
+                .whereEqualTo("id", postId)
+                .limit(1)
+                .get()
+                .await()
+            val postDoc = postQuery.documents.firstOrNull()
+            val postAuthorId = postDoc?.getString("authorId") ?: postDoc?.getString("userId") ?: ""
+
+            if (userId != commentUserId && userId != postAuthorId) {
+                return Result.failure(IllegalStateException("You are not authorized to delete this comment"))
+            }
+
+            var commentsDeletedCount = 1
+            if (parentCommentId.isNullOrBlank()) {
+                val repliesQuery = firestore.collection("post_comments")
+                    .whereEqualTo("postId", postId)
+                    .whereEqualTo("parentCommentId", commentId)
+                    .get()
+                    .await()
+                
+                commentsDeletedCount += repliesQuery.size()
+                
+                firestore.runBatch { batch ->
+                    batch.delete(commentRef)
+                    for (replyDoc in repliesQuery.documents) {
+                        batch.delete(replyDoc.reference)
+                    }
+                }.await()
+            } else {
+                commentRef.delete().await()
+            }
+
+            if (postDoc != null) {
+                postDoc.reference
+                    .update("comments", FieldValue.increment(-commentsDeletedCount.toLong()))
+                    .await()
+            }
+
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     private suspend fun resolveCurrentUserProfile(userId: String): CommentAuthorProfile {

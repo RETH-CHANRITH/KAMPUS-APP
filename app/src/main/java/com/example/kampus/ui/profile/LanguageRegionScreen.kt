@@ -41,7 +41,7 @@ private val LCard get() = if (UiIsDark) Color(0xFF252A41) else Color(0xFFFFFFFF)
 private val LBorder get() = if (UiIsDark) Color(0xFF364153) else Color(0xFFD1D5DB)
 private val LTextPrimary get() = if (UiIsDark) Color(0xFFFFFFFF) else Color(0xFF111827)
 private val LTextSecondary get() = if (UiIsDark) Color(0xFFD1D5DC) else Color(0xFF6B7280)
-private val LBlue get() = Color(0xFF0D7FFF)
+private val LBlue get() = ThemeController.accent.color
 
 @Composable
 fun LanguageRegionScreen(

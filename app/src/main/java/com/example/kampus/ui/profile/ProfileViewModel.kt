@@ -14,6 +14,7 @@ import com.example.kampus.domain.repository.IUserRepository
 import com.example.kampus.utils.ActivityLogger
 import com.example.kampus.utils.NotificationLogger
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
@@ -160,6 +161,7 @@ class ProfileViewModel(
 	private var notificationSettingsListener: ListenerRegistration? = null
 	private var privacySettingsListener: ListenerRegistration? = null
 	private var blockedUsersListener: ListenerRegistration? = null
+	private val blockedUserProfileListeners = mutableMapOf<String, ListenerRegistration>()
 	private val eventEngagementListeners = mutableMapOf<String, ListenerRegistration>()
 
 	// High-fidelity feed post and event activity cache
@@ -1668,6 +1670,7 @@ class ProfileViewModel(
 			.addSnapshotListener { snapshot, error ->
 				if (error != null) {
 					android.util.Log.e("ProfileViewModel", "Error loading blocked users: ${error.message}")
+					syncBlockedUserProfileListeners(emptySet())
 					return@addSnapshotListener
 				}
 
@@ -1690,6 +1693,51 @@ class ProfileViewModel(
 				}
 
 				_uiState.update { it.copy(blockedUsers = blockedUsers) }
+				syncBlockedUserProfileListeners(blockedUsers.map { it.userId }.toSet())
+			}
+	}
+
+	private fun syncBlockedUserProfileListeners(blockedUserIds: Set<String>) {
+		val activeUserIds = blockedUserProfileListeners.keys.toSet()
+		(activeUserIds - blockedUserIds).forEach { userId ->
+			blockedUserProfileListeners.remove(userId)?.remove()
+		}
+		(blockedUserIds - activeUserIds).forEach { userId ->
+			observeBlockedUserProfile(userId)
+		}
+	}
+
+	private fun observeBlockedUserProfile(blockedUserId: String) {
+		blockedUserProfileListeners.remove(blockedUserId)?.remove()
+		blockedUserProfileListeners[blockedUserId] = FirebaseFirestore.getInstance()
+			.collection("users")
+			.document(blockedUserId)
+			.addSnapshotListener { snapshot, error ->
+				if (error != null) {
+					android.util.Log.e("ProfileViewModel", "Error loading blocked user profile: ${error.message}")
+					return@addSnapshotListener
+				}
+
+				if (snapshot == null || !snapshot.exists()) return@addSnapshotListener
+
+				val user = snapshot.toUserProfile()
+				_uiState.update { state ->
+					state.copy(
+						blockedUsers = state.blockedUsers.map { blockedUser ->
+							if (blockedUser.userId != blockedUserId) {
+								blockedUser
+							} else {
+								blockedUser.copy(
+									displayName = user.displayName.ifEmpty { blockedUser.displayName },
+									handle = user.handle.ifEmpty { blockedUser.handle },
+									avatarEmoji = user.avatarEmoji.ifEmpty { blockedUser.avatarEmoji },
+									profileImageUrl = user.profileImageUrl,
+									isOnline = user.isOnline,
+								)
+							}
+						}
+					)
+				}
 			}
 	}
 
@@ -1712,12 +1760,42 @@ class ProfileViewModel(
 		}
 	}
 
+	private fun DocumentSnapshot.toUserProfile(): User {
+		val statsMap = get("stats") as? Map<*, *>
+		val stats = com.example.kampus.domain.model.UserStats(
+			posts = (statsMap?.get("posts") as? Number)?.toInt() ?: 0,
+			followers = (statsMap?.get("followers") as? Number)?.toInt() ?: 0,
+			following = (statsMap?.get("following") as? Number)?.toInt() ?: 0,
+			friendRequests = (statsMap?.get("friendRequests") as? Number)?.toInt() ?: 0,
+		)
+
+		return User(
+			id = id,
+			displayName = getString("displayName") ?: "",
+			handle = getString("handle") ?: "",
+			bio = getString("bio") ?: "",
+			email = getString("email") ?: "",
+			phone = getString("phone") ?: "",
+			faculty = getString("faculty") ?: "",
+			year = getString("year") ?: "",
+			location = getString("location") ?: "",
+			avatarEmoji = getString("avatarEmoji") ?: "👤",
+			profileImageUrl = getString("profileImageUrl") ?: "",
+			coverImageUrl = getString("coverImageUrl") ?: "",
+			stats = stats,
+			isVerified = getBoolean("isVerified") ?: false,
+			isOnline = getBoolean("isOnline") ?: false,
+		)
+	}
+
 	override fun onCleared() {
 		super.onCleared()
 		activityListener?.remove()
 		notificationSettingsListener?.remove()
 		privacySettingsListener?.remove()
 		blockedUsersListener?.remove()
+		blockedUserProfileListeners.values.forEach { it.remove() }
+		blockedUserProfileListeners.clear()
 		eventEngagementListeners.values.forEach { it.remove() }
 		eventEngagementListeners.clear()
 	}

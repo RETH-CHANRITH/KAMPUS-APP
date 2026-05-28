@@ -38,6 +38,7 @@ import coil.compose.AsyncImage
 import com.example.kampus.data.repository.UserRepositoryImpl
 import com.example.kampus.domain.model.Friend
 import com.example.kampus.ui.localization.rememberUiStrings
+import com.example.kampus.ui.theme.ThemeController
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 
@@ -106,7 +107,7 @@ fun PublicFriendsScreen(
 private fun TabPill(title: String, selected: Boolean, onClick: () -> Unit) {
     Box(modifier = Modifier
         .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
-        .background(if (selected) Color(0xFF0D7FFF) else Color(0xFFFFFFFF))
+        .background(if (selected) ThemeController.accent.color else Color(0xFFFFFFFF))
         .clickable(onClick = onClick)
         .padding(horizontal = 12.dp, vertical = 10.dp)) {
         Text(text = title, color = if (selected) Color.White else Color.Black)
