@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.example.kampus.data.repository.EventEngagementRepository
 import com.example.kampus.ui.feed.PostItem
 import kotlin.math.max
 
@@ -76,6 +77,14 @@ data class ProfileActivityItem(
 	val currentUserLoved: Boolean = false,
 	val loveList: List<String> = emptyList(),
 	val commentsList: List<ActivityComment> = emptyList(),
+	val eventDate: String = "",
+	val eventTime: String = "",
+	val eventLocation: String = "",
+	val eventInterestedCount: Int = 0,
+	val currentUserInterested: Boolean = false,
+	val mediaUrls: List<String> = emptyList(),
+	val mediaTypes: List<String> = emptyList(),
+	val groupId: String? = null,
 )
 
 data class ActivityComment(
@@ -151,6 +160,12 @@ class ProfileViewModel(
 	private var notificationSettingsListener: ListenerRegistration? = null
 	private var privacySettingsListener: ListenerRegistration? = null
 	private var blockedUsersListener: ListenerRegistration? = null
+	private val eventEngagementListeners = mutableMapOf<String, ListenerRegistration>()
+
+	// High-fidelity feed post and event activity cache
+	private var firestoreActivities = emptyList<ProfileActivityItem>()
+	private var eventActivities = emptyList<ProfileActivityItem>()
+	private var userTimelinePosts = emptyList<com.example.kampus.ui.feed.PostItem>()
 
 	private val currentUserId: String?
 		get() = FirebaseAuth.getInstance().currentUser?.uid
@@ -173,7 +188,6 @@ class ProfileViewModel(
 				_uiState.update { state ->
 					state.copy(
 						stats = state.stats.copy(
-							posts = max(state.stats.posts, latestPostsCount),
 							followers = max(state.stats.followers, relationshipFallback),
 							following = max(state.stats.following, relationshipFallback),
 						),
@@ -407,7 +421,6 @@ class ProfileViewModel(
 					_uiState.update {
 						it.copy(
 							timelinePosts = profilePosts,
-							stats = it.stats.copy(posts = profilePosts.size),
 						)
 					}
 				}
@@ -544,55 +557,138 @@ class ProfileViewModel(
 		updateNotificationSettings(mapOf("notificationSettings.$key" to enabled))
 	}
 
+	private fun publishRecentActivities() {
+		val userId = currentUserId ?: return
+
+		// 1. Process firestoreActivities: only filter out "create_post" since those come
+		// from userTimelinePosts (real-time feed). Keep create_event, share_post, share_profile, etc.
+		val allowedFirestoreTypes = setOf("create_event", "share_post", "share_profile", "create_group")
+		val filteredFirestore = firestoreActivities.filter {
+			it.type in allowedFirestoreTypes
+		}
+
+		// 2. Process userTimelinePosts: map them to ProfileActivityItems of type "create_post"
+		val mappedTimelinePosts = userTimelinePosts.map { post ->
+			val existing = firestoreActivities.find { it.postId == post.id && it.type == "create_post" }
+			ProfileActivityItem(
+				type = "create_post",
+				text = post.content,
+				createdAt = if (post.timestamp > 0L) post.timestamp else System.currentTimeMillis(),
+				updatedAt = if (post.timestamp > 0L) post.timestamp else System.currentTimeMillis(),
+				postId = post.id,
+				sourceId = existing?.sourceId ?: "post_${post.id}",
+				previewTitle = "Post",
+				previewSubtitle = "Shared from your feed",
+				previewImageUrl = post.mediaUris.firstOrNull()?.toString() ?: post.imageUri?.toString() ?: "",
+				likeCount = post.likes,
+				commentCount = post.comments.coerceAtLeast(existing?.commentsList?.size ?: 0),
+				shareCount = post.shares,
+				postVisibility = post.visibility,
+				isPinned = post.isPinned || (existing?.isPinned == true),
+				currentUserLoved = post.likedBy.contains(userId),
+				loveList = post.likedBy,
+				commentsList = existing?.commentsList ?: emptyList(),
+				mediaUrls = post.mediaUris.map { it.toString() },
+				mediaTypes = post.mediaTypes.map { it.name },
+				groupId = null,
+			)
+		}
+
+		// 3. Combine all
+		val allActivities = filteredFirestore + eventActivities + mappedTimelinePosts
+
+		// 4. Deduplicate using a unique key
+		val uniqueActivities = mutableMapOf<String, ProfileActivityItem>()
+		for (activity in allActivities) {
+			val key = when {
+				activity.eventId != null -> "event|${activity.eventId}"
+				activity.postId != null -> "post|${activity.postId}"
+				else -> activity.type + "|" + activity.sourceId
+			}
+			if (key.isNotEmpty()) {
+				val existing = uniqueActivities[key]
+				if (existing == null) {
+					uniqueActivities[key] = activity
+				} else {
+					val isActivityRealTime = activity.type == "create_post" || (activity.type == "create_event" && activity.sourceId == activity.eventId?.toString())
+					val realTime = if (isActivityRealTime) activity else existing
+					val staticLog = if (isActivityRealTime) existing else activity
+					
+					val merged = realTime.copy(
+						sourceId = if (staticLog.sourceId?.startsWith("post_") == false && staticLog.sourceId != staticLog.eventId?.toString()) {
+							staticLog.sourceId
+						} else {
+							realTime.sourceId
+						},
+						isPinned = staticLog.isPinned || realTime.isPinned,
+						commentsList = if (realTime.commentsList.isEmpty() && staticLog.commentsList.isNotEmpty()) staticLog.commentsList else realTime.commentsList,
+						commentCount = if (realTime.commentCount == 0 && staticLog.commentCount > 0) staticLog.commentCount else realTime.commentCount
+					)
+					uniqueActivities[key] = merged
+				}
+			}
+		}
+
+		val combined = uniqueActivities.values
+			.sortedWith(
+				compareByDescending<ProfileActivityItem> { it.isPinned }
+					.thenByDescending { it.createdAt }
+			)
+			.take(20)
+
+		val total = userTimelinePosts.size + eventActivities.size
+		_uiState.update { it.copy(activities = combined, stats = it.stats.copy(posts = total)) }
+	}
+
+	private fun parseIntField(doc: com.google.firebase.firestore.DocumentSnapshot, field: String): Int? {
+		return when (val value = doc.get(field)) {
+			is Number -> value.toInt()
+			is String -> value.toIntOrNull()
+			else -> null
+		}
+	}
+
+	private fun parseTimestampField(doc: com.google.firebase.firestore.DocumentSnapshot, field: String): Long {
+		return when (val value = doc.get(field)) {
+			is com.google.firebase.Timestamp -> value.toDate().time
+			is Number -> value.toLong()
+			is String -> value.toLongOrNull() ?: 0L
+			else -> 0L
+		}
+	}
+
 	private fun observeRecentActivities(userId: String) {
 		activityListener?.remove()
 		postActivityListener?.remove()
 		groupActivityListener?.remove()
 
-		var firestoreActivities = emptyList<ProfileActivityItem>()
-		var eventActivities = emptyList<ProfileActivityItem>()
+		firestoreActivities = emptyList()
+		eventActivities = emptyList()
+		userTimelinePosts = emptyList()
 
-		fun publishRecentActivities() {
-			// Combine all activity sources and deduplicate
-			val allActivities = firestoreActivities + eventActivities
-			val uniqueActivities = mutableMapOf<String, ProfileActivityItem>()
-			
-			for (activity in allActivities) {
-				val key = listOfNotNull(
-					activity.type,
-					activity.sourceId,
-					activity.eventId?.toString(),
-					activity.postId?.toString(),
-				).joinToString("|")
-				if (key.isNotEmpty()) {
-					uniqueActivities[key] = activity
+		// Real-time listener for the user's feed posts
+		viewModelScope.launch {
+			postRepository.getFeedPosts().collect { result ->
+				result.onSuccess { posts ->
+					val filtered = posts.filter { it.authorId == userId }
+					val currentUserId = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
+					val engagementSnapshots = com.example.kampus.data.repository.PostEngagementRepository(FirebaseFirestore.getInstance())
+						.loadSnapshots(filtered.map { it.id }, currentUserId.ifBlank { null })
+						.getOrDefault(emptyMap())
+
+					userTimelinePosts = filtered.map { post ->
+						val engagement = engagementSnapshots[post.id]
+						if (engagement != null) {
+							post.copy(
+								likes = engagement.likesCount ?: post.likes,
+								likedBy = if (currentUserId.isNotBlank() && engagement.likedByCurrentUser) listOf(currentUserId) else emptyList(),
+							)
+						} else {
+							post
+						}
+					}
+					publishRecentActivities()
 				}
-			}
-			
-			val combined = uniqueActivities.values
-				.sortedWith(
-					compareByDescending<ProfileActivityItem> { it.isPinned }
-						.thenByDescending { it.createdAt }
-				)
-				.take(20) // Limit to 20 most recent activities for better performance
-			
-			_uiState.update { it.copy(activities = combined) }
-		}
-
-		fun parseIntField(doc: com.google.firebase.firestore.DocumentSnapshot, field: String): Int? {
-			return when (val value = doc.get(field)) {
-				is Number -> value.toInt()
-				is String -> value.toIntOrNull()
-				else -> null
-			}
-		}
-
-		fun parseTimestampField(doc: com.google.firebase.firestore.DocumentSnapshot, field: String): Long {
-			return when (val value = doc.get(field)) {
-				is com.google.firebase.Timestamp -> value.toDate().time
-				is Number -> value.toLong()
-				is String -> value.toLongOrNull() ?: 0L
-				else -> 0L
 			}
 		}
 
@@ -613,7 +709,8 @@ class ProfileViewModel(
 					?.mapNotNull { doc ->
 						val createdAt = normalizeTimestamp(parseTimestampField(doc, "createdAt"))
 						val updatedAt = normalizeTimestamp(doc.getLong("updatedAt") ?: createdAt)
-						val eventId = parseIntField(doc, "eventId")
+						val eventIdStr = doc.getString("eventId")
+						val eventId = eventIdStr?.toIntOrNull() ?: eventIdStr?.hashCode()
 						val postId = parseIntField(doc, "postId")
 						val type = doc.getString("type") ?: "activity"
 						if (type in HIDDEN_ACTIVITY_TYPES) return@mapNotNull null
@@ -660,6 +757,9 @@ class ProfileViewModel(
 								null
 							}
 						}
+						val mediaUrls = (doc.get("mediaUrls") as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
+						val mediaTypes = (doc.get("mediaTypes") as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
+						val groupId = doc.getString("groupId")
 
 						ProfileActivityItem(
 							type = type,
@@ -679,15 +779,24 @@ class ProfileViewModel(
 							previewTitle = previewTitle,
 							previewSubtitle = previewSubtitle,
 							previewImageUrl = previewImageUrl,
-							likeCount = doc.getLong("likeCount")?.toInt() ?: 0,
-							commentCount = doc.getLong("commentCount")?.toInt() ?: 0,
-							shareCount = doc.getLong("shareCount")?.toInt() ?: 0,
+							likeCount = ((doc.get("likeCount") as? Number)?.toInt()
+								?: doc.getString("likeCount")?.toIntOrNull()
+								?: 0),
+							commentCount = ((doc.get("commentCount") as? Number)?.toInt()
+								?: doc.getString("commentCount")?.toIntOrNull()
+								?: 0),
+							shareCount = ((doc.get("shareCount") as? Number)?.toInt()
+								?: doc.getString("shareCount")?.toIntOrNull()
+								?: 0),
 							postVisibility = visibility,
 							isPinned = doc.getBoolean("isPinned") == true,
 							isArchived = archivedAt > 0L,
 							currentUserLoved = loveList.contains(userId),
 							loveList = loveList,
 							commentsList = commentsList,
+							mediaUrls = mediaUrls,
+							mediaTypes = mediaTypes,
+							groupId = groupId,
 						)
 					}
 					?: emptyList()
@@ -706,14 +815,26 @@ class ProfileViewModel(
 							val rawCreatedAt = event.createdAt ?: 0L
 							val createdAt = normalizeTimestamp(if (rawCreatedAt < 100_000_000_000L) rawCreatedAt * 1000L else rawCreatedAt)
 							if (createdAt <= 0L) return@mapNotNull null
+							event.id?.let { observeEventEngagement(it) }
+							val rawStart = event.startDate ?: 0L
+							val startMs = if (rawStart < 100_000_000_000L && rawStart > 0L) rawStart * 1000L else rawStart
+							val sdfDate = java.text.SimpleDateFormat("MMMM dd, yyyy", java.util.Locale.getDefault())
+							val sdfTime = java.text.SimpleDateFormat("hh:mm a", java.util.Locale.getDefault())
+							val dateStr = if (startMs > 0L) sdfDate.format(java.util.Date(startMs)) else ""
+							val timeStr = if (startMs > 0L) sdfTime.format(java.util.Date(startMs)) else ""
 							ProfileActivityItem(
 								type = "create_event",
 								text = "Created event: ${event.title.ifBlank { "Untitled event" }}",
 								createdAt = createdAt,
 								sourceId = event.id,
+								eventId = event.id?.hashCode() ?: event.title.hashCode(),
 								previewTitle = event.title.ifBlank { "Untitled event" },
 								previewSubtitle = event.location.orEmpty().ifBlank { "Event" },
 								previewImageUrl = event.imageUrl.orEmpty(),
+								eventDate = dateStr,
+								eventTime = timeStr,
+								eventLocation = event.location.orEmpty(),
+								groupId = null,
 							)
 						}
 					publishRecentActivities()
@@ -722,29 +843,126 @@ class ProfileViewModel(
 		}
 	}
 
-	private fun updateLocalActivity(activity: ProfileActivityItem, transform: (ProfileActivityItem) -> ProfileActivityItem) {
-		_uiState.update { state ->
-			state.copy(
-				activities = state.activities.map { current ->
-					if (current.sourceId == activity.sourceId) transform(current) else current
-				}.sortedWith(
-					compareByDescending<ProfileActivityItem> { it.isPinned }
-						.thenByDescending { it.createdAt }
-				),
-			)
+	private fun observeEventEngagement(eventId: String) {
+		if (eventEngagementListeners.containsKey(eventId + "_summary")) return
+		val userId = currentUserId ?: return
+
+		val firestore = FirebaseFirestore.getInstance()
+		
+		// 1. Listen to event summary (likeCount, commentCount, etc.)
+		val summaryListener = firestore.collection("event_engagements").document(eventId)
+			.addSnapshotListener { snapshot, error ->
+				if (error != null || snapshot == null) return@addSnapshotListener
+				
+				val likesCount = (snapshot.getLong("likesCount") ?: 0L).toInt()
+				val commentsCount = (snapshot.getLong("commentsCount") ?: 0L).toInt()
+				val interestedCount = (snapshot.getLong("interestedCount") ?: 0L).toInt()
+				val sharesCount = (snapshot.getLong("sharesCount") ?: 0L).toInt()
+
+				// Fetch current user interest state
+				firestore.collection("event_engagements").document(eventId)
+					.collection("members").document(userId).get()
+					.addOnSuccessListener { memberSnapshot ->
+						val isInterested = memberSnapshot.getBoolean("interested") ?: false
+						val isLiked = memberSnapshot.getBoolean("liked") ?: false
+						
+						updateLocalActivityBySourceId(eventId) { current ->
+							current.copy(
+								likeCount = likesCount,
+								shareCount = sharesCount,
+								eventInterestedCount = interestedCount,
+								currentUserLoved = isLiked,
+								loveList = if (isLiked) listOf(userId) else emptyList(),
+								currentUserInterested = isInterested
+							)
+						}
+					}
+			}
+		
+		// 2. Listen to event comments sub-collection
+		val commentsListener = firestore.collection("event_engagements").document(eventId)
+			.collection("comments")
+			.orderBy("createdAt", Query.Direction.ASCENDING)
+			.addSnapshotListener { snapshot, error ->
+				if (error != null || snapshot == null) return@addSnapshotListener
+				
+				val comments = snapshot.documents.mapNotNull { doc ->
+					val text = doc.getString("text") ?: ""
+					if (text.isBlank()) return@mapNotNull null
+					ActivityComment(
+						id = doc.id,
+						userId = doc.getString("authorId") ?: "",
+						userName = doc.getString("authorName") ?: "Anonymous",
+						userAvatar = doc.getString("authorEmoji") ?: "👤",
+						text = text,
+						createdAt = doc.getLong("createdAt") ?: 0L
+					)
+				}
+				
+				updateLocalActivityBySourceId(eventId) { current ->
+					current.copy(
+						commentsList = comments,
+						commentCount = comments.size
+					)
+				}
+			}
+
+		eventEngagementListeners[eventId + "_summary"] = summaryListener
+		eventEngagementListeners[eventId + "_comments"] = commentsListener
+	}
+
+	private fun updateLocalActivityBySourceId(sourceId: String, transform: (ProfileActivityItem) -> ProfileActivityItem) {
+		firestoreActivities = firestoreActivities.map { current ->
+			if (current.sourceId == sourceId || current.eventId?.toString() == sourceId || current.postId?.toString() == sourceId) transform(current) else current
 		}
+		eventActivities = eventActivities.map { current ->
+			if (current.sourceId == sourceId || current.eventId?.toString() == sourceId || current.postId?.toString() == sourceId) transform(current) else current
+		}
+		publishRecentActivities()
+	}
+
+	private fun updateLocalActivity(activity: ProfileActivityItem, transform: (ProfileActivityItem) -> ProfileActivityItem) {
+		firestoreActivities = firestoreActivities.map { current ->
+			if (current.sourceId == activity.sourceId) transform(current) else current
+		}
+		eventActivities = eventActivities.map { current ->
+			if (current.sourceId == activity.sourceId) transform(current) else current
+		}
+		publishRecentActivities()
 	}
 
 	private fun removeLocalActivity(activity: ProfileActivityItem) {
-		_uiState.update { state ->
-			state.copy(activities = state.activities.filterNot { it.sourceId == activity.sourceId })
-		}
+		firestoreActivities = firestoreActivities.filterNot { it.sourceId == activity.sourceId }
+		eventActivities = eventActivities.filterNot { it.sourceId == activity.sourceId }
+		publishRecentActivities()
 	}
 
 	private suspend fun updateActivityBackends(activity: ProfileActivityItem, updates: Map<String, Any>) {
 		when (activity.type) {
 			"create_post" -> {
-				postRef(activity)?.update(updates)?.await()
+				val postUpdates = updates.toMutableMap()
+				if (updates.containsKey("loveList")) {
+					postUpdates["likedBy"] = updates["loveList"]!!
+					postUpdates.remove("loveList")
+				}
+				if (updates.containsKey("likeCount")) {
+					postUpdates["likes"] = updates["likeCount"]!!
+					postUpdates.remove("likeCount")
+				}
+				if (updates.containsKey("commentCount")) {
+					postUpdates["comments"] = updates["commentCount"]!!
+					postUpdates.remove("commentCount")
+				}
+				if (updates.containsKey("commentsList")) {
+					postUpdates.remove("commentsList")
+				}
+				if (updates.containsKey("shareCount")) {
+					postUpdates["shares"] = updates["shareCount"]!!
+					postUpdates.remove("shareCount")
+				}
+				if (postUpdates.isNotEmpty()) {
+					postRef(activity)?.update(postUpdates as Map<String, Any>)?.await()
+				}
 				activityRef(activity)?.update(updates)?.await()
 			}
 			else -> activityRef(activity)?.update(updates)?.await()
@@ -915,8 +1133,8 @@ class ProfileViewModel(
 	}
 
 	private fun postRef(activity: ProfileActivityItem): com.google.firebase.firestore.DocumentReference? {
-		val sourceId = activity.sourceId ?: return null
-		return FirebaseFirestore.getInstance().collection("posts").document(sourceId)
+		val documentId = activity.postId?.toString() ?: activity.sourceId ?: return null
+		return FirebaseFirestore.getInstance().collection("posts").document(documentId)
 	}
 
 	fun pinPostActivity(activity: ProfileActivityItem, isPinned: Boolean = true) {
@@ -1092,10 +1310,55 @@ class ProfileViewModel(
 						)
 					}
 					
-					updateActivityBackends(activity, payload)
+					if (activity.type == "create_event") {
+						val eventEngagementRepo = EventEngagementRepository()
+						eventEngagementRepo.toggleFlag(
+							eventId = activity.sourceId ?: "",
+							userId = userId,
+							flagField = "liked",
+							summaryField = "likesCount"
+						)
+					} else {
+						updateActivityBackends(activity, payload)
+					}
 				}
 			} catch (error: Exception) {
 				_uiState.update { it.copy(error = error.message ?: "Failed to love activity") }
+			}
+		}
+	}
+
+	fun toggleActivityInterest(activity: ProfileActivityItem) {
+		viewModelScope.launch {
+			try {
+				currentUserId?.let { userId ->
+					val isInterested = activity.currentUserInterested
+					val newInterestedCount = if (isInterested) {
+						(activity.eventInterestedCount - 1).coerceAtLeast(0)
+					} else {
+						activity.eventInterestedCount + 1
+					}
+					
+					updateLocalActivity(activity) { current ->
+						current.copy(
+							eventInterestedCount = newInterestedCount,
+							currentUserInterested = !isInterested,
+							updatedAt = System.currentTimeMillis(),
+						)
+					}
+					
+					if (activity.type == "create_event") {
+						val eventEngagementRepo = EventEngagementRepository()
+						eventEngagementRepo.toggleFlag(
+							eventId = activity.sourceId ?: "",
+							userId = userId,
+							flagField = "interested",
+							summaryField = "interestedCount"
+						)
+					}
+				}
+			} catch (error: Exception) {
+				_uiState.update { it.copy(error = error.message ?: "Failed to update interest") }
 			}
 		}
 	}
@@ -1138,7 +1401,19 @@ class ProfileViewModel(
 						)
 					}
 					
-					updateActivityBackends(activity, payload)
+					if (activity.type == "create_event") {
+						val eventEngagementRepo = EventEngagementRepository()
+						eventEngagementRepo.addComment(
+							eventId = activity.sourceId ?: "",
+							userId = userId,
+							authorName = user.displayName.ifBlank { "You" },
+							authorEmoji = user.avatarEmoji,
+							text = commentText,
+							eventOwnerId = userId // Event creator is user
+						)
+					} else {
+						updateActivityBackends(activity, payload)
+					}
 				}
 			} catch (error: Exception) {
 				_uiState.update { it.copy(error = error.message ?: "Failed to add comment") }
@@ -1443,5 +1718,7 @@ class ProfileViewModel(
 		notificationSettingsListener?.remove()
 		privacySettingsListener?.remove()
 		blockedUsersListener?.remove()
+		eventEngagementListeners.values.forEach { it.remove() }
+		eventEngagementListeners.clear()
 	}
 }

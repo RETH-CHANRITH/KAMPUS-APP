@@ -47,8 +47,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -63,6 +66,7 @@ import kotlinx.coroutines.launch
 fun PostDetailScreen(
     postId: Int,
     onBack: () -> Unit,
+    openComposer: Boolean = false,
     viewModel: PostViewModel = viewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -72,10 +76,25 @@ fun PostDetailScreen(
     var commentImageUri by remember { mutableStateOf<Uri?>(null) }
     var replyingToCommentId by remember { mutableStateOf<String?>(null) }
     var replyingToName by remember { mutableStateOf<String?>(null) }
+    var commentsState by remember { mutableStateOf<List<PostComment>>(emptyList()) }
     val commentPickers = rememberMediaPickers(onPhotoSelected = { commentImageUri = it })
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
 
     LaunchedEffect(postId) {
         viewModel.observePost(postId)
+    }
+
+    LaunchedEffect(state.comments) {
+        commentsState = state.comments
+    }
+
+    LaunchedEffect(openComposer) {
+        if (openComposer) {
+            kotlinx.coroutines.delay(400)
+            try { focusRequester.requestFocus() } catch (_: Exception) {}
+            keyboardController?.show()
+        }
     }
 
     Surface(modifier = Modifier.fillMaxSize(), color = colors.background) {
@@ -130,7 +149,7 @@ fun PostDetailScreen(
                 else -> {
                     val post = state.post!!
                     val replyingToComment = replyingToCommentId?.let { commentId ->
-                        state.comments.firstNotNullOfOrNull { comment -> comment.findById(commentId) }
+                        commentsState.firstNotNullOfOrNull { comment -> comment.findById(commentId) }
                     }
 
                     LazyColumn(
@@ -175,7 +194,7 @@ fun PostDetailScreen(
                                 }
 
                                 Text(
-                                    text = "${post.likes} likes • ${state.comments.sumOf { 1 + it.replies.size }} comments • ${post.shares} shares",
+                                    text = "${post.likes} likes • ${commentsState.sumOf { 1 + it.replies.size }} comments • ${post.shares} shares",
                                     color = colors.onSurfaceVariant,
                                     fontSize = 12.sp,
                                 )
@@ -187,6 +206,7 @@ fun PostDetailScreen(
                                 text = commentText,
                                 imageUri = commentImageUri,
                                 replyingToName = replyingToName,
+                                focusRequester = focusRequester,
                                 onTextChange = { commentText = it },
                                 onPickPhoto = { commentPickers.pickPhoto() },
                                 onCancelReply = {
@@ -217,7 +237,7 @@ fun PostDetailScreen(
                             )
                         }
 
-                        if (state.comments.isEmpty()) {
+                        if (commentsState.isEmpty()) {
                             item {
                                 Text(
                                     text = "No comments yet. Be the first to reply.",
@@ -226,16 +246,42 @@ fun PostDetailScreen(
                                 )
                             }
                         } else {
-                            items(state.comments, key = { it.id }) { comment ->
+                            items(commentsState, key = { it.id }) { comment ->
                                 CommentThread(
                                     comment = comment,
-                                    onReply = {
-                                        replyingToCommentId = comment.id
-                                        replyingToName = comment.username
+                                    onReply = { targetComment ->
+                                        replyingToCommentId = targetComment.id
+                                        replyingToName = targetComment.username
                                     },
-                                    onLike = {
+                                    onLike = { targetComment ->
+                                        val previousComments = commentsState
+                                        commentsState = commentsState.map { current ->
+                                            if (current.id == targetComment.id) {
+                                                current.copy(
+                                                    likedByCurrentUser = !current.likedByCurrentUser,
+                                                    likesCount = if (current.likedByCurrentUser) current.likesCount - 1 else current.likesCount + 1,
+                                                )
+                                            } else {
+                                                current.copy(
+                                                    replies = current.replies.map { reply ->
+                                                        if (reply.id == targetComment.id) {
+                                                            reply.copy(
+                                                                likedByCurrentUser = !reply.likedByCurrentUser,
+                                                                likesCount = if (reply.likedByCurrentUser) reply.likesCount - 1 else reply.likesCount + 1,
+                                                            )
+                                                        } else {
+                                                            reply
+                                                        }
+                                                    }
+                                                )
+                                            }
+                                        }
+
                                         scope.launch {
-                                            viewModel.toggleCommentLike(postId, comment.id)
+                                            val result = viewModel.toggleCommentLike(postId, targetComment.id)
+                                            if (result.isFailure) {
+                                                commentsState = previousComments
+                                            }
                                         }
                                     },
                                 )
@@ -253,6 +299,7 @@ private fun CommentComposer(
     text: String,
     imageUri: Uri?,
     replyingToName: String?,
+    focusRequester: FocusRequester = remember { FocusRequester() },
     onTextChange: (String) -> Unit,
     onPickPhoto: () -> Unit,
     onCancelReply: () -> Unit,
@@ -308,7 +355,9 @@ private fun CommentComposer(
         OutlinedTextField(
             value = text,
             onValueChange = onTextChange,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusRequester(focusRequester),
             placeholder = { Text(if (replyingToName == null) "Write a comment..." else "Write a reply...") },
             minLines = 2,
             shape = RoundedCornerShape(14.dp),
@@ -387,8 +436,8 @@ private fun CommentComposer(
 @Composable
 private fun CommentThread(
     comment: PostComment,
-    onReply: () -> Unit,
-    onLike: () -> Unit,
+    onReply: (PostComment) -> Unit,
+    onLike: (PostComment) -> Unit,
     depth: Int = 0,
 ) {
     val colors = MaterialTheme.colorScheme
@@ -438,9 +487,9 @@ private fun CommentThread(
                 ActionChip(
                     label = if (comment.likedByCurrentUser) "❤️ ${comment.likesCount}" else "🤍 ${comment.likesCount}",
                     active = comment.likedByCurrentUser,
-                    onClick = onLike,
+                    onClick = { onLike(comment) },
                 )
-                ActionChip(label = "Reply", active = false, onClick = onReply)
+                ActionChip(label = "Reply", active = false, onClick = { onReply(comment) })
             }
         }
 

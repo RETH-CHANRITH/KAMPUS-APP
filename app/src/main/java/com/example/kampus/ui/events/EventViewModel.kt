@@ -57,6 +57,7 @@ class EventViewModel : ViewModel() {
     private val memberJobs = mutableMapOf<String, Job>()
     private var currentUserDisplayName: String = "You"
     private var currentUserEmoji: String = "🙂"
+    private var currentUserProfileImageUrl: String = ""
     private val currentUserId: String? get() = firebaseAuth.currentUser?.uid
 
     init {
@@ -161,9 +162,12 @@ class EventViewModel : ViewModel() {
                     ?: firebaseAuth.currentUser?.displayName?.takeIf { it.isNotBlank() }
                     ?: "You"
                 currentUserEmoji = doc.getString("avatarEmoji")?.takeIf { it.isNotBlank() } ?: "🙂"
+                currentUserProfileImageUrl = doc.getString("profileImageUrl")?.takeIf { it.isNotBlank() }
+                    ?: firebaseAuth.currentUser?.photoUrl?.toString().orEmpty()
             } catch (_: Exception) {
                 currentUserDisplayName = firebaseAuth.currentUser?.displayName?.takeIf { it.isNotBlank() } ?: "You"
                 currentUserEmoji = "🙂"
+                currentUserProfileImageUrl = firebaseAuth.currentUser?.photoUrl?.toString().orEmpty()
             }
         }
     }
@@ -520,6 +524,7 @@ class EventViewModel : ViewModel() {
             userId = userId,
             authorName = currentUserDisplayName,
             authorEmoji = currentUserEmoji,
+            authorProfileImageUrl = currentUserProfileImageUrl,
             text = comment,
             imageUrl = imageUrl,
             eventOwnerId = event.ownerId,
@@ -558,6 +563,7 @@ class EventViewModel : ViewModel() {
             userId = userId,
             authorName = currentUserDisplayName,
             authorEmoji = currentUserEmoji,
+            authorProfileImageUrl = currentUserProfileImageUrl,
             text = reply,
             imageUrl = imageUrl,
             parentCommentId = parentCommentId,

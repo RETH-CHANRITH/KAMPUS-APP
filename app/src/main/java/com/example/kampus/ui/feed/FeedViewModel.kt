@@ -23,6 +23,17 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 /**
+ * Lightweight friend / follower model used by the feed's user row.
+ */
+data class FriendUserItem(
+    val userId: String = "",
+    val name: String = "",
+    val avatarEmoji: String = "👤",
+    val profileImageUrl: String = "",
+    val isOnline: Boolean = false,
+)
+
+/**
  * UI State for feed screen
  */
 data class FeedUiState(
@@ -33,6 +44,13 @@ data class FeedUiState(
     val errorMessage: String? = null,
     val currentUserProfileImageUrl: String = "",
     val currentUserAvatarEmoji: String = "👤",
+    /** Real-time friends + followers from Firestore */
+    val friendsAndFollowers: List<FriendUserItem> = emptyList(),
+    val savedPostIds: Set<Int> = emptySet(),
+    val hiddenPostIds: Set<Int> = emptySet(),
+    val notInterestedPostIds: Set<Int> = emptySet(),
+    val mutedUserIds: Set<String> = emptySet(),
+    val blockedUserIds: Set<String> = emptySet(),
 )
 
 /**
@@ -61,9 +79,18 @@ class FeedViewModel : ViewModel() {
     private val _likedIds = MutableStateFlow<Set<Int>>(emptySet())
     val likedIds: StateFlow<Set<Int>> = _likedIds.asStateFlow()
 
+    private val _unreadCount = MutableStateFlow(0)
+    val unreadCount: StateFlow<Int> = _unreadCount.asStateFlow()
+
     private val postRepository = PostRepositoryImpl(FirebaseFirestore.getInstance())
     private val postEngagementRepository = PostEngagementRepository(FirebaseFirestore.getInstance())
     private var storiesListener: ListenerRegistration? = null
+    private var friendsListener: ListenerRegistration? = null
+    private var followingListener: ListenerRegistration? = null
+    private var userDocListener: ListenerRegistration? = null
+    private var blockedUsersListener: ListenerRegistration? = null
+    @Volatile private var latestFollowers: List<FriendUserItem> = emptyList()
+    @Volatile private var latestFollowing: List<FriendUserItem> = emptyList()
     @Volatile
     private var currentUserIdentity = AuthorIdentity("You", "🧑", "")
 
@@ -79,13 +106,26 @@ class FeedViewModel : ViewModel() {
             normalizeOwnedPosts(currentUserIdentity)
         }
         observeStories()
+        observeFriendsAndFollowers()
+        observeUserFiltersAndSavedPosts()
         loadCurrentUserStoryProfile()
         loadPosts()
+        observeNotificationCount()
     }
 
     override fun onCleared() {
         storiesListener?.remove()
         storiesListener = null
+        friendsListener?.remove()
+        friendsListener = null
+        followingListener?.remove()
+        followingListener = null
+        userDocListener?.remove()
+        userDocListener = null
+        blockedUsersListener?.remove()
+        blockedUsersListener = null
+        notificationCountListener?.remove()
+        notificationCountListener = null
         super.onCleared()
     }
 
@@ -126,7 +166,8 @@ class FeedViewModel : ViewModel() {
                         .toSet()
 
                     _posts.update { enrichedPosts }
-                    _uiState.update { it.copy(posts = enrichedPosts, isLoading = false) }
+                    _uiState.update { it.copy(isLoading = false) }
+                    filterAndPublishPosts()
                 }
                 result.onFailure { error ->
                     _uiState.update { it.copy(isLoading = false, errorMessage = error.message) }
@@ -179,12 +220,102 @@ class FeedViewModel : ViewModel() {
 
     private fun loadCurrentUserStoryProfile() {
         val user = FirebaseAuth.getInstance().currentUser ?: return
+        // Immediately populate from FirebaseAuth so the UI is not blank
         _uiState.update {
             it.copy(
                 currentUserProfileImageUrl = user.photoUrl?.toString().orEmpty(),
                 currentUserAvatarEmoji = "👤",
             )
         }
+        // Enrich with real Firestore data (display name, custom avatar, profile photo)
+        viewModelScope.launch {
+            runCatching {
+                val doc = FirebaseFirestore.getInstance()
+                    .collection("users").document(user.uid)
+                    .get().await()
+                val profileImageUrl = doc.getString("profileImageUrl")
+                    ?.takeIf { it.isNotBlank() }
+                    ?: user.photoUrl?.toString().orEmpty()
+                val avatarEmoji = doc.getString("avatarEmoji")
+                    ?.takeIf { it.isNotBlank() } ?: "👤"
+                _uiState.update {
+                    it.copy(
+                        currentUserProfileImageUrl = profileImageUrl,
+                        currentUserAvatarEmoji = avatarEmoji,
+                    )
+                }
+            }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Real-time friends / followers observer
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private fun mergeFriendsAndFollowing() {
+        val combined = (latestFollowers + latestFollowing)
+            .distinctBy { it.userId }
+            .sortedBy { it.name }
+        _uiState.update { it.copy(friendsAndFollowers = combined) }
+    }
+
+    private fun observeFriendsAndFollowers() {
+        val currentUserId = FirebaseAuth.getInstance().currentUser?.uid ?: return
+
+        friendsListener = FirebaseFirestore.getInstance()
+            .collection("users").document(currentUserId)
+            .collection("followers")
+            .limit(60)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) return@addSnapshotListener
+                latestFollowers = snapshot?.documents?.mapNotNull { doc ->
+                    val name = doc.getString("displayName")?.takeIf { it.isNotBlank() }
+                        ?: return@mapNotNull null
+                    FriendUserItem(
+                        userId = doc.getString("userId") ?: doc.id,
+                        name = name,
+                        avatarEmoji = doc.getString("avatarEmoji") ?: "👤",
+                        profileImageUrl = doc.getString("profileImageUrl") ?: "",
+                        isOnline = doc.getBoolean("isOnline") ?: false,
+                    )
+                } ?: emptyList()
+                mergeFriendsAndFollowing()
+            }
+
+        followingListener = FirebaseFirestore.getInstance()
+            .collection("users").document(currentUserId)
+            .collection("following")
+            .limit(60)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) return@addSnapshotListener
+                latestFollowing = snapshot?.documents?.mapNotNull { doc ->
+                    val name = doc.getString("displayName")?.takeIf { it.isNotBlank() }
+                        ?: return@mapNotNull null
+                    FriendUserItem(
+                        userId = doc.getString("userId") ?: doc.id,
+                        name = name,
+                        avatarEmoji = doc.getString("avatarEmoji") ?: "👤",
+                        profileImageUrl = doc.getString("profileImageUrl") ?: "",
+                        isOnline = doc.getBoolean("isOnline") ?: false,
+                    )
+                } ?: emptyList()
+                mergeFriendsAndFollowing()
+            }
+    }
+
+    private var notificationCountListener: ListenerRegistration? = null
+
+    private fun observeNotificationCount() {
+        val currentUserId = FirebaseAuth.getInstance().currentUser?.uid ?: return
+        notificationCountListener?.remove()
+        notificationCountListener = FirebaseFirestore.getInstance()
+            .collection("users").document(currentUserId)
+            .collection("notifications")
+            .whereEqualTo("isRead", false)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) return@addSnapshotListener
+                _unreadCount.value = snapshot?.size() ?: 0
+            }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -251,6 +382,11 @@ class FeedViewModel : ViewModel() {
             result.onSuccess { liked ->
                 _likedIds.update { currentLiked ->
                     if (liked) currentLiked + postId else currentLiked - postId
+                }
+                // Sync the like count and status back to the main posts document in Firestore and Supabase
+                val updatedLikeCount = _posts.value.firstOrNull { it.id == postId }?.likes ?: 0
+                viewModelScope.launch {
+                    postRepository.updatePostLikes(postId.toString(), updatedLikeCount, currentUserId, liked)
                 }
             }
             result.onFailure { error ->
@@ -1069,4 +1205,125 @@ class FeedViewModel : ViewModel() {
      *     postRepository.toggleLike(postId, isLiked)
      * }
      */
+
+    private fun observeUserFiltersAndSavedPosts() {
+        val currentUserId = FirebaseAuth.getInstance().currentUser?.uid ?: return
+        val db = FirebaseFirestore.getInstance()
+
+        userDocListener?.remove()
+        userDocListener = db.collection("users").document(currentUserId)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null || !snapshot.exists()) return@addSnapshotListener
+                
+                val saved = (snapshot.get("savedPosts") as? List<*>)?.mapNotNull { (it as? Number)?.toInt() }?.toSet() ?: emptySet()
+                val hidden = (snapshot.get("hiddenPosts") as? List<*>)?.mapNotNull { (it as? Number)?.toInt() }?.toSet() ?: emptySet()
+                val notInterested = (snapshot.get("notInterestedPosts") as? List<*>)?.mapNotNull { (it as? Number)?.toInt() }?.toSet() ?: emptySet()
+                val muted = (snapshot.get("mutedUsers") as? List<*>)?.mapNotNull { it as? String }?.toSet() ?: emptySet()
+
+                _uiState.update { state ->
+                    state.copy(
+                        savedPostIds = saved,
+                        hiddenPostIds = hidden,
+                        notInterestedPostIds = notInterested,
+                        mutedUserIds = muted
+                    )
+                }
+                filterAndPublishPosts()
+            }
+
+        blockedUsersListener?.remove()
+        blockedUsersListener = db.collection("users").document(currentUserId)
+            .collection("blockedUsers")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+                val blocked = snapshot.documents.mapNotNull { it.getString("userId") ?: it.id }.toSet()
+                _uiState.update { state ->
+                    state.copy(blockedUserIds = blocked)
+                }
+                filterAndPublishPosts()
+            }
+    }
+
+    private fun filterAndPublishPosts() {
+        val state = _uiState.value
+        val allPosts = _posts.value
+        val filtered = allPosts.filter { post ->
+            post.id !in state.hiddenPostIds &&
+            post.id !in state.notInterestedPostIds &&
+            post.authorId !in state.mutedUserIds &&
+            post.authorId !in state.blockedUserIds
+        }
+        _uiState.update { it.copy(posts = filtered) }
+    }
+
+    fun savePost(postId: Int, save: Boolean) {
+        val currentUserId = FirebaseAuth.getInstance().currentUser?.uid ?: return
+        val db = FirebaseFirestore.getInstance()
+        val ref = db.collection("users").document(currentUserId)
+        if (save) {
+            ref.update("savedPosts", FieldValue.arrayUnion(postId))
+        } else {
+            ref.update("savedPosts", FieldValue.arrayRemove(postId))
+        }
+    }
+
+    fun hidePost(postId: Int) {
+        val currentUserId = FirebaseAuth.getInstance().currentUser?.uid ?: return
+        val db = FirebaseFirestore.getInstance()
+        db.collection("users").document(currentUserId)
+            .update("hiddenPosts", FieldValue.arrayUnion(postId))
+    }
+
+    fun notInterested(postId: Int) {
+        val currentUserId = FirebaseAuth.getInstance().currentUser?.uid ?: return
+        val db = FirebaseFirestore.getInstance()
+        db.collection("users").document(currentUserId)
+            .update("notInterestedPosts", FieldValue.arrayUnion(postId))
+    }
+
+    fun muteUser(authorId: String) {
+        val currentUserId = FirebaseAuth.getInstance().currentUser?.uid ?: return
+        val db = FirebaseFirestore.getInstance()
+        db.collection("users").document(currentUserId)
+            .update("mutedUsers", FieldValue.arrayUnion(authorId))
+    }
+
+    fun blockUser(authorId: String) {
+        val currentUserId = FirebaseAuth.getInstance().currentUser?.uid ?: return
+        val db = FirebaseFirestore.getInstance()
+        val blockedData = mapOf(
+            "userId" to authorId,
+            "blockedAt" to System.currentTimeMillis()
+        )
+        viewModelScope.launch {
+            try {
+                db.collection("users").document(currentUserId)
+                    .collection("blockedUsers").document(authorId)
+                    .set(blockedData).await()
+                
+                db.collection("users").document(currentUserId)
+                    .collection("following").document(authorId).delete().await()
+                
+                db.collection("users").document(currentUserId)
+                    .collection("followers").document(authorId).delete().await()
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun reportPost(postId: Int) {
+        val currentUserId = FirebaseAuth.getInstance().currentUser?.uid ?: return
+        val db = FirebaseFirestore.getInstance()
+        val reportDoc = mapOf(
+            "reporterId" to currentUserId,
+            "reportedAt" to System.currentTimeMillis(),
+            "reason" to "reported_from_feed"
+        )
+        viewModelScope.launch {
+            try {
+                db.collection("posts").document(postId.toString())
+                    .collection("reports").document(currentUserId)
+                    .set(reportDoc).await()
+            } catch (_: Exception) {}
+        }
+    }
 }

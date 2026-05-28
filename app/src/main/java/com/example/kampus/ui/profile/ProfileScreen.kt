@@ -64,6 +64,21 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.filled.Stars
+import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.filled.BookmarkAdd
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.PersonOff
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import android.content.ClipboardManager
+import android.content.ClipData
+import android.widget.Toast
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -96,16 +111,26 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.example.kampus.ui.components.CampusBottomNavBar
-import com.example.kampus.ui.feed.PostItem
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.unit.Dp
+import androidx.media3.common.MediaItem
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
 
-private val Bg = Color(0xFF080B11)
-private val Card = Color(0xFF252A41)
-private val Border = Color(0xFF2C3552)
-private val Blue = Color(0xFF0D7FFF)
-private val TextPrimary = Color(0xFFFFFFFF)
-private val TextSecondary = Color(0xFF99A1AF)
-private val Danger = Color(0xFFFF3B5C)
-private val NavBg = Color(0xFF0C1018)
+import com.example.kampus.ui.theme.ThemeController
+
+private val Bg: Color get() = if (ThemeController.isDark) Color(0xFF080B11) else Color(0xFFFFFFFF)
+private val Card: Color get() = if (ThemeController.isDark) Color(0xFF252A41) else Color(0xFFF7F7FA)
+private val Border: Color get() = if (ThemeController.isDark) Color(0xFF2C3552) else Color(0xFFD1D5DB)
+private val Blue: Color get() = ThemeController.accent.color
+private val TextPrimary: Color get() = if (ThemeController.isDark) Color(0xFFFFFFFF) else Color(0xFF111827)
+private val TextSecondary: Color get() = if (ThemeController.isDark) Color(0xFF99A1AF) else Color(0xFF6B7280)
+private val Danger: Color get() = Color(0xFFFF3B5C)
+private val NavBg: Color get() = if (ThemeController.isDark) Color(0xFF0C1018) else Color(0xFFFFFFFF)
 
 private data class ProfileNavItem(
 	val label: String,
@@ -135,6 +160,7 @@ fun ProfileScreen(
 	onChatClick: () -> Unit,
 	onCreatePost: () -> Unit,
 	onOpenActivity: (ProfileActivityItem) -> Unit = {},
+	onCommentClick: (ProfileActivityItem) -> Unit = {},
 	onEditCoverImage: () -> Unit = {},
 	viewModel: ProfileViewModel = viewModel(),
 ) {
@@ -143,6 +169,8 @@ fun ProfileScreen(
 	var selectedNav = remember { mutableIntStateOf(-1) } // -1 means no tab is selected (we're on profile)
 	val isProfileSelected = true // Profile screen is always selected when viewing profile
 	var showImagePicker by remember { mutableStateOf(false) }
+	var activeMenuActivity by remember { mutableStateOf<ProfileActivityItem?>(null) }
+	var confirmDeleteActivity by remember { mutableStateOf<ProfileActivityItem?>(null) }
 	val context = LocalContext.current
 
 	// Show error as snackbar
@@ -223,8 +251,14 @@ fun ProfileScreen(
 				)
 				AboutCard(state = state)
 				RecentActivitySection(
-					posts = state.timelinePosts,
 					activities = state.activities,
+					displayName = state.displayName,
+					avatarEmoji = state.avatarEmoji,
+					profileImageUrl = state.profileImageUrl,
+					viewModel = viewModel,
+					onOpenActivity = onOpenActivity,
+					onCommentClick = onCommentClick,
+					onMenuClick = { activity -> activeMenuActivity = activity },
 				)
 				Spacer(modifier = Modifier.height(16.dp))
 			}
@@ -234,7 +268,12 @@ fun ProfileScreen(
 			modifier = Modifier
 				.fillMaxWidth()
 				.align(Alignment.BottomCenter)
-				.background(Brush.verticalGradient(listOf(Color.Transparent, Bg.copy(alpha = 0.98f))))
+				.background(
+					run {
+						val fadeEnd = if (ThemeController.isDark) Bg.copy(alpha = 0.98f) else Color.Transparent
+						Brush.verticalGradient(listOf(Color.Transparent, fadeEnd))
+					}
+				)
 				.padding(horizontal = 14.dp, vertical = 10.dp)
 				.navigationBarsPadding(),
 		) {
@@ -252,6 +291,215 @@ fun ProfileScreen(
 				onFabClick = onCreatePost,
 				onProfileClick = { },
 				isProfileSelected = isProfileSelected,
+			)
+		}
+
+		if (activeMenuActivity != null) {
+			val activity = activeMenuActivity!!
+			val bSheetState = rememberModalBottomSheetState()
+			ModalBottomSheet(
+				onDismissRequest = { activeMenuActivity = null },
+				sheetState = bSheetState,
+				containerColor = Bg,
+				scrimColor = Color.Black.copy(alpha = 0.5f),
+			) {
+				Column(
+					modifier = Modifier
+						.fillMaxWidth()
+						.background(Color.Transparent)
+						.navigationBarsPadding()
+				) {
+					// Drag handle
+					Box(
+						modifier = Modifier
+							.fillMaxWidth()
+							.padding(top = 8.dp, bottom = 6.dp),
+						contentAlignment = Alignment.Center
+					) {
+						Box(
+							modifier = Modifier
+								.width(36.dp)
+								.height(4.dp)
+								.clip(RoundedCornerShape(4.dp))
+								.background(Border.copy(alpha = 0.35f))
+						)
+					}
+
+					// Top group (main post actions)
+					Surface(
+						shape = RoundedCornerShape(16.dp),
+						color = Card,
+						modifier = Modifier
+							.fillMaxWidth()
+							.padding(horizontal = 12.dp)
+					) {
+						Column(modifier = Modifier.padding(vertical = 10.dp)) {
+							Text(
+								text = "Post options",
+								color = TextPrimary,
+								fontWeight = FontWeight.Bold,
+								modifier = Modifier.padding(start = 18.dp, top = 6.dp, end = 18.dp, bottom = 2.dp)
+							)
+							Text(
+								text = "Choose what to do with this post.",
+								color = TextSecondary,
+								fontSize = 13.sp,
+								modifier = Modifier.padding(start = 18.dp, end = 18.dp, bottom = 8.dp)
+							)
+
+							MenuItemLarge(
+								icon = Icons.AutoMirrored.Outlined.Send,
+								label = "Open post",
+								tint = Blue
+							) {
+								onOpenActivity(activity)
+								activeMenuActivity = null
+							}
+							MenuItemLarge(
+								icon = Icons.Outlined.ContentCopy,
+								label = "Copy post text",
+								tint = TextSecondary
+							) {
+								val clipboard = context.getSystemService(ClipboardManager::class.java)
+								clipboard?.setPrimaryClip(ClipData.newPlainText("post", activity.text))
+								Toast.makeText(context, "Post text copied", Toast.LENGTH_SHORT).show()
+								activeMenuActivity = null
+							}
+
+							HorizontalDivider(color = Border.copy(alpha = 0.5f))
+
+							MenuItemLarge(
+								icon = Icons.Default.BookmarkAdd,
+								label = if (activity.isPinned) "Unpin post" else "Pin post",
+								tint = Blue,
+								subtitle = "Keep this post at the top"
+							) {
+								viewModel.pinPostActivity(activity, !activity.isPinned)
+								activeMenuActivity = null
+							}
+							MenuItemLarge(
+								icon = Icons.Default.Edit,
+								label = "Edit post",
+								tint = TextSecondary,
+								subtitle = "Update the content or media"
+							) {
+								viewModel.editPostActivity(activity)
+								activeMenuActivity = null
+							}
+							MenuItemLarge(
+								icon = Icons.Outlined.Lock,
+								label = "Privacy settings",
+								tint = TextSecondary,
+								subtitle = "Choose who can see this post"
+							) {
+								Toast.makeText(context, "Select a preset below to change privacy", Toast.LENGTH_SHORT).show()
+								activeMenuActivity = null
+							}
+						}
+					}
+
+					Spacer(Modifier.height(10.dp))
+
+					// Privacy presets
+					Surface(
+						shape = RoundedCornerShape(16.dp),
+						color = Card,
+						modifier = Modifier
+							.fillMaxWidth()
+							.padding(horizontal = 12.dp)
+					) {
+						Column(modifier = Modifier.padding(vertical = 10.dp)) {
+							MenuItemLarge(
+								icon = Icons.Outlined.Public,
+								label = "Public",
+								tint = Color(0xFF4CAF50),
+								subtitle = "Anyone can see this post"
+							) {
+								viewModel.updatePostVisibility(activity, com.example.kampus.ui.feed.PostItem.PostVisibility.PUBLIC)
+								activeMenuActivity = null
+							}
+							HorizontalDivider(color = Border.copy(alpha = 0.5f))
+							MenuItemLarge(
+								icon = Icons.Outlined.Group,
+								label = "Friends",
+								tint = Blue,
+								subtitle = "Only your friends can see it"
+							) {
+								viewModel.updatePostVisibility(activity, com.example.kampus.ui.feed.PostItem.PostVisibility.FRIENDS)
+								activeMenuActivity = null
+							}
+							HorizontalDivider(color = Border.copy(alpha = 0.5f))
+							MenuItemLarge(
+								icon = Icons.Outlined.Lock,
+								label = "Only me",
+								tint = TextSecondary,
+								subtitle = "Visible only to you"
+							) {
+								viewModel.updatePostVisibility(activity, com.example.kampus.ui.feed.PostItem.PostVisibility.PRIVATE)
+								activeMenuActivity = null
+							}
+						}
+					}
+
+					Spacer(Modifier.height(10.dp))
+
+					// Destructive actions
+					Surface(
+						shape = RoundedCornerShape(16.dp),
+						color = Card,
+						modifier = Modifier
+							.fillMaxWidth()
+							.padding(horizontal = 12.dp, vertical = 8.dp)
+					) {
+						Column(modifier = Modifier.padding(vertical = 10.dp)) {
+							MenuItemLarge(
+								icon = Icons.Default.PersonOff,
+								label = "Hide from profile",
+								tint = TextSecondary,
+								subtitle = "Remove it from your profile only"
+							) {
+								viewModel.hideFromProfile(activity)
+								activeMenuActivity = null
+							}
+							HorizontalDivider(color = Border.copy(alpha = 0.5f))
+							MenuItemLarge(
+								icon = Icons.Default.Delete,
+								label = "Delete post",
+								tint = Danger,
+								subtitle = "This removes the post from the feed"
+							) {
+								confirmDeleteActivity = activity
+								activeMenuActivity = null
+							}
+						}
+					}
+					Spacer(Modifier.height(18.dp))
+				}
+			}
+		}
+
+		if (confirmDeleteActivity != null) {
+			val activity = confirmDeleteActivity!!
+			AlertDialog(
+				onDismissRequest = { confirmDeleteActivity = null },
+				title = { Text("Move to trash", color = TextPrimary) },
+				text = { Text("Are you sure you want to delete this activity? This removes it from the feed.", color = TextSecondary) },
+				confirmButton = {
+					TextButton(
+						onClick = {
+							viewModel.deletePostFromProfile(activity)
+							confirmDeleteActivity = null
+						}
+					) {
+						Text("Delete", color = Danger)
+					}
+				},
+				dismissButton = {
+					TextButton(onClick = { confirmDeleteActivity = null }) {
+						Text("Cancel", color = TextPrimary)
+					}
+				},
+				containerColor = Card
 			)
 		}
 	}
@@ -585,129 +833,353 @@ private fun AboutCard(state: ProfileUiState) {
 }
 
 @Composable
-private fun RecentActivitySection(
-	posts: List<PostItem>,
+fun RecentActivitySection(
 	activities: List<ProfileActivityItem>,
+	displayName: String,
+	avatarEmoji: String,
+	profileImageUrl: String,
+	viewModel: ProfileViewModel,
+	onOpenActivity: (ProfileActivityItem) -> Unit,
+	onCommentClick: (ProfileActivityItem) -> Unit,
+	onMenuClick: (ProfileActivityItem) -> Unit,
 ) {
-	val eventFallbacks = activities.filter { it.type == "create_event" }
-	val itemsToShow = if (posts.isNotEmpty()) posts else emptyList()
-	val hasAnything = itemsToShow.isNotEmpty() || eventFallbacks.isNotEmpty()
+	val displayTypes = setOf("create_post", "create_event", "share_post", "create_group")
+	val itemsToShow = activities.filter { it.type in displayTypes }
 
 	Column(
 		modifier = Modifier
 			.fillMaxWidth()
 			.padding(top = 16.dp, start = 24.dp, end = 24.dp),
-		verticalArrangement = Arrangement.spacedBy(10.dp),
+		verticalArrangement = Arrangement.spacedBy(12.dp),
 	) {
 		Text(text = "Recent Activity", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
 
-		if (!hasAnything) {
+		if (itemsToShow.isEmpty()) {
 			Text(
-				text = "No recent posts yet. New posts will appear here in real time.",
+				text = "No recent activity yet. Your posts, events, and groups will appear here.",
 				color = TextSecondary,
 				fontSize = 13.sp,
 			)
 		} else {
-			itemsToShow.forEach { post ->
-				ProfileTimelinePostCard(post = post)
-			}
-			if (itemsToShow.isEmpty()) {
-				eventFallbacks.forEach { activity ->
-					ProfileTimelineActivityCard(activity = activity)
+			itemsToShow.forEach { activity ->
+				when (activity.type) {
+					"create_post"    -> ActivityPostCard(
+						activity = activity,
+						displayName = displayName,
+						avatarEmoji = avatarEmoji,
+						profileImageUrl = profileImageUrl,
+						onLikeClick = { viewModel.toggleActivityLove(activity) },
+						onCommentClick = { onCommentClick(activity) },
+						onCardClick = { onOpenActivity(activity) },
+						onMenuClick = { onMenuClick(activity) }
+					)
+					"create_event"   -> ActivityEventCard(
+						activity = activity,
+						displayName = displayName,
+						avatarEmoji = avatarEmoji,
+						profileImageUrl = profileImageUrl,
+						onLikeClick = { viewModel.toggleActivityLove(activity) },
+						onInterestClick = { viewModel.toggleActivityInterest(activity) },
+						onCommentClick = { onCommentClick(activity) },
+						onCardClick = { onOpenActivity(activity) },
+						onMenuClick = { onMenuClick(activity) }
+					)
+					"share_post"     -> ActivitySharePostCard(
+						activity = activity,
+						displayName = displayName,
+						avatarEmoji = avatarEmoji,
+						profileImageUrl = profileImageUrl,
+						onLikeClick = { viewModel.toggleActivityLove(activity) },
+						onCommentClick = { onCommentClick(activity) },
+						onCardClick = { onOpenActivity(activity) },
+						onMenuClick = { onMenuClick(activity) }
+					)
+					"create_group"   -> ActivityGroupCard(
+						activity = activity,
+						displayName = displayName,
+						avatarEmoji = avatarEmoji,
+						profileImageUrl = profileImageUrl,
+						onLikeClick = { viewModel.toggleActivityLove(activity) },
+						onCommentClick = { onCommentClick(activity) },
+						onCardClick = { onOpenActivity(activity) },
+						onMenuClick = { onMenuClick(activity) }
+					)
 				}
 			}
 		}
 	}
 }
 
+/* ───────────────────────────── helpers ───────────────────────────── */
+
 @Composable
-private fun ProfileTimelineActivityCard(
+fun ActivityCardHeader(
+	displayName: String,
+	avatarEmoji: String,
+	profileImageUrl: String,
 	activity: ProfileActivityItem,
+	onMenuClick: () -> Unit = {}
 ) {
-	Column(
+	Row(
 		modifier = Modifier
 			.fillMaxWidth()
-			.clip(RoundedCornerShape(20.dp))
-			.background(Card)
-			.border(1.dp, Border, RoundedCornerShape(20.dp))
-			.padding(14.dp),
-		verticalArrangement = Arrangement.spacedBy(10.dp),
+			.padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 8.dp),
+		horizontalArrangement = Arrangement.SpaceBetween,
+		verticalAlignment = Alignment.CenterVertically,
 	) {
-		Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-			Box(
-				modifier = Modifier
-					.size(36.dp)
-					.clip(CircleShape)
-					.background(Color.White.copy(alpha = 0.12f)),
-				contentAlignment = Alignment.Center,
-			) {
-				Text(text = "🎓", fontSize = 18.sp)
+		Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+			if (profileImageUrl.isNotBlank()) {
+				AsyncImage(
+					model = profileImageUrl,
+					contentDescription = null,
+					contentScale = ContentScale.Crop,
+					modifier = Modifier
+						.size(36.dp)
+						.clip(CircleShape)
+				)
+			} else {
+				Box(
+					modifier = Modifier
+						.size(36.dp)
+						.clip(CircleShape)
+						.background(Color.White.copy(alpha = 0.12f)),
+					contentAlignment = Alignment.Center,
+				) {
+					Text(text = avatarEmoji.ifBlank { "👤" }, fontSize = 18.sp)
+				}
 			}
-			Column(modifier = Modifier.weight(1f)) {
-				Text(text = "Created event", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+			Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+				Text(text = displayName, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
 				Text(text = formatActivityTime(activity.createdAt), color = TextSecondary, fontSize = 12.sp)
 			}
-			Icon(Icons.Outlined.MoreVert, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(18.dp))
 		}
-
-		Text(
-			text = activity.previewTitle.ifBlank { activity.text },
-			color = TextPrimary,
-			fontSize = 22.sp,
-			fontWeight = FontWeight.Bold,
-			lineHeight = 26.sp,
-			maxLines = 3,
+		Icon(
+			Icons.Outlined.MoreVert,
+			contentDescription = null,
+			tint = TextSecondary,
+			modifier = Modifier
+				.size(18.dp)
+				.clickable { onMenuClick() }
 		)
-
-		if (activity.previewImageUrl.isNotBlank()) {
-			AsyncImage(
-				model = activity.previewImageUrl,
-				contentDescription = activity.previewTitle,
-				contentScale = ContentScale.Crop,
-				modifier = Modifier
-					.fillMaxWidth()
-					.height(220.dp)
-					.clip(RoundedCornerShape(18.dp)),
-			)
-		}
-
-		Row(horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically) {
-			InfoLine(icon = { Icon(Icons.Filled.Favorite, contentDescription = null, tint = Danger, modifier = Modifier.size(15.dp)) }, text = activity.likeCount.toString())
-			InfoLine(icon = { Icon(Icons.Outlined.ChatBubbleOutline, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(15.dp)) }, text = activity.commentCount.toString())
-			InfoLine(icon = { Icon(Icons.Outlined.Share, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(15.dp)) }, text = activity.shareCount.toString())
-		}
-
-		Button(
-			onClick = { },
-			modifier = Modifier.fillMaxWidth().height(48.dp),
-			shape = RoundedCornerShape(14.dp),
-			colors = ButtonDefaults.buttonColors(containerColor = Blue, contentColor = Color.White),
-		) {
-			Text(text = "I'm Interested", fontWeight = FontWeight.SemiBold)
-		}
 	}
 }
 
 @Composable
-private fun ProfileTimelinePostCard(
-	post: PostItem,
+fun ActivityActionItem(
+	icon: ImageVector,
+	tint: Color,
+	count: Int,
+	onClick: () -> Unit
+) {
+	Row(
+		modifier = Modifier
+			.clip(RoundedCornerShape(8.dp))
+			.clickable(onClick = onClick)
+			.padding(horizontal = 8.dp, vertical = 4.dp),
+		verticalAlignment = Alignment.CenterVertically,
+		horizontalArrangement = Arrangement.spacedBy(4.dp)
+	) {
+		Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(16.dp))
+		Text(text = count.toString(), color = TextSecondary, fontSize = 13.sp)
+	}
+}
+
+@Composable
+fun ActivityMediaGallery(
+	mediaUrls: List<String>,
+	mediaTypes: List<String>,
+	fallbackImageUrl: String,
+	height: Dp = 200.dp,
+	modifier: Modifier = Modifier
+) {
+	val context = LocalContext.current
+	if (mediaUrls.isNotEmpty()) {
+		LazyRow(
+			modifier = modifier
+				.padding(horizontal = 14.dp, vertical = 6.dp)
+				.fillMaxWidth()
+				.height(height)
+				.clip(RoundedCornerShape(12.dp))
+				.background(Color.Black.copy(alpha = 0.2f))
+				.border(1.dp, Border, RoundedCornerShape(12.dp)),
+			horizontalArrangement = Arrangement.spacedBy(8.dp),
+		) {
+			items(mediaUrls.size) { index ->
+				val mediaUrl = mediaUrls[index]
+				val isVideo = mediaTypes.getOrNull(index)?.equals("VIDEO", ignoreCase = true) == true
+
+				if (isVideo) {
+					Box(
+						modifier = Modifier
+							.width(280.dp)
+							.height(height)
+							.fillParentMaxHeight()
+					) {
+						val player = remember(mediaUrl) {
+							ExoPlayer.Builder(context).build().apply {
+								setMediaItem(MediaItem.fromUri(mediaUrl))
+								prepare()
+								playWhenReady = false
+							}
+						}
+						DisposableEffect(player) {
+							onDispose { player.release() }
+						}
+						AndroidView(
+							modifier = Modifier.fillMaxSize(),
+							factory = { ctx ->
+								PlayerView(ctx).apply {
+									useController = true
+									this.player = player
+								}
+							},
+							update = { it.player = player },
+						)
+					}
+				} else {
+					Box(
+						modifier = Modifier
+							.width(280.dp)
+							.height(height)
+							.fillParentMaxHeight()
+					) {
+						AsyncImage(
+							model = mediaUrl,
+							contentDescription = "Activity media",
+							modifier = Modifier.fillMaxSize(),
+							contentScale = ContentScale.Crop,
+						)
+					}
+				}
+			}
+		}
+	} else if (fallbackImageUrl.isNotBlank()) {
+		AsyncImage(
+			model = fallbackImageUrl,
+			contentDescription = null,
+			contentScale = ContentScale.Crop,
+			modifier = modifier
+				.fillMaxWidth()
+				.height(height)
+				.padding(horizontal = 14.dp, vertical = 6.dp)
+				.clip(RoundedCornerShape(12.dp)),
+		)
+	}
+}
+
+/* ─────────────────── create_post card ─────────────────── */
+
+@Composable
+fun ActivityPostCard(
+	activity: ProfileActivityItem,
+	displayName: String,
+	avatarEmoji: String,
+	profileImageUrl: String,
+	onLikeClick: () -> Unit,
+	onCommentClick: () -> Unit = {},
+	onCardClick: () -> Unit = {},
+	onMenuClick: () -> Unit = {}
 ) {
 	Column(
 		modifier = Modifier
 			.fillMaxWidth()
-		.clip(RoundedCornerShape(20.dp))
-		.background(Card)
-		.border(1.dp, Border, RoundedCornerShape(20.dp))
+			.clip(RoundedCornerShape(18.dp))
+			.background(Card)
+			.border(1.dp, Border, RoundedCornerShape(18.dp))
+			.clickable(onClick = onCardClick),
+		verticalArrangement = Arrangement.spacedBy(0.dp),
 	) {
+		ActivityCardHeader(
+			displayName = displayName,
+			avatarEmoji = avatarEmoji,
+			profileImageUrl = profileImageUrl,
+			activity = activity,
+			onMenuClick = onMenuClick
+		)
+
+		ActivityMediaGallery(
+			mediaUrls = activity.mediaUrls,
+			mediaTypes = activity.mediaTypes,
+			fallbackImageUrl = activity.previewImageUrl,
+			height = 200.dp
+		)
+
+		if (activity.text.isNotBlank()) {
+			Text(
+				text = activity.text,
+				color = TextPrimary,
+				fontSize = 15.sp,
+				fontWeight = FontWeight.Medium,
+				lineHeight = 21.sp,
+				maxLines = 4,
+				modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+			)
+		}
+
+		Spacer(modifier = Modifier.height(4.dp))
+
+		Row(
+			modifier = Modifier
+				.fillMaxWidth()
+				.padding(horizontal = 14.dp, vertical = 8.dp),
+			horizontalArrangement = Arrangement.spacedBy(16.dp),
+			verticalAlignment = Alignment.CenterVertically,
+		) {
+			ActivityActionItem(
+				icon = if (activity.currentUserLoved) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+				tint = if (activity.currentUserLoved) Danger else TextSecondary,
+				count = activity.likeCount,
+				onClick = onLikeClick
+			)
+			ActivityActionItem(
+				icon = Icons.Outlined.ChatBubbleOutline,
+				tint = TextSecondary,
+				count = activity.commentCount,
+				onClick = onCommentClick
+			)
+			ActivityActionItem(
+				icon = Icons.AutoMirrored.Outlined.Send,
+				tint = TextSecondary,
+				count = activity.shareCount,
+				onClick = {}
+			)
+		}
+		Spacer(modifier = Modifier.height(6.dp))
+	}
+}
+
+/* ─────────────────── create_event card ─────────────────── */
+
+@Composable
+fun ActivityEventCard(
+	activity: ProfileActivityItem,
+	displayName: String,
+	avatarEmoji: String,
+	profileImageUrl: String,
+	onLikeClick: () -> Unit,
+	onInterestClick: () -> Unit,
+	onCommentClick: () -> Unit = {},
+	onCardClick: () -> Unit = {},
+	onMenuClick: () -> Unit = {}
+) {
+	Column(
+		modifier = Modifier
+			.fillMaxWidth()
+			.clip(RoundedCornerShape(18.dp))
+			.background(Card)
+			.border(1.dp, Border, RoundedCornerShape(18.dp))
+			.clickable(onClick = onCardClick),
+	) {
+		// Cover banner
 		Box(
 			modifier = Modifier
 				.fillMaxWidth()
-				.height(190.dp),
+				.height(150.dp),
 		) {
-			if (post.getFirstMediaUri() != null) {
+			if (activity.previewImageUrl.isNotBlank()) {
 				AsyncImage(
-					model = post.getFirstMediaUri(),
-					contentDescription = post.content,
+					model = activity.previewImageUrl,
+					contentDescription = null,
 					contentScale = ContentScale.Crop,
 					modifier = Modifier.fillMaxSize(),
 				)
@@ -716,150 +1188,437 @@ private fun ProfileTimelinePostCard(
 					modifier = Modifier
 						.fillMaxSize()
 						.background(
-							Brush.linearGradient(
-								listOf(Color(0xFF1F3C88), Color(0xFF0D7FFF)),
-							),
+							Brush.linearGradient(listOf(Color(0xFF1A237E), Color(0xFF0D7FFF))),
 						),
 				)
 			}
+			// dim overlay
+			Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.25f)))
+			
+			// Category badge
 			Box(
 				modifier = Modifier
 					.align(Alignment.TopStart)
-					.padding(12.dp)
-					.clip(RoundedCornerShape(8.dp))
-					.background(Blue.copy(alpha = 0.9f))
-					.padding(horizontal = 10.dp, vertical = 4.dp),
+					.padding(10.dp)
+					.clip(RoundedCornerShape(6.dp))
+					.background(Blue.copy(alpha = 0.85f))
+					.border(1.dp, Border.copy(alpha = 0.2f), RoundedCornerShape(6.dp))
+					.padding(horizontal = 8.dp, vertical = 4.dp),
 			) {
-				Text("KAMPUS", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+				Row(
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(4.dp)
+				) {
+					Text("🎓", fontSize = 11.sp)
+					Text("CAMPUS", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+				}
 			}
+
+			// Bookmark badge
 			Box(
 				modifier = Modifier
 					.align(Alignment.TopEnd)
-					.padding(12.dp)
-					.size(28.dp)
+					.padding(10.dp)
+					.size(32.dp)
 					.clip(CircleShape)
-					.background(Color.Black.copy(alpha = 0.35f)),
-				contentAlignment = Alignment.Center,
+					.background(Color.Black.copy(alpha = 0.4f)),
+				contentAlignment = Alignment.Center
 			) {
-				Icon(Icons.Outlined.Bookmark, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+				Icon(
+					Icons.Outlined.BookmarkBorder,
+					contentDescription = "Save",
+					tint = Color.White,
+					modifier = Modifier.size(16.dp)
+				)
 			}
 		}
 
-		Column(
-			modifier = Modifier.padding(14.dp),
-			verticalArrangement = Arrangement.spacedBy(10.dp),
-		) {
-			Row(verticalAlignment = Alignment.CenterVertically) {
-				Box(
-					modifier = Modifier
-						.size(36.dp)
-						.clip(CircleShape)
-						.background(Color.White.copy(alpha = 0.12f)),
-					contentAlignment = Alignment.Center,
-				) {
-					Text(text = post.avatar, fontSize = 18.sp)
-				}
-				Spacer(modifier = Modifier.size(10.dp))
-				Column(modifier = Modifier.weight(1f)) {
-					Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-						Text(text = post.author, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-						if (post.isVerified) {
-							Icon(Icons.Filled.Verified, contentDescription = null, tint = Blue, modifier = Modifier.size(14.dp))
-						}
-					}
-					Text(text = post.time, color = TextSecondary, fontSize = 12.sp)
-				}
-				Icon(Icons.Outlined.MoreVert, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(18.dp))
-			}
+		// Body Header
+		ActivityCardHeader(
+			displayName = displayName,
+			avatarEmoji = avatarEmoji,
+			profileImageUrl = profileImageUrl,
+			activity = activity,
+			onMenuClick = onMenuClick
+		)
 
+		// Event Title & Details
+		Column(
+			modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+			verticalArrangement = Arrangement.spacedBy(8.dp),
+		) {
 			Text(
-				text = post.content,
+				text = activity.previewTitle.ifBlank { activity.text },
 				color = TextPrimary,
-				fontSize = 22.sp,
+				fontSize = 18.sp,
 				fontWeight = FontWeight.Bold,
-				lineHeight = 26.sp,
-				maxLines = 3,
+				lineHeight = 24.sp,
+				maxLines = 2,
 			)
 
-			Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-				val visibilityIcon = when (post.visibility) {
-					PostItem.PostVisibility.PUBLIC -> Icons.Outlined.Public
-					PostItem.PostVisibility.FRIENDS -> Icons.Outlined.Group
-					else -> Icons.Outlined.Lock
+			// Details list
+			Column(
+				verticalArrangement = Arrangement.spacedBy(6.dp)
+			) {
+				Row(
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(8.dp)
+				) {
+					Icon(Icons.Outlined.CalendarMonth, contentDescription = null, tint = Blue, modifier = Modifier.size(16.dp))
+					val dateStr = buildString {
+						append(activity.eventDate.ifBlank { "TBA" })
+						if (activity.eventTime.isNotBlank()) append(" · ${activity.eventTime}")
+					}
+					Text(text = dateStr, color = TextSecondary, fontSize = 13.sp)
 				}
-				val visibilityLabel = when (post.visibility) {
-					PostItem.PostVisibility.PUBLIC -> "Public"
-					PostItem.PostVisibility.FRIENDS -> "Friends"
-					PostItem.PostVisibility.FOLLOWERS -> "Followers"
-					PostItem.PostVisibility.UNIVERSITY -> "University"
-					PostItem.PostVisibility.PRIVATE -> "Only me"
+				Row(
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(8.dp)
+				) {
+					Icon(Icons.Outlined.LocationOn, contentDescription = null, tint = Blue, modifier = Modifier.size(16.dp))
+					Text(text = activity.eventLocation.ifBlank { "TBA" }, color = TextSecondary, fontSize = 13.sp)
 				}
-				InfoLine(icon = { Icon(visibilityIcon, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(15.dp)) }, text = visibilityLabel)
-				if (post.location != null) {
-					InfoLine(icon = { Icon(Icons.Outlined.LocationOn, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(15.dp)) }, text = post.location)
+				Row(
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(8.dp)
+				) {
+					Icon(Icons.Outlined.Group, contentDescription = null, tint = Blue, modifier = Modifier.size(16.dp))
+					Text(text = "${activity.eventInterestedCount} people interested", color = TextSecondary, fontSize = 13.sp)
 				}
 			}
 
-			if (post.hasMedia()) {
-				Box(
-					modifier = Modifier
-						.fillMaxWidth()
-						.height(220.dp)
-						.clip(RoundedCornerShape(18.dp))
-						.background(Color(0xFF111827)),
+			Spacer(modifier = Modifier.height(4.dp))
+
+			// Reaction Row - compact left-aligned
+			Row(
+				modifier = Modifier
+					.fillMaxWidth()
+					.padding(bottom = 4.dp),
+				horizontalArrangement = Arrangement.spacedBy(16.dp),
+				verticalAlignment = Alignment.CenterVertically
+			) {
+				ActivityActionItem(
+					icon = if (activity.currentUserLoved) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+					tint = if (activity.currentUserLoved) Danger else TextSecondary,
+					count = activity.likeCount,
+					onClick = onLikeClick
+				)
+				ActivityActionItem(
+					icon = Icons.Outlined.ChatBubbleOutline,
+					tint = TextSecondary,
+					count = activity.commentCount,
+					onClick = onCommentClick
+				)
+				ActivityActionItem(
+					icon = Icons.AutoMirrored.Outlined.Send,
+					tint = TextSecondary,
+					count = activity.shareCount,
+					onClick = {}
+				)
+			}
+
+			Spacer(modifier = Modifier.height(6.dp))
+
+			// "I'm Interested" Button
+			Button(
+				onClick = onInterestClick,
+				modifier = Modifier.fillMaxWidth(),
+				shape = RoundedCornerShape(14.dp),
+				colors = ButtonDefaults.buttonColors(
+					containerColor = if (activity.currentUserInterested) Card else Blue,
+					contentColor = if (activity.currentUserInterested) TextPrimary else Color.White
+				),
+				border = if (activity.currentUserInterested) BorderStroke(1.dp, Border) else null
+			) {
+				Row(
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(6.dp)
 				) {
-					AsyncImage(
-						model = post.getFirstMediaUri(),
-						contentDescription = post.content,
-						contentScale = ContentScale.Crop,
-						modifier = Modifier.fillMaxSize(),
+					Icon(
+						if (activity.currentUserInterested) Icons.Filled.Stars else Icons.Outlined.Stars,
+						contentDescription = null,
+						modifier = Modifier.size(18.dp)
+					)
+					Text(
+						text = if (activity.currentUserInterested) "Interested" else "I'm Interested",
+						fontWeight = FontWeight.Medium,
+						fontSize = 14.sp
 					)
 				}
 			}
-
-			Row(horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically) {
-				InfoLine(icon = { Icon(Icons.Filled.Favorite, contentDescription = null, tint = Danger, modifier = Modifier.size(15.dp)) }, text = post.likes.toString())
-				InfoLine(icon = { Icon(Icons.Outlined.ChatBubbleOutline, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(15.dp)) }, text = post.comments.toString())
-				InfoLine(icon = { Icon(Icons.Outlined.Share, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(15.dp)) }, text = "Share")
-			}
-
-			Row(
-				modifier = Modifier.fillMaxWidth(),
-				horizontalArrangement = Arrangement.spacedBy(10.dp),
-			) {
-				TimelineActionChip(icon = Icons.Outlined.FavoriteBorder, label = "Like", tint = TextSecondary, modifier = Modifier.weight(1f))
-				TimelineActionChip(icon = Icons.Outlined.ChatBubbleOutline, label = "Comment", tint = TextSecondary, modifier = Modifier.weight(1f))
-				TimelineActionChip(icon = Icons.Outlined.Share, label = "Share", tint = TextSecondary, modifier = Modifier.weight(1f))
-			}
-
-			Button(
-				onClick = { },
-				modifier = Modifier.fillMaxWidth().height(48.dp),
-				shape = RoundedCornerShape(14.dp),
-				colors = ButtonDefaults.buttonColors(containerColor = Blue, contentColor = Color.White),
-			) {
-				Text(text = "I'm Interested", fontWeight = FontWeight.SemiBold)
-			}
+			Spacer(modifier = Modifier.height(8.dp))
 		}
 	}
 }
+
+/* ─────────────────── share_post card ─────────────────── */
+
+@Composable
+fun ActivitySharePostCard(
+	activity: ProfileActivityItem,
+	displayName: String,
+	avatarEmoji: String,
+	profileImageUrl: String,
+	onLikeClick: () -> Unit,
+	onCommentClick: () -> Unit = {},
+	onCardClick: () -> Unit = {},
+	onMenuClick: () -> Unit = {}
+) {
+	Column(
+		modifier = Modifier
+			.fillMaxWidth()
+			.clip(RoundedCornerShape(18.dp))
+			.background(Card)
+			.border(1.dp, Border, RoundedCornerShape(18.dp))
+			.clickable(onClick = onCardClick),
+	) {
+		ActivityCardHeader(
+			displayName = displayName,
+			avatarEmoji = avatarEmoji,
+			profileImageUrl = profileImageUrl,
+			activity = activity,
+			onMenuClick = onMenuClick
+		)
+
+		if (activity.previewTitle.isNotBlank()) {
+			Text(
+				text = activity.previewTitle,
+				color = TextPrimary,
+				fontSize = 15.sp,
+				fontWeight = FontWeight.SemiBold,
+				modifier = Modifier.padding(horizontal = 14.dp),
+			)
+		}
+
+		if (activity.text.isNotBlank()) {
+			Text(
+				text = activity.text,
+				color = TextSecondary,
+				fontSize = 13.sp,
+				maxLines = 3,
+				modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+			)
+		}
+
+		ActivityMediaGallery(
+			mediaUrls = activity.mediaUrls,
+			mediaTypes = activity.mediaTypes,
+			fallbackImageUrl = activity.previewImageUrl,
+			height = 180.dp
+		)
+
+		Row(
+			modifier = Modifier
+				.fillMaxWidth()
+				.padding(horizontal = 14.dp, vertical = 8.dp),
+			horizontalArrangement = Arrangement.spacedBy(16.dp),
+			verticalAlignment = Alignment.CenterVertically,
+		) {
+			ActivityActionItem(
+				icon = if (activity.currentUserLoved) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+				tint = if (activity.currentUserLoved) Danger else TextSecondary,
+				count = activity.likeCount,
+				onClick = onLikeClick
+			)
+			ActivityActionItem(
+				icon = Icons.Outlined.ChatBubbleOutline,
+				tint = TextSecondary,
+				count = activity.commentCount,
+				onClick = onCommentClick
+			)
+			ActivityActionItem(
+				icon = Icons.AutoMirrored.Outlined.Send,
+				tint = TextSecondary,
+				count = activity.shareCount,
+				onClick = {}
+			)
+		}
+		Spacer(modifier = Modifier.height(12.dp))
+	}
+}
+
+/* ─────────────────── create_group card ─────────────────── */
+
+@Composable
+fun ActivityGroupCard(
+	activity: ProfileActivityItem,
+	displayName: String,
+	avatarEmoji: String,
+	profileImageUrl: String,
+	onLikeClick: () -> Unit,
+	onCommentClick: () -> Unit = {},
+	onCardClick: () -> Unit = {},
+	onMenuClick: () -> Unit = {}
+) {
+	Column(
+		modifier = Modifier
+			.fillMaxWidth()
+			.clip(RoundedCornerShape(18.dp))
+			.background(Card)
+			.border(1.dp, Border, RoundedCornerShape(18.dp))
+			.clickable(onClick = onCardClick),
+	) {
+		ActivityCardHeader(
+			displayName = displayName,
+			avatarEmoji = avatarEmoji,
+			profileImageUrl = profileImageUrl,
+			activity = activity,
+			onMenuClick = onMenuClick
+		)
+
+		// Group details panel
+		Row(
+			modifier = Modifier
+				.fillMaxWidth()
+				.padding(horizontal = 14.dp, vertical = 6.dp)
+				.clip(RoundedCornerShape(12.dp))
+				.background(Blue.copy(alpha = 0.08f))
+				.border(1.dp, Blue.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
+				.padding(12.dp),
+			horizontalArrangement = Arrangement.spacedBy(12.dp),
+			verticalAlignment = Alignment.CenterVertically
+		) {
+			Box(
+				modifier = Modifier
+					.size(44.dp)
+					.clip(RoundedCornerShape(10.dp))
+					.background(Blue.copy(alpha = 0.2f)),
+				contentAlignment = Alignment.Center,
+			) {
+				Icon(
+					Icons.Outlined.Group,
+					contentDescription = null,
+					tint = Blue,
+					modifier = Modifier.size(22.dp)
+				)
+			}
+
+			Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+				Text(
+					text = activity.previewTitle.ifBlank { "Untitled Group" },
+					color = TextPrimary,
+					fontSize = 14.sp,
+					fontWeight = FontWeight.Bold,
+					maxLines = 1,
+				)
+				Text(
+					text = activity.previewSubtitle.ifBlank { "Shared from groups" },
+					color = TextSecondary,
+					fontSize = 12.sp,
+					maxLines = 1,
+				)
+			}
+
+			Text(
+				text = "View",
+				color = Blue,
+				fontSize = 12.sp,
+				fontWeight = FontWeight.SemiBold,
+			)
+		}
+
+		if (activity.text.isNotBlank() && activity.text != "Created a group" && !activity.text.startsWith("Created group:")) {
+			Text(
+				text = activity.text,
+				color = TextPrimary,
+				fontSize = 14.sp,
+				fontWeight = FontWeight.Normal,
+				modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+			)
+		}
+
+		Spacer(modifier = Modifier.height(4.dp))
+
+		Row(
+			modifier = Modifier
+				.fillMaxWidth()
+				.padding(horizontal = 14.dp, vertical = 8.dp),
+			horizontalArrangement = Arrangement.spacedBy(16.dp),
+			verticalAlignment = Alignment.CenterVertically,
+		) {
+			ActivityActionItem(
+				icon = if (activity.currentUserLoved) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+				tint = if (activity.currentUserLoved) Danger else TextSecondary,
+				count = activity.likeCount,
+				onClick = onLikeClick
+			)
+			ActivityActionItem(
+				icon = Icons.Outlined.ChatBubbleOutline,
+				tint = TextSecondary,
+				count = activity.commentCount,
+				onClick = onCommentClick
+			)
+			ActivityActionItem(
+				icon = Icons.AutoMirrored.Outlined.Send,
+				tint = TextSecondary,
+				count = activity.shareCount,
+				onClick = {}
+			)
+		}
+		Spacer(modifier = Modifier.height(6.dp))
+	}
+}
+
+/* ─────────────────── share_profile card ─────────────────── */
+
+
+@Composable
+private fun ActivityShareProfileCard(activity: ProfileActivityItem) {
+	Row(
+		modifier = Modifier
+			.fillMaxWidth()
+			.clip(RoundedCornerShape(18.dp))
+			.background(Card)
+			.border(1.dp, Border, RoundedCornerShape(18.dp))
+			.padding(14.dp),
+		horizontalArrangement = Arrangement.spacedBy(12.dp),
+		verticalAlignment = Alignment.CenterVertically,
+	) {
+		Box(
+			modifier = Modifier
+				.size(44.dp)
+				.clip(CircleShape)
+				.background(Blue.copy(alpha = 0.2f)),
+			contentAlignment = Alignment.Center,
+		) {
+			Icon(Icons.Outlined.Share, contentDescription = null, tint = Blue, modifier = Modifier.size(22.dp))
+		}
+
+		Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+			Text(
+				text = activity.previewTitle.ifBlank { "Shared a profile" },
+				color = TextPrimary,
+				fontSize = 14.sp,
+				fontWeight = FontWeight.SemiBold,
+			)
+			Text(
+				text = formatActivityTime(activity.createdAt),
+				color = TextSecondary,
+				fontSize = 12.sp,
+			)
+		}
+	}
+}
+
+/* ─────────────────── utilities ─────────────────── */
 
 private fun formatActivityTime(timestamp: Long): String {
 	if (timestamp <= 0L) return "just now"
 	val minutes = ((System.currentTimeMillis() - timestamp) / 60000L).coerceAtLeast(0L)
 	return when {
-		minutes < 1 -> "just now"
-		minutes < 60 -> "${minutes}m ago"
+		minutes < 1    -> "just now"
+		minutes < 60   -> "${minutes}m ago"
 		minutes < 1440 -> "${minutes / 60}h ago"
-		else -> "${minutes / 1440}d ago"
+		else           -> "${minutes / 1440}d ago"
 	}
 }
 
 @Composable
 private fun InfoLine(icon: @Composable () -> Unit, text: String) {
-	Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+	Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
 		icon()
-		Text(text = text, color = Color(0xFFE5E7EB), fontSize = 14.sp)
+		val textColor = com.example.kampus.ui.theme.KampusColors.TextMuted
+		Text(text = text, color = textColor, fontSize = 13.sp)
 	}
 }
 
@@ -943,6 +1702,42 @@ private fun ErrorSnackBar(message: String, onDismiss: () -> Unit) {
 					.clickable { onDismiss() }
 					.rotate(45f),
 			)
+		}
+	}
+}
+
+@Composable
+private fun MenuItemLarge(
+	icon: ImageVector,
+	label: String,
+	tint: Color,
+	subtitle: String? = null,
+	onClick: () -> Unit = {}
+) {
+	Row(
+		modifier = Modifier
+			.fillMaxWidth()
+			.height(64.dp)
+			.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+			.padding(horizontal = 16.dp),
+		verticalAlignment = Alignment.CenterVertically,
+	) {
+		Box(
+			modifier = Modifier
+				.size(44.dp)
+				.clip(RoundedCornerShape(10.dp))
+				.background(NavBg)
+				.border(1.dp, Border, RoundedCornerShape(10.dp)),
+			contentAlignment = Alignment.Center,
+		) {
+			Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
+		}
+
+		Column(modifier = Modifier.padding(start = 14.dp)) {
+			Text(label, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+			if (!subtitle.isNullOrEmpty()) {
+				Text(subtitle, color = TextSecondary, fontSize = 13.sp)
+			}
 		}
 	}
 }

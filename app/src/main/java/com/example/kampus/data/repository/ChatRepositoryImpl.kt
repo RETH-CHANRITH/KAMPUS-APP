@@ -30,6 +30,13 @@ data class Message(
     val voiceUrl: String = "",
     val voiceDuration: String = "",
     val messageType: String = "message",
+    val storyId: String = "",
+    val storyImage: String = "",
+    val storyCaption: String = "",
+    val storyReplyText: String = "",
+    val storyOwnerId: String = "",
+    val storyOwnerName: String = "",
+    val storyThumbnail: String = "",
     val callType: String = "",
     val callStatus: String = "",
     val timestamp: Long = 0,
@@ -147,6 +154,13 @@ class ChatRepositoryImpl(private val firestore: FirebaseFirestore) {
                             voiceUrl = doc.getString("voiceUrl") ?: "",
                             voiceDuration = doc.getString("voiceDuration") ?: "",
                             messageType = doc.getString("messageType") ?: "message",
+                            storyId = doc.getString("storyId") ?: "",
+                            storyImage = doc.getString("storyImage") ?: doc.getString("storyThumbnail") ?: "",
+                            storyCaption = doc.getString("storyCaption") ?: "",
+                            storyReplyText = doc.getString("storyReplyText") ?: doc.getString("replyText") ?: "",
+                            storyOwnerId = doc.getString("storyOwnerId") ?: "",
+                            storyOwnerName = doc.getString("storyOwnerName") ?: "",
+                            storyThumbnail = doc.getString("storyThumbnail") ?: doc.getString("storyImage") ?: "",
                             callType = doc.getString("callType") ?: "",
                             callStatus = doc.getString("callStatus") ?: "",
                             timestamp = (doc.get("timestamp") as? Number)?.toLong() ?: 0,
@@ -194,6 +208,13 @@ class ChatRepositoryImpl(private val firestore: FirebaseFirestore) {
             "voiceUrl" to message.voiceUrl,
             "voiceDuration" to message.voiceDuration,
             "messageType" to message.messageType,
+            "storyId" to message.storyId,
+            "storyImage" to message.storyImage,
+            "storyCaption" to message.storyCaption,
+            "storyReplyText" to message.storyReplyText,
+            "storyOwnerId" to message.storyOwnerId,
+            "storyOwnerName" to message.storyOwnerName,
+            "storyThumbnail" to message.storyThumbnail,
             "callType" to message.callType,
             "callStatus" to message.callStatus,
             "timestamp" to now,
@@ -231,6 +252,7 @@ class ChatRepositoryImpl(private val firestore: FirebaseFirestore) {
             mapOf(
                 "lastMessage" to when {
                     message.messageType.equals("call_invite", ignoreCase = true) -> "Call"
+                    message.messageType.equals("story_reply", ignoreCase = true) -> message.storyReplyText.ifBlank { message.text.ifBlank { "Story reply" } }
                     message.mediaType.startsWith("image") -> "Photo"
                     message.mediaType.startsWith("video") -> "Video"
                     message.voiceUrl.isNotBlank() || message.voiceDuration.isNotBlank() || message.mediaType.startsWith("audio") -> "Voice message"
@@ -238,11 +260,27 @@ class ChatRepositoryImpl(private val firestore: FirebaseFirestore) {
                     message.text.isNotBlank() -> message.text
                     else -> "Attachment"
                 },
-                "lastMessageType" to if (message.messageType.equals("call_invite", ignoreCase = true)) "call" else "message",
+                "lastMessageType" to when {
+                    message.messageType.equals("call_invite", ignoreCase = true) -> "call"
+                    message.messageType.equals("story_reply", ignoreCase = true) -> "story_reply"
+                    else -> "message"
+                },
                 "lastCallType" to message.callType,
                 "lastCallStatus" to message.callStatus,
                 "lastMessageSenderId" to message.senderId,
-                "lastMessageSenderName" to if (message.senderId == auth.currentUser?.uid) "You" else "",
+                "lastMessageSenderName" to if (message.senderId == auth.currentUser?.uid) {
+                    val cachedName = auth.currentUser?.displayName
+                    if (!cachedName.isNullOrBlank()) {
+                        cachedName
+                    } else {
+                        try {
+                            val doc = firestore.collection("users").document(message.senderId).get().await()
+                            doc.getString("displayName") ?: doc.getString("name") ?: "You"
+                        } catch (e: Exception) {
+                            "You"
+                        }
+                    }
+                } else "",
                 "lastMessageTime" to now,
                 "timestamp" to formatRelativeTime(now),
             )

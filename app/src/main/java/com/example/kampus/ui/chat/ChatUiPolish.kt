@@ -2,7 +2,19 @@ package com.example.kampus.ui.chat
 
 import com.example.kampus.ui.localization.UiStrings
 
-fun chatPreviewText(chat: ChatItem, strings: UiStrings): String {
+fun chatPreviewText(chat: ChatItem, strings: UiStrings, currentUserName: String = ""): String {
+    val sender = chat.lastMessageSenderName.trim()
+    val isGroup = chat.otherUserId.isBlank() || chat.name.contains("group", ignoreCase = true)
+    val prefix = if (chat.isLastMessageFromMe) {
+        if (currentUserName.isNotBlank()) currentUserName else if (sender.equals("You", ignoreCase = true)) strings.you else sender
+    } else {
+        if (sender.isBlank() || sender.equals("You", ignoreCase = true)) {
+            if (isGroup) "" else chat.name
+        } else {
+            sender
+        }
+    }
+
     if (chat.lastMessageType.equals("call", ignoreCase = true)) {
         val callKind = when {
             chat.lastCallType.equals("video", ignoreCase = true) -> "Video"
@@ -16,8 +28,7 @@ fun chatPreviewText(chat: ChatItem, strings: UiStrings): String {
             chat.lastCallStatus.equals("accepted", ignoreCase = true) -> "Live"
             else -> "Ringing"
         }
-        val sender = chat.lastMessageSenderName.trim()
-        val who = if (sender.equals("You", ignoreCase = true)) strings.you else sender
+        val who = prefix
         return when {
             who.isBlank() -> "$callKind call · $callState"
             callState == "Live" -> "$who started a $callKind call"
@@ -25,7 +36,6 @@ fun chatPreviewText(chat: ChatItem, strings: UiStrings): String {
         }
     }
 
-    val sender = chat.lastMessageSenderName.trim()
-    val prefix = if (sender.equals("You", ignoreCase = true)) strings.you else sender
     return if (prefix.isBlank()) chat.lastMessage else "$prefix: ${chat.lastMessage}"
 }
+

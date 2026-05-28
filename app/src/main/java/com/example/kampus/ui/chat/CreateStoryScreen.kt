@@ -61,6 +61,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -240,23 +241,30 @@ private fun NotesComposerScreen(
     var profileImageUrl by remember { mutableStateOf("") }
     var avatarEmoji by remember { mutableStateOf("👤") }
     var noteText by remember { mutableStateOf("") }
-    var selectedMood by remember { mutableStateOf("😊") }
+    var selectedMood by remember { mutableStateOf<String?>(null) }
     var isSharing by remember { mutableStateOf(false) }
     var shareError by remember { mutableStateOf<String?>(null) }
     val coroutineScope = rememberCoroutineScope()
 
-    LaunchedEffect(auth.currentUser?.uid) {
-        val userId = auth.currentUser?.uid ?: return@LaunchedEffect
-        runCatching {
-            firestore.collection("users").document(userId).get().await()
-        }.onSuccess { doc ->
-            displayName = doc.getString("displayName").orEmpty().ifBlank {
-                auth.currentUser?.displayName.orEmpty().ifBlank { "You" }
-            }
-            profileImageUrl = doc.getString("profileImageUrl").orEmpty().ifBlank {
-                auth.currentUser?.photoUrl?.toString().orEmpty()
-            }
-            avatarEmoji = doc.getString("avatarEmoji").orEmpty().ifBlank { "👤" }
+    DisposableEffect(auth.currentUser?.uid) {
+        val userId = auth.currentUser?.uid
+        var listener: com.google.firebase.firestore.ListenerRegistration? = null
+        if (userId != null) {
+            listener = firestore.collection("users").document(userId)
+                .addSnapshotListener { snapshot, error ->
+                    if (error == null && snapshot != null && snapshot.exists()) {
+                        displayName = snapshot.getString("displayName").orEmpty().ifBlank {
+                            auth.currentUser?.displayName.orEmpty().ifBlank { "You" }
+                        }
+                        profileImageUrl = snapshot.getString("profileImageUrl").orEmpty().ifBlank {
+                            auth.currentUser?.photoUrl?.toString().orEmpty()
+                        }
+                        avatarEmoji = snapshot.getString("avatarEmoji").orEmpty().ifBlank { "👤" }
+                    }
+                }
+        }
+        onDispose {
+            listener?.remove()
         }
     }
 
@@ -294,8 +302,9 @@ private fun NotesComposerScreen(
                         isSharing = true
                         shareError = null
                         coroutineScope.launch {
+                            val moodPrefix = selectedMood?.takeIf { it.isNotBlank() }?.let { "$it " }.orEmpty()
                             val result = viewModel.createStory(
-                                note = "${selectedMood} $cleanNote".trim(),
+                                note = "$moodPrefix$cleanNote",
                                 privacy = "friends",
                                 storyType = "note",
                             )
@@ -404,25 +413,14 @@ private fun NotesComposerScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    listOf(
-                        Pair("🎂", "Birthday today"),
-                        Pair("🙂", ""),
-                        Pair("🥰", ""),
-                        Pair("🥺", ""),
-                    ).forEach { mood ->
-                        if (mood.second.isBlank()) {
-                            NoteMoodButton(
-                                emoji = mood.first,
-                                selected = selectedMood == mood.first,
-                                onClick = { selectedMood = mood.first },
-                            )
-                        } else {
-                            NoteMoodCard(
-                                emoji = mood.first,
-                                title = "Mèy 🎂",
-                                subtitle = mood.second,
-                            )
-                        }
+                    listOf("🎂", "🙂", "🥰", "🥺", "😊", "🥳", "🤔").forEach { mood ->
+                        NoteMoodButton(
+                            emoji = mood,
+                            selected = selectedMood == mood,
+                            onClick = {
+                                selectedMood = if (selectedMood == mood) null else mood
+                            },
+                        )
                     }
                 }
 

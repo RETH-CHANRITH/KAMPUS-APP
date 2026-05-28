@@ -1,3 +1,5 @@
+@file:Suppress("UNUSED_PARAMETER", "UNUSED_VARIABLE", "NAME_SHADOWING")
+
 package com.example.kampus.ui.chat
 
 import androidx.compose.animation.AnimatedVisibility
@@ -74,6 +76,8 @@ private val waveHeights = listOf(
 @Composable
 fun MessageBubble(
     message: Message,
+    selfName: String = "",
+    contactName: String = "",
     modifier: Modifier = Modifier,
     onLongPress: (() -> Unit)? = null,
     onReact: ((remoteMessageId: String, emoji: String) -> Unit)? = null,
@@ -107,6 +111,20 @@ fun MessageBubble(
             ),
         horizontalArrangement = if (message.isSentByMe) Arrangement.End else Arrangement.Start,
     ) {
+        Column(
+            horizontalAlignment = if (message.isSentByMe) Alignment.End else Alignment.Start,
+        ) {
+            val displayName = if (message.isSentByMe) selfName.ifBlank { "You" } else contactName
+            if (displayName.isNotBlank()) {
+                Text(
+                    text = displayName,
+                    color = if (message.isSentByMe) ThemeController.accent.color.copy(alpha = 0.85f) else TimestampColor,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(bottom = 3.dp, start = 4.dp, end = 4.dp)
+                )
+            }
+
             AnimatedVisibility(
                 visible = true,
                 enter = bubbleEnter,
@@ -118,14 +136,18 @@ fun MessageBubble(
                     TextBubble(message, onLongPress = onLongPress, onReact = onReact)
                 }
             }
+        }
     }
 }
 
 // ─── Message group with avatar ────────────────────────────────────────────────
+@Suppress("UNUSED_PARAMETER")
 @Composable
 fun MessageGroupWithAvatar(
     message: Message,
     isLastInGroup: Boolean = true,
+    selfName: String = "",
+    contactName: String = "",
     contactProfileImageUrl: String = "",
     contactAvatarEmoji: String = "",
     selfProfileImageUrl: String = "",
@@ -161,7 +183,14 @@ fun MessageGroupWithAvatar(
         verticalAlignment = Alignment.Bottom,
     ) {
         if (message.isSentByMe) {
-            MessageBubble(message = message, modifier = Modifier.weight(1f, fill = false), onLongPress = onLongPress, onReact = onReact)
+            MessageBubble(
+                message = message,
+                selfName = selfName,
+                contactName = contactName,
+                modifier = Modifier.weight(1f, fill = false),
+                onLongPress = onLongPress,
+                onReact = onReact
+            )
             Spacer(modifier = Modifier.width(8.dp))
             if (showAvatar) {
                 MessageAvatar(
@@ -183,7 +212,14 @@ fun MessageGroupWithAvatar(
                 Spacer(modifier = avatarModifier)
             }
             Spacer(modifier = Modifier.width(8.dp))
-            MessageBubble(message = message, modifier = Modifier.weight(1f, fill = false), onLongPress = onLongPress, onReact = onReact)
+            MessageBubble(
+                message = message,
+                selfName = selfName,
+                contactName = contactName,
+                modifier = Modifier.weight(1f, fill = false),
+                onLongPress = onLongPress,
+                onReact = onReact
+            )
         }
     }
 }
@@ -219,6 +255,10 @@ private fun TextBubble(message: Message, onLongPress: (() -> Unit)? = null, onRe
                 .padding(horizontal = 13.dp, vertical = 9.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (message.isStoryReply || message.storyId.isNotBlank()) {
+                    StoryReplyPreview(message = message)
+                }
+
                 if (shouldShowAttachment) {
                     AttachmentPreview(message = message)
                 }
@@ -245,7 +285,6 @@ private fun TextBubble(message: Message, onLongPress: (() -> Unit)? = null, onRe
         }
 
         // Show all persisted reactions as tappable chips (emoji + count). Highlight if current user reacted.
-        if (message.reactions.isNotEmpty()) {
             Spacer(Modifier.height(6.dp))
             val currentUserId = FirebaseAuth.getInstance().currentUser?.uid
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -266,7 +305,6 @@ private fun TextBubble(message: Message, onLongPress: (() -> Unit)? = null, onRe
                     }
                 }
             }
-        }
 
         Spacer(Modifier.height(3.dp))
         Row(
@@ -291,6 +329,61 @@ private fun TextBubble(message: Message, onLongPress: (() -> Unit)? = null, onRe
                         message.deliveryState == MessageDeliveryState.Delivered && message.isRead -> MessageDeliveryState.Seen
                         else -> message.deliveryState
                     }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StoryReplyPreview(message: Message) {
+    val previewUrl = message.storyImage.ifBlank { message.storyThumbnail }
+    val previewCaption = message.storyCaption.ifBlank { "Story" }
+    val replyText = message.storyReplyText.ifBlank { message.text }
+    val previewBackground = if (message.isSentByMe) Color.White.copy(alpha = 0.10f) else Color.Black.copy(alpha = 0.06f)
+    val previewTextColor = if (message.isSentByMe) Color.White else if (UiIsDark) Color.White else Color(0xFF111827)
+    val previewSubtextColor = if (message.isSentByMe) Color.White.copy(alpha = 0.78f) else if (UiIsDark) Color.White.copy(alpha = 0.78f) else Color(0xFF4B5563)
+
+    Surface(
+        color = previewBackground,
+        shape = RoundedCornerShape(16.dp),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (message.isSentByMe) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.08f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (previewUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = previewUrl,
+                            contentDescription = "Story preview",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                        )
+                    } else {
+                        Icon(Icons.Filled.Image, contentDescription = null, tint = previewTextColor)
+                    }
+                }
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Story reply", color = previewTextColor, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(previewCaption, color = previewSubtextColor, fontSize = 12.sp, maxLines = 2)
+                }
+            }
+
+            if (replyText.isNotBlank()) {
+                Text(
+                    text = replyText,
+                    color = previewTextColor,
+                    fontSize = 15.sp,
+                    lineHeight = 20.sp,
                 )
             }
         }
@@ -373,7 +466,7 @@ private fun ReactionPicker(
 
 @Composable
 private fun AttachmentPreview(message: Message) {
-    val context = LocalContext.current
+    val attachmentContext = LocalContext.current
     val mediaType = if (message.mediaType.isBlank() && message.text == "Photo") "image" else message.mediaType.lowercase()
     val previewShape = RoundedCornerShape(14.dp)
     val previewBackground = if (message.isSentByMe) Color.White.copy(alpha = 0.10f) else Color.Black.copy(alpha = 0.06f)
@@ -410,7 +503,7 @@ private fun AttachmentPreview(message: Message) {
                         contentAlignment = Alignment.Center,
                     ) {
                         AsyncImage(
-                            model = ImageRequest.Builder(context)
+                            model = ImageRequest.Builder(attachmentContext)
                                 .data(message.mediaUrl)
                                 .crossfade(true)
                                 .build(),
@@ -439,9 +532,9 @@ private fun AttachmentPreview(message: Message) {
                             val intent = Intent(Intent.ACTION_VIEW)
                             intent.setDataAndType(Uri.parse(message.mediaUrl), "video/*")
                             intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                            context.startActivity(intent)
+                            attachmentContext.startActivity(intent)
                         } catch (e: Exception) {
-                            try { android.widget.Toast.makeText(context, "Unable to open video", android.widget.Toast.LENGTH_SHORT).show() } catch (_: Exception) {}
+                            try { android.widget.Toast.makeText(attachmentContext, "Unable to open video", android.widget.Toast.LENGTH_SHORT).show() } catch (_: Exception) {}
                         }
                     },
             ) {
@@ -552,7 +645,7 @@ private fun AttachmentPreview(message: Message) {
 // ─── Professional photo display with floating share button ──────────────────
 @Composable
 private fun ProfessionalPhotoDisplay(message: Message) {
-    val context = LocalContext.current
+    val photoContext = LocalContext.current
     val imageModel = remember(message.mediaUrl) {
         val url = message.mediaUrl.trim()
         when {
@@ -578,7 +671,7 @@ private fun ProfessionalPhotoDisplay(message: Message) {
             ) {
                 if (message.mediaUrl.isNotBlank()) {
                     AsyncImage(
-                        model = ImageRequest.Builder(context)
+                        model = ImageRequest.Builder(photoContext)
                             .data(imageModel)
                             .crossfade(true)
                             .build(),
@@ -595,7 +688,7 @@ private fun ProfessionalPhotoDisplay(message: Message) {
                     )
                 } else {
                     // Placeholder when URL missing — looks clean and offers retry affordance
-                    val context = LocalContext.current
+                    val placeholderContext = photoContext
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -625,7 +718,7 @@ private fun ProfessionalPhotoDisplay(message: Message) {
                             modifier = Modifier
                                 .clickable {
                                     try {
-                                        android.widget.Toast.makeText(context, "No image URL to load", android.widget.Toast.LENGTH_SHORT).show()
+                                        android.widget.Toast.makeText(placeholderContext, "No image URL to load", android.widget.Toast.LENGTH_SHORT).show()
                                     } catch (_: Exception) {}
                                 }
                         )
@@ -639,7 +732,7 @@ private fun ProfessionalPhotoDisplay(message: Message) {
 // ─── Voice bubble ─────────────────────────────────────────────────────────────
 @Composable
 private fun VoiceBubble(message: Message) {
-    val context = LocalContext.current
+    val voiceContext = LocalContext.current
     val scope = rememberCoroutineScope()
     val playbackSource = remember(message.voiceUrl, message.mediaUrl) {
         message.voiceUrl.ifBlank { message.mediaUrl }
@@ -754,8 +847,8 @@ private fun VoiceBubble(message: Message) {
                                         mediaPlayer = null
                                     }
 
-                                    player.setOnErrorListener { mp, what, extra ->
-                                        android.util.Log.e("VoicePlayback", "❌ Playback error: what=$what extra=$extra")
+                                    player.setOnErrorListener { mp, _, _ ->
+                                        android.util.Log.e("VoicePlayback", "❌ Playback error")
                                         playing = false
                                         preparing = false
                                         try { mp.release() } catch (_: Exception) {}
@@ -773,7 +866,7 @@ private fun VoiceBubble(message: Message) {
                                                     if (message.mediaUrl.isNotBlank() && message.mediaUrl.startsWith("http")) {
                                                         player.setDataSource(message.mediaUrl)
                                                     } else {
-                                                        android.widget.Toast.makeText(context, "Voice file is no longer available", android.widget.Toast.LENGTH_SHORT).show()
+                                                        android.widget.Toast.makeText(voiceContext, "Voice file is no longer available", android.widget.Toast.LENGTH_SHORT).show()
                                                         try { player.release() } catch (_: Exception) {}
                                                         return@clickable
                                                     }
@@ -790,7 +883,7 @@ private fun VoiceBubble(message: Message) {
                                                     if (message.mediaUrl.isNotBlank() && message.mediaUrl.startsWith("http")) {
                                                         player.setDataSource(message.mediaUrl)
                                                     } else {
-                                                        android.widget.Toast.makeText(context, "Voice file is no longer available", android.widget.Toast.LENGTH_SHORT).show()
+                                                        android.widget.Toast.makeText(voiceContext, "Voice file is no longer available", android.widget.Toast.LENGTH_SHORT).show()
                                                         try { player.release() } catch (_: Exception) {}
                                                         return@clickable
                                                     }
@@ -807,7 +900,7 @@ private fun VoiceBubble(message: Message) {
                                         if (playbackSource.startsWith("http")) {
                                             scope.launch(Dispatchers.IO) {
                                                 try {
-                                                    val cacheFile = java.io.File(context.cacheDir, "voice_${message.remoteMessageId}_${message.timestampMillis}.m4a")
+                                                    val cacheFile = java.io.File(voiceContext.cacheDir, "voice_${message.remoteMessageId}_${message.timestampMillis}.m4a")
                                                     if (!cacheFile.exists()) {
                                                         android.util.Log.d("VoicePlayback", "📥 Downloading to cache (bg): ${cacheFile.absolutePath}")
                                                         java.net.URL(playbackSource).openStream().use { input ->
@@ -828,7 +921,7 @@ private fun VoiceBubble(message: Message) {
                                                             cachePlayer.setOnPreparedListener { mp -> try { mp.start(); playing = true } catch (_: Exception) {} }
                                                             cachePlayer.setOnPreparedListener { mp -> try { mp.start(); playing = true; preparing = false } catch (_: Exception) { preparing = false } }
                                                             cachePlayer.setOnCompletionListener { mp -> try { mp.release() } catch (_: Exception) {}; mediaPlayer = null; playing = false; preparing = false }
-                                                            cachePlayer.setOnErrorListener { mp, what, extra -> try { mp.release() } catch (_: Exception) {}; mediaPlayer = null; playing = false; preparing = false; true }
+                                                            cachePlayer.setOnErrorListener { mp, _, _ -> try { mp.release() } catch (_: Exception) {}; mediaPlayer = null; playing = false; preparing = false; true }
                                                             cachePlayer.setDataSource(cacheFile.absolutePath)
                                                             mediaPlayer = cachePlayer
                                                             cachePlayer.prepareAsync()
@@ -999,7 +1092,7 @@ private fun DeliveryStatusChip(deliveryState: MessageDeliveryState) {
 // ─── Live Location Display with Map Preview and Timer ──────────────────────
 @Composable
 private fun LiveLocationDisplay(message: Message) {
-    val context = LocalContext.current
+    val locationContext = LocalContext.current
     val durationSeconds = message.locationRemainingSeconds.coerceAtLeast(0L)
     var tick by remember(message.timestampMillis, durationSeconds) { mutableStateOf(System.currentTimeMillis()) }
 
@@ -1038,7 +1131,7 @@ private fun LiveLocationDisplay(message: Message) {
                 .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
                 .clickable {
                     openLocationInMaps(
-                        context = context,
+                        context = locationContext,
                         latitude = message.locationLatitude,
                         longitude = message.locationLongitude,
                         label = message.mediaName.ifBlank { "Shared location" },
@@ -1137,7 +1230,7 @@ private fun StaticLocationDisplay(
     attachmentSubtextColor: androidx.compose.ui.graphics.Color,
     attachmentIconTint: androidx.compose.ui.graphics.Color
 ) {
-    val context = LocalContext.current
+    val staticLocationContext = LocalContext.current
     val previewShape = RoundedCornerShape(14.dp)
     val previewBackground = if (message.isSentByMe) Color.White.copy(alpha = 0.10f) else Color.Black.copy(alpha = 0.06f)
     
@@ -1150,7 +1243,7 @@ private fun StaticLocationDisplay(
             .fillMaxWidth()
             .clickable {
                 openLocationInMaps(
-                    context = context,
+                    context = staticLocationContext,
                     latitude = message.locationLatitude,
                     longitude = message.locationLongitude,
                     label = message.mediaName.ifBlank { "Shared location" },

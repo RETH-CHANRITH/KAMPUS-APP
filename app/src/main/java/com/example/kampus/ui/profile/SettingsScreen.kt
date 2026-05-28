@@ -58,6 +58,8 @@ import androidx.compose.ui.graphics.painter.ColorPainter
 import coil.request.ImageRequest
 import com.example.kampus.ui.localization.rememberUiStrings
 import com.example.kampus.ui.theme.ThemeController
+import com.example.kampus.ui.theme.AppAccent
+import com.example.kampus.ui.theme.AppSettingsStore
 
 private val UiIsDark get() = ThemeController.isDark
 private val SBg get() = if (UiIsDark) Color(0xFF1A1D2E) else Color(0xFFF3F4F8)
@@ -93,17 +95,20 @@ fun SettingsScreen(
     val state = viewModel.uiState.collectAsStateWithLifecycle().value
     val strings = rememberUiStrings()
     var showLogoutDialog by remember { mutableStateOf(false) }
+    val accent = ThemeController.accent.color
+    val accentSoft = accent.copy(alpha = if (ThemeController.isDark) 0.18f else 0.12f)
+    val accentSoftBg = accent.copy(alpha = if (ThemeController.isDark) 0.10f else 0.08f)
 
     val menuItems = listOf(
-        SettingsMenuItem(strings.editProfile, Icons.Outlined.Person, Color(0xFF0D7FFF).copy(alpha = 0.13f), onClick = onEditProfile),
-        SettingsMenuItem(strings.notifications, Icons.Outlined.Notifications, Color(0xFFFF4D6D).copy(alpha = 0.13f), onClick = onOpenNotificationSettings),
-        SettingsMenuItem(strings.privacyAndSecurity, Icons.Outlined.Shield, Color(0xFF00C853).copy(alpha = 0.13f), onClick = onOpenPrivacySecurity),
-        SettingsMenuItem(strings.account, Icons.Outlined.Edit, Color(0xFFFFB000).copy(alpha = 0.13f), onClick = onOpenAccountSettings),
-        SettingsMenuItem(strings.appearance, Icons.Outlined.Palette, Color(0xFF9C27B0).copy(alpha = 0.13f), onClick = onOpenAppearance),
-        SettingsMenuItem(strings.languageAndRegion, Icons.Outlined.Language, Color(0xFF00BCD4).copy(alpha = 0.13f), onClick = onOpenLanguageRegion),
-        SettingsMenuItem(strings.blockedUsers, Icons.Outlined.VisibilityOff, Color(0xFFF44336).copy(alpha = 0.13f), onClick = onOpenBlockedUsers),
-        SettingsMenuItem(strings.helpAndSupport, Icons.AutoMirrored.Outlined.HelpOutline, Color(0xFF4CAF50).copy(alpha = 0.13f), onClick = onOpenHelpSupport),
-        SettingsMenuItem(strings.about, Icons.AutoMirrored.Outlined.HelpOutline, Color(0xFF607D8B).copy(alpha = 0.13f), onClick = onOpenAbout),
+        SettingsMenuItem(strings.editProfile, Icons.Outlined.Person, accentSoftBg, onClick = onEditProfile),
+        SettingsMenuItem(strings.notifications, Icons.Outlined.Notifications, accent.copy(alpha = 0.10f), onClick = onOpenNotificationSettings),
+        SettingsMenuItem(strings.privacyAndSecurity, Icons.Outlined.Shield, accent.copy(alpha = 0.08f), onClick = onOpenPrivacySecurity),
+        SettingsMenuItem(strings.account, Icons.Outlined.Edit, accent.copy(alpha = 0.12f), onClick = onOpenAccountSettings),
+        SettingsMenuItem(strings.appearance, Icons.Outlined.Palette, accentSoftBg, onClick = onOpenAppearance),
+        SettingsMenuItem(strings.languageAndRegion, Icons.Outlined.Language, accent.copy(alpha = 0.09f), onClick = onOpenLanguageRegion),
+        SettingsMenuItem(strings.blockedUsers, Icons.Outlined.VisibilityOff, accent.copy(alpha = 0.10f), onClick = onOpenBlockedUsers),
+        SettingsMenuItem(strings.helpAndSupport, Icons.AutoMirrored.Outlined.HelpOutline, accent.copy(alpha = 0.08f), onClick = onOpenHelpSupport),
+        SettingsMenuItem(strings.about, Icons.AutoMirrored.Outlined.HelpOutline, accent.copy(alpha = 0.07f), onClick = onOpenAbout),
     )
 
     Surface(color = SBg) {
@@ -132,6 +137,8 @@ fun SettingsScreen(
                     handle = state.handle,
                     profileImageUrl = state.profileImageUrl,
                     avatarEmoji = state.avatarEmoji,
+                    accent = accent,
+                    accentSoft = accentSoft,
                 )
             }
 
@@ -229,6 +236,8 @@ private fun ProfileHeader(
     handle: String,
     profileImageUrl: String,
     avatarEmoji: String,
+    accent: Color,
+    accentSoft: Color,
 ) {
     val resolvedName = displayName.ifBlank { "User" }
     val resolvedHandle = if (handle.isNotBlank()) handle else "@${resolvedName.lowercase().replace(" ", "")}"
@@ -238,7 +247,7 @@ private fun ProfileHeader(
             .fillMaxWidth()
             .height(112.dp)
             .clip(RoundedCornerShape(16.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFF0D7FFF), Color(0xFF0A5FD4))))
+            .background(Brush.linearGradient(listOf(accent.copy(alpha = 0.98f), accent.copy(alpha = 0.78f))))
             .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.Center,
     ) {
@@ -247,8 +256,8 @@ private fun ProfileHeader(
                 modifier = Modifier
                     .size(64.dp)
                     .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.2f))
-                    .border(2.dp, Color.White, CircleShape),
+                    .background(accentSoft)
+                    .border(2.dp, Color.White.copy(alpha = if (UiIsDark) 0.95f else 0.8f), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 if (profileImageUrl.isNotBlank()) {

@@ -113,6 +113,9 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
 
+    // WorkManager for background uploads and retries
+    implementation("androidx.work:work-runtime-ktx:2.8.1")
+
     // WebRTC (native) - Maven Central hosted fork that keeps org.webrtc packages
     implementation("io.github.webrtc-sdk:android:125.6422.07")
 

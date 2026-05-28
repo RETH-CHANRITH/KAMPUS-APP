@@ -41,6 +41,7 @@ data class ChatListUiState(
     val stories: List<ChatStory> = emptyList(),
     val currentUserProfileImageUrl: String = "",
     val currentUserAvatarEmoji: String = "👤",
+    val currentUserName: String = "",
 )
 
 data class ChatUiState(
@@ -91,6 +92,8 @@ class ChatViewModel : ViewModel() {
     private var chatTypingListener: ListenerRegistration? = null
     private var previewMessagesJob: Job? = null
     private var messagesJob: Job? = null
+    private val _targetMessageId = MutableStateFlow<String?>(null)
+    val targetMessageId = _targetMessageId.asStateFlow()
     private var typingDebounceJob: Job? = null
     private var selfTypingActive: Boolean = false
     private var chatLoadJob: Job? = null
@@ -275,6 +278,14 @@ class ChatViewModel : ViewModel() {
                                 mediaType = msg.mediaType,
                                 voiceUrl = msg.voiceUrl,
                                 voiceDuration = msg.voiceDuration,
+                                storyId = msg.storyId,
+                                storyImage = msg.storyImage,
+                                storyCaption = msg.storyCaption,
+                                storyReplyText = msg.storyReplyText.ifBlank { msg.text },
+                                storyOwnerId = msg.storyOwnerId,
+                                storyOwnerName = msg.storyOwnerName,
+                                storyThumbnail = msg.storyThumbnail,
+                                isStoryReply = msg.messageType.equals("story_reply", ignoreCase = true),
                                 timestamp = formatTimestamp(msg.timestamp),
                                 timestampMillis = msg.timestamp,
                                 isSentByMe = msg.senderId == currentUserId,
@@ -303,6 +314,21 @@ class ChatViewModel : ViewModel() {
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Open a chat and focus a specific message id once messages are loaded.
+     */
+    fun openChatAndFocusMessage(chatId: String, messageId: String) {
+        viewModelScope.launch {
+            openChat(chatId)
+            // Delay a bit to allow messages job to start and load
+            delay(300)
+            _targetMessageId.value = messageId
+            // Clear it after a short time so it can be re-used
+            delay(5000)
+            _targetMessageId.value = null
         }
     }
 
@@ -366,19 +392,37 @@ class ChatViewModel : ViewModel() {
         storyType: String = "note",
     ): Result<String> = runCatching {
         val userId = auth.currentUser?.uid ?: throw IllegalStateException("User not signed in")
+        val now = System.currentTimeMillis()
+        val expiresAt = now + 86_400_000L
+        val userDoc = FirebaseFirestore.getInstance()
+            .collection("users")
+            .document(userId)
+            .get()
+            .await()
+
         val storyData = mutableMapOf<String, Any>(
+            "ownerId" to userId,
             "userId" to userId,
             "note" to note,
+            "ownerName" to (userDoc.getString("displayName")?.ifBlank { null }
+                ?: auth.currentUser?.displayName?.ifBlank { null }
+                ?: auth.currentUser?.email?.substringBefore("@")
+                ?: "User"),
+            "ownerAvatarEmoji" to (userDoc.getString("avatarEmoji")?.ifBlank { null } ?: "👤"),
+            "ownerProfileImageUrl" to (userDoc.getString("profileImageUrl")?.ifBlank { null } ?: ""),
+            "ownerAvatarColor" to ((userDoc.get("avatarColor") as? Number)?.toLong() ?: 0xFF3B82F6),
             "overlayText" to overlayText,
             "overlayX" to overlayX,
             "overlayY" to overlayY,
             "overlayColor" to overlayColor,
             "privacy" to privacy,
             "storyType" to storyType,
-            "createdAt" to System.currentTimeMillis(),
+            "createdAt" to now,
+            "expiresAt" to expiresAt,
         )
         if (!imageUri.isNullOrBlank()) {
             storyData["imageUri"] = imageUri
+            storyData["imageUrl"] = imageUri
         }
         FirebaseFirestore.getInstance()
             .collection("stories")
@@ -410,6 +454,49 @@ class ChatViewModel : ViewModel() {
             )
             .await()
         Unit
+    }
+
+    suspend fun createStoryReply(story: ChatStory, replyText: String): Result<String> = runCatching {
+        val senderId = auth.currentUser?.uid ?: throw IllegalStateException("User not signed in")
+        val trimmedReply = replyText.trim()
+        if (trimmedReply.isBlank()) {
+            throw IllegalArgumentException("Reply cannot be blank")
+        }
+        if (story.id.isBlank() || story.ownerId.isBlank()) {
+            throw IllegalArgumentException("Story context is missing")
+        }
+
+        val replyId = FirebaseFirestore.getInstance().collection("storyReplies").document().id
+        val userDoc = FirebaseFirestore.getInstance()
+            .collection("users")
+            .document(senderId)
+            .get()
+            .await()
+
+        val payload = mapOf(
+            "senderId" to senderId,
+            "receiverId" to story.ownerId,
+            "storyOwnerId" to story.ownerId,
+            "storyId" to story.id,
+            "storyImage" to story.imageUrl,
+            "storyThumbnail" to story.imageUrl,
+            "storyCaption" to story.note,
+            "message" to trimmedReply,
+            "replyText" to trimmedReply,
+            "mediaPreview" to story.imageUrl,
+            "storyOwnerName" to story.ownerName,
+            "senderName" to (userDoc.getString("displayName") ?: auth.currentUser?.displayName ?: "You"),
+            "createdAt" to System.currentTimeMillis(),
+            "replyId" to replyId,
+        )
+
+        FirebaseFirestore.getInstance()
+            .collection("storyReplies")
+            .document(replyId)
+            .set(payload)
+            .await()
+
+        replyId
     }
 
     fun onInputChange(text: String) {
@@ -857,9 +944,14 @@ class ChatViewModel : ViewModel() {
 
     fun startOutgoingCall(chatId: String, callType: String, onReady: (String) -> Unit) {
         val userId = auth.currentUser?.uid ?: return
+        android.util.Log.d("ChatViewModel", "startOutgoingCall initiated: chatId=$chatId, callType=$callType, callerId=$userId")
         viewModelScope.launch {
             val calleeId = resolveOtherUserId(chatId)
-            if (calleeId.isBlank()) return@launch
+            android.util.Log.d("ChatViewModel", "startOutgoingCall: resolved calleeId=$calleeId")
+            if (calleeId.isBlank()) {
+                android.util.Log.e("ChatViewModel", "startOutgoingCall: resolved calleeId is blank! Returning early.")
+                return@launch
+            }
             val callDoc = FirebaseFirestore.getInstance()
                 .collection("chats")
                 .document(chatId)
@@ -874,9 +966,12 @@ class ChatViewModel : ViewModel() {
                 "startedAt" to System.currentTimeMillis(),
             )
             runCatching {
+                android.util.Log.d("ChatViewModel", "startOutgoingCall: writing call doc at chats/$chatId/calls/${callDoc.id}")
                 callDoc.set(payload).await()
+                android.util.Log.d("ChatViewModel", "startOutgoingCall: call doc written successfully")
 
-                chatRepository.sendMessage(
+                android.util.Log.d("ChatViewModel", "startOutgoingCall: sending call invite message...")
+                val sendMsgResult = chatRepository.sendMessage(
                     chatId,
                     RepositoryMessage(
                         remoteMessageId = callDoc.id,
@@ -889,7 +984,9 @@ class ChatViewModel : ViewModel() {
                         isRead = false,
                     ),
                 )
+                android.util.Log.d("ChatViewModel", "startOutgoingCall: send invite message completed. Success=${sendMsgResult.isSuccess}")
 
+                android.util.Log.d("ChatViewModel", "startOutgoingCall: writing incomingCall doc for callee=$calleeId")
                 FirebaseFirestore.getInstance()
                     .collection("users")
                     .document(calleeId)
@@ -908,6 +1005,7 @@ class ChatViewModel : ViewModel() {
                         ),
                     )
                     .await()
+                android.util.Log.d("ChatViewModel", "startOutgoingCall: incomingCall doc written successfully")
 
                 runCatching {
                     NotificationLogger.notifyUser(
@@ -918,7 +1016,10 @@ class ChatViewModel : ViewModel() {
                         targetId = callDoc.id,
                     )
                 }
+                android.util.Log.d("ChatViewModel", "startOutgoingCall: calling onReady for callId=${callDoc.id}")
                 onReady(callDoc.id)
+            }.onFailure { e ->
+                android.util.Log.e("ChatViewModel", "startOutgoingCall error during execution: ", e)
             }
         }
     }
@@ -1322,6 +1423,7 @@ class ChatViewModel : ViewModel() {
             it.copy(
                 currentUserProfileImageUrl = user.photoUrl?.toString().orEmpty(),
                 currentUserAvatarEmoji = fallbackEmoji,
+                currentUserName = user.displayName.orEmpty(),
             )
         }
 
@@ -1337,6 +1439,7 @@ class ChatViewModel : ViewModel() {
                     state.copy(
                         currentUserProfileImageUrl = doc.getString("profileImageUrl") ?: state.currentUserProfileImageUrl,
                         currentUserAvatarEmoji = doc.getString("avatarEmoji") ?: state.currentUserAvatarEmoji,
+                        currentUserName = doc.getString("displayName") ?: doc.getString("name") ?: state.currentUserName,
                     )
                 }
             }

@@ -112,6 +112,7 @@ fun ChatScreen(
     chatViewModel : ChatViewModel = viewModel(),
 ) {
     LaunchedEffect(chatId) { chatViewModel.openChat(chatId) }
+    val targetMessageId by chatViewModel.targetMessageId.collectAsState()
     val state        by chatViewModel.chatState.collectAsStateWithLifecycle()
     val chatListState by chatViewModel.chatListState.collectAsStateWithLifecycle()
     val listState    = rememberLazyListState()
@@ -129,7 +130,6 @@ fun ChatScreen(
         }
     }
     var shouldAutoScroll by remember { mutableStateOf(true) }
-    var hasScrolledToBottomOnOpen by remember { mutableStateOf(false) }
     var actionMessage by remember { mutableStateOf<Message?>(null) }
     var editTargetMessage by remember { mutableStateOf<Message?>(null) }
     var editText by remember { mutableStateOf("") }
@@ -468,7 +468,7 @@ fun ChatScreen(
         snapshotFlow {
             val info = listState.layoutInfo
             val lastVisibleIndex = info.visibleItemsInfo.lastOrNull()?.index ?: -1
-            lastVisibleIndex >= info.totalItemsCount - 2
+            lastVisibleIndex >= info.totalItemsCount - 3 || info.totalItemsCount == 0
         }.collect { nearBottom ->
             shouldAutoScroll = nearBottom
         }
@@ -476,30 +476,28 @@ fun ChatScreen(
 
     // Reset scroll flag whenever switching to a new chat
     LaunchedEffect(chatId) {
-        hasScrolledToBottomOnOpen = false
+        shouldAutoScroll = true
     }
 
-    // On initial chat open: immediately scroll to the newest messages (bottom) once.
-    LaunchedEffect(chatId, visibleMessages.size) {
-        if (!hasScrolledToBottomOnOpen && visibleMessages.isNotEmpty()) {
-            hasScrolledToBottomOnOpen = true
+    // Scroll to bottom when message list size changes and shouldAutoScroll is true
+    LaunchedEffect(visibleMessages.size, shouldAutoScroll) {
+        if (visibleMessages.isNotEmpty() && shouldAutoScroll) {
             scope.launch {
-                // Scroll to the very last item (newest message) immediately
-                listState.scrollToItem(visibleMessages.size - 1 + (visibleMessages.size / 5).coerceAtMost(10))
+                val totalItems = listState.layoutInfo.totalItemsCount
+                if (totalItems > 0) {
+                    listState.scrollToItem(totalItems - 1)
+                } else {
+                    listState.scrollToItem(visibleMessages.size * 2)
+                }
             }
         }
     }
 
-    // Scroll to bottom only when user is already near bottom (for incoming messages).
-    // OR when current user sends a message (always scroll to show sent message).
-    LaunchedEffect(visibleMessages.size, shouldAutoScroll) {
-        if (visibleMessages.isNotEmpty() && hasScrolledToBottomOnOpen) {
-            val isLatestFromCurrentUser = visibleMessages.lastOrNull()?.isSentByMe == true
-            if (shouldAutoScroll || isLatestFromCurrentUser) {
-                scope.launch {
-                    listState.scrollToItem(visibleMessages.size - 1)
-                }
-            }
+    LaunchedEffect(targetMessageId, visibleMessages.size) {
+        val target = targetMessageId ?: return@LaunchedEffect
+        val index = visibleMessages.indexOfFirst { it.id == target }
+        if (index >= 0) {
+            listState.scrollToItem(index)
         }
     }
 
@@ -598,6 +596,8 @@ fun ChatScreen(
                         SwipeToDeleteMessageRow(
                             message = msg,
                             isLastInGroup = isLastInGroup,
+                            selfName = chatListState.currentUserName,
+                            contactName = state.contactName,
                             contactProfileImageUrl = state.contactProfileImageUrl,
                             contactAvatarEmoji = state.contactAvatarEmoji,
                             selfProfileImageUrl = chatListState.currentUserProfileImageUrl,
@@ -985,6 +985,8 @@ fun ChatScreen(
 private fun SwipeToDeleteMessageRow(
     message: Message,
     isLastInGroup: Boolean = true,
+    selfName: String = "",
+    contactName: String = "",
     contactProfileImageUrl: String = "",
     contactAvatarEmoji: String = "",
     selfProfileImageUrl: String = "",
@@ -1000,6 +1002,8 @@ private fun SwipeToDeleteMessageRow(
         MessageGroupWithAvatar(
             message = message, 
             isLastInGroup = isLastInGroup,
+            selfName = selfName,
+            contactName = contactName,
             contactProfileImageUrl = contactProfileImageUrl,
             contactAvatarEmoji = contactAvatarEmoji,
             selfProfileImageUrl = selfProfileImageUrl,
@@ -1099,6 +1103,8 @@ private fun SwipeToDeleteMessageRow(
             MessageGroupWithAvatar(
                 message = message,
                 isLastInGroup = isLastInGroup,
+                selfName = selfName,
+                contactName = contactName,
                 contactProfileImageUrl = contactProfileImageUrl,
                 contactAvatarEmoji = contactAvatarEmoji,
                 selfProfileImageUrl = selfProfileImageUrl,

@@ -1,10 +1,16 @@
 package com.example.kampus.navigation
 
 import android.annotation.SuppressLint
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
@@ -28,10 +34,9 @@ import com.example.kampus.ui.events.NewEventData
 import com.example.kampus.ui.feed.CreatePostScreen
 import com.example.kampus.ui.feed.FeedViewModel
 import com.example.kampus.ui.feed.HomeScreen
-import com.example.kampus.ui.groups.CreateGroupScreen
-import com.example.kampus.ui.groups.GroupDetailScreen
-import com.example.kampus.ui.groups.GroupListScreen
-import com.example.kampus.ui.groups.GroupViewModel
+import com.example.kampus.ui.screens.groups.groupsNavGraph
+import com.example.kampus.viewmodel.GroupsViewModel
+import com.example.kampus.ui.screens.groups.GroupRoutes
 import com.example.kampus.ui.notifications.NotificationScreen
 import com.example.kampus.ui.events.EventDetailScreen
 import com.example.kampus.ui.events.EventListScreen
@@ -50,6 +55,7 @@ import com.example.kampus.ui.profile.NotificationSettingsScreen
 import com.example.kampus.ui.profile.PrivacySecurityScreen
 import com.example.kampus.ui.profile.ProfileScreen
 import com.example.kampus.ui.profile.PublicProfileScreen
+import com.example.kampus.ui.profile.PublicFriendsScreen
 import com.example.kampus.ui.profile.SettingsScreen
 import com.example.kampus.ui.post.PostDetailScreen
 import com.google.firebase.auth.FirebaseAuth
@@ -69,12 +75,10 @@ object Routes {
 
     // Feed
     const val POST_CREATE     = "post_create"
-    const val POST_DETAIL     = "post_detail/{postId}"
+    const val POST_DETAIL     = "post_detail/{postId}?openComposer={openComposer}"
 
     // Groups
-    const val GROUP_LIST   = "group_list"
-    const val GROUP_DETAIL = "group_detail/{groupId}"
-    const val GROUP_CREATE = "group_create"
+    const val GROUP_LIST   = "groups_graph"
 
     // Events
     const val EVENT_LIST   = "event_list"
@@ -91,6 +95,7 @@ object Routes {
     // Profile
     const val PROFILE      = "profile"
     const val PROFILE_PUBLIC = "profile_public/{userId}"
+    const val FRIENDS_PUBLIC = "friends/{userId}?tab={tab}"
     const val FRIEND_REQUESTS = "friend_requests"
     const val FRIENDS = "friends"
     const val DISCOVER_PEOPLE = "discover_people"
@@ -105,10 +110,10 @@ object Routes {
     const val LANGUAGE_REGION_SETTINGS = "language_region_settings"
     const val PROFILE_EDIT = "profile_edit"
 
-    fun groupDetail(groupId: Int) = "group_detail/$groupId"
     fun eventDetail(eventId: Int, openComposer: Boolean = false) = "event_detail/$eventId?openComposer=$openComposer"
-    fun postDetail(postId: Int) = "post_detail/$postId"
+    fun postDetail(postId: Int, openComposer: Boolean = false) = "post_detail/$postId?openComposer=$openComposer"
     fun profilePublic(userId: String) = "profile_public/$userId"
+    fun friendsPublic(userId: String, tab: Int = 1) = "friends/$userId?tab=$tab"
     fun chatScreen(chatId: String)   = "chat_screen/$chatId"
     fun chatWithUser(userId: String) = "chat_with_user/$userId"
     fun callScreen(chatId: String, callType: String, callId: String = "") =
@@ -128,7 +133,25 @@ object Routes {
 @Composable
 fun NavGraph(navController: NavHostController) {
     val globalChatViewModel: ChatViewModel = viewModel()
+    val context = navController.context
+    LaunchedEffect(Unit) {
+        try {
+            val activity = context as? android.app.Activity
+            val extras = activity?.intent?.extras
+            val openChatId = extras?.getString("openChatId")
+            val storyId = extras?.getString("storyId")
+            val replyId = extras?.getString("replyId")
+            if (!openChatId.isNullOrBlank()) {
+                navController.navigate(Routes.chatScreen(openChatId))
+                if (!replyId.isNullOrBlank()) {
+                    globalChatViewModel.openChatAndFocusMessage(openChatId, replyId)
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
     val incomingCall = globalChatViewModel.incomingCallState.collectAsStateWithLifecycle()
+    val groupsViewModel: GroupsViewModel = viewModel()
 
     LaunchedEffect(Unit) {
         globalChatViewModel.startIncomingCallListener()
@@ -294,7 +317,10 @@ fun NavGraph(navController: NavHostController) {
         }
 
         composable(Routes.NOTIFICATIONS) {
-            NotificationScreen(onBack = { navController.popBackStack() })
+            NotificationScreen(
+                onBack = { navController.popBackStack() },
+                onNavigate = { route -> navController.navigate(route) }
+            )
         }
 
         // ── Create Post ───────────────────────────────────────────────────────
@@ -321,59 +347,26 @@ fun NavGraph(navController: NavHostController) {
         // ── Post Detail ───────────────────────────────────────────────────────
         composable(
             route = Routes.POST_DETAIL,
-            arguments = listOf(navArgument("postId") { type = NavType.IntType }),
+            arguments = listOf(
+                navArgument("postId") { type = NavType.IntType },
+                navArgument("openComposer") { type = NavType.BoolType; defaultValue = false },
+            ),
         ) { back ->
             val postId = back.arguments?.getInt("postId") ?: return@composable
+            val openComposer = back.arguments?.getBoolean("openComposer") ?: false
             PostDetailScreen(
                 postId = postId,
+                openComposer = openComposer,
                 onBack = { navController.popBackStack() },
             )
         }
 
         // ── Group List ─────────────────────────────────────────────────────────
-        composable(Routes.GROUP_LIST) {
-            val vm: GroupViewModel = viewModel()
-            GroupListScreen(
-                viewModel          = vm,
-                onGroupClick       = { navController.navigate(Routes.groupDetail(it.id)) },
-                onCreateGroupClick = { navController.navigate(Routes.GROUP_CREATE) },
-                onHomeClick        = {
-                    navController.navigate(Routes.HOME) {
-                        popUpTo(Routes.HOME) { inclusive = false }
-                    }
-                },
-                onEventsClick  = { navController.navigate(Routes.EVENT_LIST) },
-                onChatClick    = { navController.navigate(Routes.CHAT_LIST) },
-                onFabClick     = { navController.navigate(Routes.POST_CREATE) },
-                onProfileClick = { navController.navigate(Routes.PROFILE) },
-            )
-        }
-
-        // ── Group Detail ───────────────────────────────────────────────────────
-        composable(
-            route     = Routes.GROUP_DETAIL,
-            arguments = listOf(navArgument("groupId") { type = NavType.IntType })
-        ) { back ->
-            val groupId   = back.arguments?.getInt("groupId") ?: return@composable
-            val listEntry = remember(back) { navController.getBackStackEntry(Routes.GROUP_LIST) }
-            val vm: GroupViewModel = viewModel(listEntry)
-            val state = vm.uiState.value
-            val group = (state.myGroups + state.discoverGroups)
-                .firstOrNull { it.id == groupId } ?: return@composable
-            GroupDetailScreen(
-                group     = group,
-                viewModel = vm,
-                onBack    = { navController.popBackStack() },
-            )
-        }
-
-        // ── Group Create ───────────────────────────────────────────────────────
-        composable(Routes.GROUP_CREATE) {
-            CreateGroupScreen(
-                onBack   = { navController.popBackStack() },
-                onCreate = { navController.popBackStack() },
-            )
-        }
+        // ── Groups Feature ────────────────────────────────────────────────────
+        groupsNavGraph(
+            navController = navController,
+            sharedViewModel = groupsViewModel,
+        )
 
         // ── Event List ─────────────────────────────────────────────────────────
         composable(Routes.EVENT_LIST) {
@@ -405,22 +398,39 @@ fun NavGraph(navController: NavHostController) {
         ) { back ->
             val eventId   = back.arguments?.getInt("eventId") ?: return@composable
             val openComposer = back.arguments?.getBoolean("openComposer") ?: false
-            val listEntry = remember(back) { navController.getBackStackEntry(Routes.EVENT_LIST) }
-            val vm: EventViewModel = viewModel(listEntry)
+            // Safe: when navigating from profile screens, EVENT_LIST may not be in the back stack.
+            // Try to get the shared ViewModel; fall back to a standalone one if EVENT_LIST is absent.
+            val hasEventList = runCatching { navController.getBackStackEntry(Routes.EVENT_LIST) }.isSuccess
+            val vm: EventViewModel = if (hasEventList) {
+                viewModel(navController.getBackStackEntry(Routes.EVENT_LIST))
+            } else {
+                viewModel(back)
+            }
             val state = vm.uiState.collectAsStateWithLifecycle().value
-            val event = state.events.firstOrNull { it.id == eventId } ?: return@composable
-            EventDetailScreen(
-                event        = event,
-                isInterested = event.id in state.interestedIds,
-                isLiked      = event.id in state.likedIds,
-                isSaved      = event.id in state.savedIds,
-                onInterested = { vm.toggleInterested(event) },
-                onLike       = { vm.toggleLike(event) },
-                onSave       = { vm.toggleSave(event) },
-                onBack       = { navController.popBackStack() },
-                viewModel    = vm,
-                openComposer = openComposer,
-            )
+            val event = state.events.firstOrNull { it.id == eventId }
+            if (event == null) {
+                // Still loading — show spinner until the ViewModel fetches events
+                Box(
+                    modifier = Modifier.fillMaxSize()
+                        .background(com.example.kampus.ui.events.EventColors.Bg),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator(color = com.example.kampus.ui.events.EventColors.Blue)
+                }
+            } else {
+                EventDetailScreen(
+                    event        = event,
+                    isInterested = event.id in state.interestedIds,
+                    isLiked      = event.id in state.likedIds,
+                    isSaved      = event.id in state.savedIds,
+                    onInterested = { vm.toggleInterested(event) },
+                    onLike       = { vm.toggleLike(event) },
+                    onSave       = { vm.toggleSave(event) },
+                    onBack       = { navController.popBackStack() },
+                    viewModel    = vm,
+                    openComposer = openComposer,
+                )
+            }
         }
 
         // ── Event Create ───────────────────────────────────────────────────────
@@ -478,7 +488,7 @@ fun NavGraph(navController: NavHostController) {
                             }
                         }
 
-                        "create_post" -> {
+                        "create_post", "share_post" -> {
                             val postId = activity.postId
                             if (postId != null) {
                                 navController.navigate(Routes.postDetail(postId))
@@ -489,10 +499,43 @@ fun NavGraph(navController: NavHostController) {
                             }
                         }
 
+                        "create_group" -> {
+                            val groupId = activity.groupId
+                            if (!groupId.isNullOrBlank()) {
+                                navController.navigate(GroupRoutes.detail(groupId))
+                            } else {
+                                navController.navigate(GroupRoutes.LIST)
+                            }
+                        }
+
                         else -> {
                             navController.navigate(Routes.profilePublic(userId))
                         }
                     }
+                },
+                onCommentClick = { activity ->
+                    when (activity.type) {
+                        "create_event", "interested_event" -> {
+                            val eventId = activity.eventId
+                            if (eventId != null) {
+                                navController.navigate(Routes.eventDetail(eventId, openComposer = true))
+                            }
+                        }
+
+                        "create_post", "share_post" ->
+                            activity.postId?.let {
+                                navController.navigate(Routes.postDetail(it, openComposer = true))
+                            }
+                    }
+                },
+                onOpenFollowers = { targetUserId ->
+                    navController.navigate(Routes.friendsPublic(targetUserId, 1))
+                },
+                onOpenFollowing = { targetUserId ->
+                    navController.navigate(Routes.friendsPublic(targetUserId, 2))
+                },
+                onOpenProfile = { targetUserId ->
+                    navController.navigate(Routes.profilePublic(targetUserId))
                 },
             )
         }
@@ -526,7 +569,7 @@ fun NavGraph(navController: NavHostController) {
                             }
                         }
 
-                        "create_post" -> {
+                        "create_post", "share_post" -> {
                             val postId = activity.postId
                             if (postId != null) {
                                 navController.navigate(Routes.postDetail(postId))
@@ -537,6 +580,15 @@ fun NavGraph(navController: NavHostController) {
                             }
                         }
 
+                        "create_group" -> {
+                            val groupId = activity.groupId
+                            if (!groupId.isNullOrBlank()) {
+                                navController.navigate(GroupRoutes.detail(groupId))
+                            } else {
+                                navController.navigate(GroupRoutes.LIST)
+                            }
+                        }
+
                         else -> {
                             navController.navigate(Routes.PROFILE) {
                                 popUpTo(Routes.PROFILE) { inclusive = false }
@@ -544,6 +596,39 @@ fun NavGraph(navController: NavHostController) {
                         }
                     }
                 },
+                onCommentClick = { activity ->
+                    when (activity.type) {
+                        "create_event", "interested_event" -> {
+                            val eventId = activity.eventId
+                            if (eventId != null) {
+                                navController.navigate(Routes.eventDetail(eventId, openComposer = true))
+                            }
+                        }
+
+                        "create_post", "share_post" ->
+                            activity.postId?.let {
+                                navController.navigate(Routes.postDetail(it, openComposer = true))
+                            }
+                    }
+                },
+            )
+        }
+
+        composable(
+            route = Routes.FRIENDS_PUBLIC,
+            arguments = listOf(
+                navArgument("userId") { type = NavType.StringType },
+                navArgument("tab") { type = NavType.IntType; defaultValue = 1 }
+            )
+        ) { back ->
+            val userId = back.arguments?.getString("userId") ?: return@composable
+            val tab = back.arguments?.getInt("tab") ?: 1
+            PublicFriendsScreen(
+                userId = userId,
+                initialTab = tab,
+                onBack = { navController.popBackStack() },
+                onOpenProfile = { id: String -> navController.navigate(Routes.profilePublic(id)) },
+                onOpenChat = { id: String -> navController.navigate(Routes.chatWithUser(id)) },
             )
         }
 

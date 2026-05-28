@@ -5,12 +5,13 @@ import com.example.kampus.ui.theme.ThemeController
 
 object ProfileColors {
     private val isDark get() = ThemeController.isDark
+    private val accent get() = ThemeController.accent.color
     
     val Bg get() = if (isDark) Color(0xFF1A1D2E) else Color(0xFFF3F4F8)
     val Card get() = if (isDark) Color(0xFF252A41) else Color(0xFFFFFFFF)
     val Border get() = if (isDark) Color(0xFF364153) else Color(0xFFD1D5DB)
-    val Blue get() = Color(0xFF0D7FFF)
-    val Purple get() = Color(0xFF7C3AED)
+    val Blue get() = accent
+    val Purple get() = accent.copy(alpha = if (isDark) 0.80f else 0.72f)
     val White get() = if (isDark) Color(0xFFFFFFFF) else Color(0xFF111827)
     val Subtle get() = if (isDark) Color(0xFF99A1AF) else Color(0xFF6B7280)
     val Red get() = Color(0xFFEF4444)

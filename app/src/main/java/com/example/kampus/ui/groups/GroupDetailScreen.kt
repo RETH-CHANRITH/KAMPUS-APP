@@ -34,7 +34,10 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.launch
 import com.example.kampus.ui.groups.GroupColors as C
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -97,11 +100,42 @@ fun GroupDetailScreen(
     viewModel : GroupViewModel = viewModel(),
 ) {
     val state    by viewModel.uiState.collectAsState()
+    val currentUserId = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
+    val groupRepository = remember { com.example.kampus.data.repository.GroupRepositoryImpl(FirebaseFirestore.getInstance()) }
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val pendingRequests by produceState(initialValue = emptyList<GroupJoinRequest>(), key1 = group.id) {
+        groupRepository.observeJoinRequests(group.id.toString()).collect { result ->
+            value = result.getOrDefault(emptyList())
+        }
+    }
+    var seenRequestIds by remember(group.id) { mutableStateOf(emptySet<String>()) }
+    val isOwner = group.ownerId.isNotBlank() && group.ownerId == currentUserId
     val isJoined  = group.id in state.joinedIds
+    val isRequested = group.id in state.requestedIds
     var postText by remember { mutableStateOf("") }
+
+    LaunchedEffect(pendingRequests.map { it.requesterId }) {
+        val currentIds = pendingRequests.mapTo(mutableSetOf()) { it.requesterId }
+        val newRequest = pendingRequests.firstOrNull { it.requesterId !in seenRequestIds }
+        if (isOwner && newRequest != null && seenRequestIds.isNotEmpty()) {
+            snackbarHostState.showSnackbar("${newRequest.requesterName} requested to join")
+        }
+        seenRequestIds = currentIds
+    }
 
     Scaffold(
         containerColor = C.Bg,
+        snackbarHost = {
+            SnackbarHost(snackbarHostState) { data ->
+                Snackbar(
+                    containerColor = C.Surface,
+                    contentColor = C.White,
+                    actionColor = C.Blue,
+                    snackbarData = data,
+                )
+            }
+        },
         bottomBar = {
             PostComposer(
                 text         = postText,
@@ -127,8 +161,39 @@ fun GroupDetailScreen(
                 GroupInfoSection(
                     group    = group,
                     isJoined = isJoined,
-                    onToggle = { viewModel.toggleJoin(group.id) },
+                    isRequested = isRequested,
+                    onToggle = {
+                        scope.launch {
+                            when (val result = viewModel.handleJoinAction(group)) {
+                                GroupViewModel.JoinActionResult.Joined -> snackbarHostState.showSnackbar("Joined ${group.name}")
+                                GroupViewModel.JoinActionResult.Requested -> snackbarHostState.showSnackbar("Request sent to ${group.name}")
+                                GroupViewModel.JoinActionResult.AlreadyRequested -> snackbarHostState.showSnackbar("Request already sent")
+                                GroupViewModel.JoinActionResult.NotAuthenticated -> snackbarHostState.showSnackbar("Sign in to join groups")
+                                is GroupViewModel.JoinActionResult.Failed -> snackbarHostState.showSnackbar(result.message)
+                            }
+                        }
+                    },
                 )
+                if (group.privacy.equals("private", ignoreCase = true)) {
+                    PrivateGroupBanner(isOwner = isOwner)
+                }
+                if (isOwner && pendingRequests.isNotEmpty()) {
+                    PendingRequestsSection(
+                        requests = pendingRequests,
+                        onApprove = { requesterId ->
+                            scope.launch {
+                                groupRepository.approveJoinRequest(group.id.toString(), requesterId)
+                                snackbarHostState.showSnackbar("Request approved")
+                            }
+                        },
+                        onReject = { requesterId ->
+                            scope.launch {
+                                groupRepository.rejectJoinRequest(group.id.toString(), requesterId)
+                                snackbarHostState.showSnackbar("Request rejected")
+                            }
+                        },
+                    )
+                }
                 HorizontalDivider(
                     color     = C.Border.copy(alpha = 0.5f),
                     thickness = 0.5.dp,
@@ -257,6 +322,7 @@ private fun CoverIconButton(
 private fun GroupInfoSection(
     group    : GroupData,
     isJoined : Boolean,
+    isRequested : Boolean,
     onToggle : () -> Unit,
 ) {
     Column(
@@ -276,6 +342,12 @@ private fun GroupInfoSection(
             fontSize      = 11.sp,
             fontWeight    = FontWeight.Bold,
             letterSpacing = 0.5.sp,
+        )
+        Text(
+            text = if (group.privacy.equals("private", ignoreCase = true)) "Private group" else "Public group",
+            color = C.Gray3,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
         )
 
         Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
@@ -309,13 +381,13 @@ private fun GroupInfoSection(
                 .height(46.dp)
                 .clip(RoundedCornerShape(14.dp))
                 .background(
-                    if (isJoined)
+                    if (isJoined || isRequested)
                         Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
                     else
                         Brush.linearGradient(listOf(C.Blue, C.BlueGlow))
                 )
                 .then(
-                    if (isJoined) Modifier.border(1.dp, C.Border, RoundedCornerShape(14.dp))
+                    if (isJoined || isRequested) Modifier.border(1.dp, C.Border, RoundedCornerShape(14.dp))
                     else Modifier
                 )
                 .clickable(
@@ -326,11 +398,94 @@ private fun GroupInfoSection(
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text       = if (isJoined) "Joined" else "Join Group",
-                color      = if (isJoined) C.Gray3 else C.White,
+                text       = when {
+                    isJoined -> "Joined"
+                    isRequested -> "Requested"
+                    group.privacy.equals("private", ignoreCase = true) -> "Request Join"
+                    else -> "Join Group"
+                },
+                color      = if (isJoined || isRequested) C.Gray3 else C.White,
                 fontSize   = 15.sp,
                 fontWeight = FontWeight.SemiBold,
             )
+        }
+    }
+}
+
+@Composable
+private fun PrivateGroupBanner(isOwner: Boolean) {
+    Surface(
+        color = C.Surface.copy(alpha = 0.7f),
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, C.Border),
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .clip(CircleShape)
+                    .background(C.Blue),
+            )
+            Text(
+                text = if (isOwner) "Private group: review incoming requests below." else "Private group: waiting for admin approval.",
+                color = C.Gray1,
+                fontSize = 12.sp,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun PendingRequestsSection(
+    requests : List<GroupJoinRequest>,
+    onApprove : (String) -> Unit,
+    onReject : (String) -> Unit,
+) {
+    Column(
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = "Pending Requests",
+            color = C.White,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        requests.forEach { request ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(C.Surface)
+                    .border(1.dp, C.Border, RoundedCornerShape(14.dp))
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(C.Blue.copy(alpha = 0.18f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(request.requesterName.take(1).uppercase(), color = C.White, fontWeight = FontWeight.Bold)
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(request.requesterName, color = C.White, fontWeight = FontWeight.SemiBold)
+                    Text("Wants to join your private group", color = C.Gray3, fontSize = 12.sp)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AssistChip(onClick = { onReject(request.requesterId) }, label = { Text("Reject") })
+                    AssistChip(onClick = { onApprove(request.requesterId) }, label = { Text("Approve") })
+                }
+            }
         }
     }
 }
