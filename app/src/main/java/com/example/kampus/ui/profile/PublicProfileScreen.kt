@@ -27,6 +27,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.AddCircle
 import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.BookmarkBorder
@@ -84,6 +85,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.example.kampus.ui.theme.ThemeController
+import com.example.kampus.data.repository.UserRepositoryImpl
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.auth.FirebaseAuth
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.layout.width
 
 private val PubIsDark get() = ThemeController.isDark
 private val Bg get() = if (PubIsDark) Color(0xFF080B11) else Color(0xFFF3F4F8)
@@ -98,6 +106,10 @@ fun PublicProfileScreen(
     userId: String,
     onBack: () -> Unit,
     onOpenActivity: (ProfileActivityItem) -> Unit,
+    onCommentClick: (ProfileActivityItem) -> Unit = {},
+    onOpenFollowers: (String) -> Unit = {},
+    onOpenFollowing: (String) -> Unit = {},
+    onOpenProfile: (String) -> Unit = {},
     viewModel: PublicProfileViewModel = viewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -176,33 +188,50 @@ fun PublicProfileScreen(
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back", tint = TextPrimary)
                 }
 
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .offset(y = 48.dp)
-                        .size(96.dp)
-                        .clip(CircleShape)
-                        .border(4.dp, Bg, CircleShape)
-                        .background(Brush.linearGradient(listOf(Color(0xFF20A4FF), Color(0xFF7C3AED)))),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (state.profileImageUrl.isNotEmpty()) {
-                        val ctx = LocalContext.current
-                        AsyncImage(
-                            model = ImageRequest.Builder(ctx)
-                                .data(state.profileImageUrl)
-                                .crossfade(true)
-                                .build(),
-                            placeholder = ColorPainter(Color.DarkGray.copy(alpha = 0.12f)),
-                            contentDescription = "Profile",
-                            contentScale = ContentScale.Crop,
+                Box(modifier = Modifier.align(Alignment.BottomCenter).offset(y = 56.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(104.dp)
+                            .clip(CircleShape)
+                            .background(Brush.linearGradient(listOf(Color(0xFF20A4FF), Color(0xFF7C3AED)))),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .clip(CircleShape),
-                        )
-                    } else {
-                        Text(text = state.avatarEmoji, fontSize = 36.sp)
+                                .padding(6.dp)
+                                .clip(CircleShape)
+                                .background(Bg),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (state.profileImageUrl.isNotEmpty()) {
+                                val ctx = LocalContext.current
+                                AsyncImage(
+                                    model = ImageRequest.Builder(ctx)
+                                        .data(state.profileImageUrl)
+                                        .crossfade(true)
+                                        .build(),
+                                    placeholder = ColorPainter(Color.DarkGray.copy(alpha = 0.12f)),
+                                    contentDescription = "Profile",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(CircleShape),
+                                )
+                            } else {
+                                Text(text = state.avatarEmoji, fontSize = 40.sp)
+                            }
+                        }
                     }
+
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .size(18.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF6B7280))
+                            .border(2.dp, Bg, CircleShape),
+                    )
                 }
             }
 
@@ -231,6 +260,9 @@ fun PublicProfileScreen(
                     StatItem(value = state.followers.toString(), label = "Followers")
                     StatItem(value = state.following.toString(), label = "Following")
                 }
+
+                // Followers avatar strip (realtime)
+                FollowersAvatarStrip(userId = state.userId, onProfileClick = { id -> onOpenProfile(id) })
             }
 
             // ACTION BUTTONS SECTION - Always visible after stats
@@ -359,19 +391,60 @@ fun PublicProfileScreen(
             ) {
                 Text(text = "Recent Activity", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
 
-                val filteredActivities = state.activities.filter { it.type != "share_profile" }
+                val displayTypes = setOf("create_post", "create_event", "share_post", "comment", "reply", "create_group")
+                val filteredActivities = state.activities.filter { it.type in displayTypes }
                 if (filteredActivities.isEmpty()) {
                     Text(text = "No public activity yet.", color = TextSecondary, fontSize = 13.sp)
                 } else {
                     filteredActivities.forEach { activity ->
-                        PublicActivityRow(
-                            profileUserId = state.userId.ifBlank { userId },
-                            displayName = state.displayName,
-                            avatarEmoji = state.avatarEmoji,
-                            activity = activity,
-                            viewModel = viewModel,
-                            onOpenActivity = { onOpenActivity(activity) },
-                        )
+                        when (activity.type) {
+                            "create_post" -> ActivityPostCard(
+                                activity = activity,
+                                displayName = state.displayName,
+                                avatarEmoji = state.avatarEmoji,
+                                profileImageUrl = state.profileImageUrl,
+                                onLikeClick = { viewModel.likeActivity(activity) },
+                                onCommentClick = { onCommentClick(activity) },
+                                onCardClick = { onOpenActivity(activity) }
+                            )
+                            "create_event" -> ActivityEventCard(
+                                activity = activity,
+                                displayName = state.displayName,
+                                avatarEmoji = state.avatarEmoji,
+                                profileImageUrl = state.profileImageUrl,
+                                onLikeClick = { viewModel.likeActivity(activity) },
+                                onInterestClick = { viewModel.toggleActivityInterest(activity) },
+                                onCommentClick = { onCommentClick(activity) },
+                                onCardClick = { onOpenActivity(activity) }
+                            )
+                            "share_post" -> ActivitySharePostCard(
+                                activity = activity,
+                                displayName = state.displayName,
+                                avatarEmoji = state.avatarEmoji,
+                                profileImageUrl = state.profileImageUrl,
+                                onLikeClick = { viewModel.likeActivity(activity) },
+                                onCommentClick = { onCommentClick(activity) },
+                                onCardClick = { onOpenActivity(activity) }
+                            )
+                            "comment", "reply" -> ActivityCommentCard(
+                                activity = activity,
+                                displayName = state.displayName,
+                                avatarEmoji = state.avatarEmoji,
+                                profileImageUrl = state.profileImageUrl,
+                                onLikeClick = { viewModel.likeActivity(activity) },
+                                onReplyClick = { onCommentClick(activity) },
+                                onCardClick = { onOpenActivity(activity) }
+                            )
+                            "create_group" -> ActivityGroupCard(
+                                activity = activity,
+                                displayName = state.displayName,
+                                avatarEmoji = state.avatarEmoji,
+                                profileImageUrl = state.profileImageUrl,
+                                onLikeClick = { viewModel.likeActivity(activity) },
+                                onCommentClick = { onCommentClick(activity) },
+                                onCardClick = { onOpenActivity(activity) }
+                            )
+                        }
                     }
                 }
             }
@@ -410,8 +483,16 @@ private fun AboutInfoRow(icon: ImageVector, text: String) {
 
 @Composable
 private fun StatItem(value: String, label: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(text = value, color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+        modifier = Modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (PubIsDark) Color(0xFF0F1724) else Color(0xFFFFFFFF))
+            .border(1.dp, Border.copy(alpha = 0.9f), RoundedCornerShape(14.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        Text(text = value, color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Text(text = label, color = TextSecondary, fontSize = 12.sp)
     }
 }
@@ -589,6 +670,7 @@ private fun PublicActivityRow(
     }
 
     if (showMenuSheet) {
+
         ModalBottomSheet(
             onDismissRequest = { showMenuSheet = false },
             sheetState = menuSheetState,
@@ -706,6 +788,90 @@ private fun PublicActivityRow(
                 Spacer(modifier = Modifier.height(8.dp))
             }
         }
+    }
+}
+
+@Composable
+fun ActivityCommentCard(
+    activity: ProfileActivityItem,
+    displayName: String,
+    avatarEmoji: String,
+    profileImageUrl: String,
+    onLikeClick: () -> Unit,
+    onReplyClick: () -> Unit = {},
+    onCardClick: () -> Unit = {},
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(Card)
+            .border(1.dp, Border, RoundedCornerShape(18.dp))
+            .clickable(onClick = onCardClick),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
+    ) {
+        ActivityCardHeader(
+            displayName = displayName,
+            avatarEmoji = avatarEmoji,
+            profileImageUrl = profileImageUrl,
+            activity = activity
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 6.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Bg.copy(alpha = 0.55f))
+                .border(1.dp, Border.copy(alpha = 0.75f), RoundedCornerShape(14.dp))
+                .padding(14.dp),
+        ) {
+            Text(
+                text = activity.text,
+                color = TextPrimary,
+                fontSize = 15.sp,
+                lineHeight = 21.sp,
+            )
+        }
+
+        if (activity.previewTitle.isNotBlank() || activity.previewImageUrl.isNotBlank()) {
+            ActivityPreviewPanel(
+                accent = Blue,
+                previewTitle = if (activity.previewTitle.isNotBlank()) activity.previewTitle else "Comment",
+                previewSubtitle = if (activity.previewSubtitle.isNotBlank()) activity.previewSubtitle else "Public comment",
+                previewImageUrl = activity.previewImageUrl,
+                activity = activity,
+                onClick = onCardClick,
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ActivityActionItem(
+                icon = if (activity.currentUserLoved) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                tint = if (activity.currentUserLoved) Color(0xFFE11D48) else TextSecondary,
+                count = activity.likeCount,
+                onClick = onLikeClick,
+            )
+            ActivityActionItem(
+                icon = Icons.Outlined.ChatBubbleOutline,
+                tint = TextSecondary,
+                count = activity.commentCount,
+                onClick = onReplyClick,
+            )
+            ActivityActionItem(
+                icon = Icons.AutoMirrored.Outlined.Send,
+                tint = TextSecondary,
+                count = activity.shareCount,
+                onClick = onCardClick,
+            )
+        }
+        Spacer(modifier = Modifier.height(6.dp))
     }
 }
 
@@ -874,6 +1040,43 @@ private fun formatActivityTime(timestamp: Long): String {
         minutes < 60 -> "${minutes}m ago"
         minutes < 1440 -> "${minutes / 60}h ago"
         else -> "${minutes / 1440}d ago"
+    }
+}
+
+@Composable
+private fun FollowersAvatarStrip(userId: String, onProfileClick: (String) -> Unit) {
+    val repo = remember { UserRepositoryImpl(FirebaseFirestore.getInstance(), FirebaseAuth.getInstance()) }
+    val followersRes by repo.getFollowers(userId).collectAsStateWithLifecycle(initialValue = Result.success(emptyList()))
+    val followers = followersRes.getOrNull().orEmpty()
+
+    if (followers.isEmpty()) return
+
+    LazyRow(modifier = Modifier
+        .fillMaxWidth()
+        .padding(top = 12.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        items(items = followers.take(12), key = { it.userId }) { f ->
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(modifier = Modifier.size(68.dp), contentAlignment = Alignment.Center) {
+                    Box(modifier = Modifier
+                        .size(64.dp)
+                        .clip(CircleShape)
+                        .background(Brush.linearGradient(listOf(Color(0xFF0D7FFF), Color(0xFF7C3AED)))), contentAlignment = Alignment.Center) {
+                        Box(modifier = Modifier
+                            .size(58.dp)
+                            .clip(CircleShape)
+                            .background(Bg)
+                             .clickable { onProfileClick(f.userId) }, contentAlignment = Alignment.Center) {
+                            if (f.profileImageUrl.isNotBlank()) {
+                                AsyncImage(model = f.profileImageUrl, contentDescription = f.displayName, modifier = Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop)
+                            } else {
+                                Text(text = f.avatarEmoji.ifBlank { "👤" }, fontSize = 24.sp)
+                            }
+                        }
+                    }
+                }
+                Text(text = f.displayName, fontSize = 12.sp, color = TextSecondary, modifier = Modifier.width(72.dp), textAlign = TextAlign.Center)
+            }
+        }
     }
 }
 

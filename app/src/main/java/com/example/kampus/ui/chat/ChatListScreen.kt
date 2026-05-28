@@ -7,6 +7,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -38,16 +39,23 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.tasks.await
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
+import com.google.firebase.auth.FirebaseAuth
+import androidx.compose.ui.geometry.Offset
+import com.example.kampus.ui.feed.FeedViewModel
+import com.example.kampus.ui.feed.FriendUserItem
 import com.example.kampus.ui.localization.rememberUiStrings
 import com.example.kampus.ui.theme.ThemeController
 import com.example.kampus.ui.chat.ChatViewModel
 import com.example.kampus.ui.components.CampusBottomNavBar
 import com.example.kampus.ui.chat.StoryEntryMode
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -107,6 +115,8 @@ fun ChatListScreen(
 ) {
     val state      by viewModel.chatListState.collectAsStateWithLifecycle()
     val previewState by viewModel.chatPreviewState.collectAsStateWithLifecycle()
+    val feedViewModel: FeedViewModel = viewModel()
+    val feedState by feedViewModel.uiState.collectAsStateWithLifecycle()
     val strings = rememberUiStrings()
     var selectedFilter by remember { mutableStateOf(ChatFilter.All) }
     var showCreateStoryDialog by remember { mutableStateOf(false) }
@@ -170,9 +180,10 @@ fun ChatListScreen(
             )
 
             ChatStoriesRow(
-                stories = state.stories,
-                currentUserProfileImageUrl = state.currentUserProfileImageUrl,
-                currentUserAvatarEmoji = state.currentUserAvatarEmoji,
+                stories = feedState.stories,
+                friendsAndFollowers = feedState.friendsAndFollowers,
+                currentUserProfileImageUrl = feedState.currentUserProfileImageUrl,
+                currentUserAvatarEmoji = feedState.currentUserAvatarEmoji,
                 onCreateNote = {
                     showCreateNoteDialog = true
                 },
@@ -181,6 +192,9 @@ fun ChatListScreen(
                 },
                 onOpenStory = { selectedStoryId = it.id },
                 currentVibeLabel = "Current vibe",
+                onChatClick = onChatClick,
+                viewModel = viewModel,
+                chats = state.chats,
             )
 
             ChatFilters(
@@ -214,6 +228,7 @@ fun ChatListScreen(
                             onLongPress = { viewModel.openChatPreview(chat.id) },
                             onTogglePin = { viewModel.togglePinChat(chat.id, !chat.isPinned) },
                             strings = strings,
+                            currentUserName = state.currentUserName,
                         )
                     }
                 }
@@ -376,38 +391,352 @@ private fun ChatSearchBar(
 }
 
 @Composable
+private fun MessengerSpeechBubble(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    val bubbleColor = if (UiIsDark) Color(0xFF23262A) else Color(0xFFE5E7EB)
+    val textColor = if (UiIsDark) Color(0xFFEFF3FF) else Color(0xFF111827)
+    val borderColor = if (UiIsDark) Color(0xFF2D3748) else Color(0xFFD1D5DB)
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier
+    ) {
+        Box(
+            modifier = Modifier
+                .widthIn(max = 84.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(bubbleColor)
+                .border(1.dp, borderColor, RoundedCornerShape(12.dp))
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = text,
+                color = textColor,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center
+            )
+        }
+        
+        Canvas(
+            modifier = Modifier
+                .size(width = 8.dp, height = 4.dp)
+                .offset(y = (-0.5).dp)
+        ) {
+            val path = Path().apply {
+                moveTo(0f, 0f)
+                lineTo(size.width, 0f)
+                lineTo(size.width / 2, size.height)
+                close()
+            }
+            drawPath(path = path, color = bubbleColor)
+            
+            // Border lines for the triangle tail
+            drawLine(
+                color = borderColor,
+                start = Offset(0f, 0f),
+                end = Offset(size.width / 2, size.height),
+                strokeWidth = 1.dp.toPx()
+            )
+            drawLine(
+                color = borderColor,
+                start = Offset(size.width / 2, size.height),
+                end = Offset(size.width, 0f),
+                strokeWidth = 1.dp.toPx()
+            )
+        }
+    }
+}
+
+@Composable
 private fun ChatStoriesRow(
     stories: List<ChatStory>,
+    friendsAndFollowers: List<FriendUserItem>,
     currentUserProfileImageUrl: String,
     currentUserAvatarEmoji: String,
     onCreateNote: () -> Unit,
     onCreateStory: () -> Unit,
     onOpenStory: (ChatStory) -> Unit,
     currentVibeLabel: String,
+    onChatClick: (String) -> Unit,
+    viewModel: ChatViewModel,
+    chats: List<ChatItem>,
 ) {
-    val visibleStories = remember(stories) { stories.take(10) }
+    val coroutineScope = rememberCoroutineScope()
+    val currentUserId = remember { FirebaseAuth.getInstance().currentUser?.uid.orEmpty() }
+    
+    // Group stories/notes by owner
+    val notesByOwner = remember(stories) {
+        stories
+            .filter { it.storyType == "note" }
+            .groupBy { it.ownerId }
+            .mapValues { (_, ownerStories) -> ownerStories.firstOrNull() }
+    }
+    val imageStoriesByOwner = remember(stories) {
+        stories.filter { it.storyType == "image" }.groupBy { it.ownerId }
+    }
 
-    Row(
-        modifier = Modifier
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 14.dp, vertical = 14.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    // Combine friendsAndFollowers and active chats, ensuring uniqueness
+    val combinedFriends = remember(friendsAndFollowers, chats) {
+        val list = mutableListOf<FriendUserItem>()
+        friendsAndFollowers.forEach { friend ->
+            if (friend.userId != currentUserId) {
+                list.add(friend)
+            }
+        }
+        chats.forEach { chat ->
+            if (chat.otherUserId.isNotBlank() && chat.otherUserId != currentUserId && list.none { it.userId == chat.otherUserId }) {
+                list.add(
+                    FriendUserItem(
+                        userId = chat.otherUserId,
+                        name = chat.name,
+                        avatarEmoji = chat.avatarEmoji,
+                        profileImageUrl = chat.profileImageUrl,
+                        isOnline = chat.isOnline
+                    )
+                )
+            }
+        }
+        list
+    }
+
+    LazyRow(
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalAlignment = Alignment.Top
     ) {
-        StoryAddTile(
-            profileImageUrl = currentUserProfileImageUrl,
-            avatarEmoji = currentUserAvatarEmoji,
-            onLabelClick = onCreateNote,
-            onAvatarClick = onCreateStory,
-            label = currentVibeLabel,
-        )
-        visibleStories.forEach { story ->
-            StoryTile(story = story, onClick = { onOpenStory(story) })
+        // "You" item
+        item {
+            val myNote = notesByOwner[currentUserId]?.note.orEmpty()
+            
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Top,
+                modifier = Modifier
+                    .width(80.dp)
+                    .clickable(
+                        onClick = onCreateNote,
+                        indication = null,
+                        interactionSource = remember { MutableInteractionSource() }
+                    )
+            ) {
+                // Speech bubble for "You"
+                Box(
+                    modifier = Modifier
+                        .height(38.dp)
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.BottomCenter
+                ) {
+                    // Show my note if set, else show "add status..."
+                    MessengerSpeechBubble(
+                        text = myNote.ifBlank { "add status..." }
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height((-4).dp))
+                
+                // Avatar with blue border and blue plus sign
+                Box(
+                    contentAlignment = Alignment.BottomEnd,
+                    modifier = Modifier.size(60.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(60.dp)
+                            .clip(CircleShape)
+                            .background(HBlue),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(55.dp)
+                                .clip(CircleShape)
+                                .background(HBg),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(50.dp)
+                                    .clip(CircleShape)
+                                    .background(HChipBg),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (currentUserProfileImageUrl.isNotBlank()) {
+                                    AsyncImage(
+                                        model = currentUserProfileImageUrl,
+                                        contentDescription = "Your profile",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize().clip(CircleShape)
+                                    )
+                                } else {
+                                    Text(text = currentUserAvatarEmoji.ifBlank { "👤" }, fontSize = 22.sp)
+                                }
+                            }
+                        }
+                    }
+                    
+                    Box(
+                        modifier = Modifier
+                            .size(18.dp)
+                            .clip(CircleShape)
+                            .background(HBlue)
+                            .border(1.5.dp, HBg, CircleShape)
+                            .clickable(
+                                onClick = onCreateStory,
+                                indication = null,
+                                interactionSource = remember { MutableInteractionSource() },
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(10.dp)
+                        )
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(4.dp))
+                
+                Text(
+                    text = "You",
+                    color = HWhite,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+
+        // Friends list
+        items(combinedFriends, key = { it.userId }) { friend ->
+            val note = notesByOwner[friend.userId]?.note.orEmpty()
+            val hasImageStory = imageStoriesByOwner[friend.userId]?.isNotEmpty() == true
+            val story = imageStoriesByOwner[friend.userId]?.firstOrNull()
+
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Top,
+                modifier = Modifier
+                    .width(80.dp)
+                    .clickable(
+                        onClick = {
+                            if (hasImageStory && story != null) {
+                                onOpenStory(story)
+                            } else {
+                                coroutineScope.launch {
+                                    val chatId = viewModel.getOrCreateDirectChatWithUser(friend.userId)
+                                    if (chatId != null) {
+                                        onChatClick(chatId)
+                                    }
+                                }
+                            }
+                        },
+                        indication = null,
+                        interactionSource = remember { MutableInteractionSource() }
+                    )
+            ) {
+                // Speech bubble for friend (only show if note is not empty!)
+                Box(
+                    modifier = Modifier
+                        .height(38.dp)
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.BottomCenter
+                ) {
+                    if (note.isNotBlank()) {
+                        MessengerSpeechBubble(text = note)
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height((-4).dp))
+                
+                // Avatar with story ring / online indicator
+                Box(
+                    contentAlignment = Alignment.BottomEnd,
+                    modifier = Modifier.size(60.dp)
+                ) {
+                    val storyGradient = Brush.linearGradient(
+                        colors = listOf(
+                            Color(0xFFE91E63),
+                            Color(0xFFFF5722),
+                            Color(0xFF9C27B0)
+                        )
+                    )
+                    
+                    Box(
+                        modifier = Modifier
+                            .size(60.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (hasImageStory) storyGradient 
+                                else if (friend.isOnline) Brush.sweepGradient(listOf(HBlue, Color(0xFF93C5FD), HGlow, HBlue))
+                                else Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(if (hasImageStory || friend.isOnline) 55.dp else 60.dp)
+                                .clip(CircleShape)
+                                .background(HBg),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(if (hasImageStory || friend.isOnline) 50.dp else 56.dp)
+                                    .clip(CircleShape)
+                                    .background(HChipBg),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (friend.profileImageUrl.isNotBlank()) {
+                                    AsyncImage(
+                                        model = friend.profileImageUrl,
+                                        contentDescription = friend.name,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize().clip(CircleShape)
+                                    )
+                                } else {
+                                    Text(text = friend.avatarEmoji.ifBlank { "👤" }, fontSize = 22.sp)
+                                }
+                            }
+                        }
+                    }
+
+                    if (friend.isOnline) {
+                        Box(
+                            modifier = Modifier
+                                .size(13.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF22C55E))
+                                .border(1.5.dp, HBg, CircleShape)
+                        )
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(4.dp))
+                
+                Text(
+                    text = friend.name.split(" ").firstOrNull() ?: friend.name,
+                    color = HGray2,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun StoryAddTile(
+private fun CurrentVibeBubble(
     profileImageUrl: String,
     avatarEmoji: String,
     onLabelClick: () -> Unit,
@@ -417,33 +746,25 @@ private fun StoryAddTile(
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.widthIn(min = 92.dp, max = 112.dp),
+        modifier = Modifier.widthIn(min = 76.dp, max = 96.dp),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(22.dp))
-                .background(
-                    Brush.linearGradient(
-                        listOf(
-                            HCard.copy(alpha = 0.98f),
-                            HCard.copy(alpha = 0.88f),
-                        ),
-                    ),
-                )
-                .border(1.dp, HBorder.copy(alpha = 0.82f), RoundedCornerShape(22.dp))
+                .clip(RoundedCornerShape(18.dp))
+                .background(HCard.copy(alpha = 0.92f))
+                .border(1.dp, HBorder.copy(alpha = 0.72f), RoundedCornerShape(18.dp))
                 .clickable(onClick = onLabelClick)
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+                .padding(horizontal = 10.dp, vertical = 8.dp),
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     text = label,
                     color = HWhite,
-                    fontSize = 13.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Start,
                 )
                 Text(
                     text = "Create note",
@@ -452,7 +773,6 @@ private fun StoryAddTile(
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Start,
                 )
             }
         }
@@ -460,7 +780,7 @@ private fun StoryAddTile(
         Box(contentAlignment = Alignment.BottomEnd) {
             Box(
                 modifier = Modifier
-                    .size(62.dp)
+                    .size(58.dp)
                     .clip(CircleShape)
                     .background(HChipBg)
                     .border(2.dp, HBlue.copy(alpha = 0.55f), CircleShape),
@@ -471,16 +791,11 @@ private fun StoryAddTile(
                         model = profileImageUrl,
                         contentDescription = "Your note",
                         contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(CircleShape)
-                            .clickable(onClick = onAvatarClick),
+                        modifier = Modifier.fillMaxSize().clip(CircleShape).clickable(onClick = onAvatarClick),
                     )
                 } else {
                     Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clickable(onClick = onAvatarClick),
+                        modifier = Modifier.fillMaxSize().clickable(onClick = onAvatarClick),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
@@ -494,7 +809,7 @@ private fun StoryAddTile(
             }
             Box(
                 modifier = Modifier
-                    .size(22.dp)
+                    .size(20.dp)
                     .offset(x = 2.dp, y = 2.dp)
                     .clip(CircleShape)
                     .background(HBlue)
@@ -506,62 +821,136 @@ private fun StoryAddTile(
                     Icons.Default.Add,
                     contentDescription = null,
                     tint = HWhite,
-                    modifier = Modifier.size(13.dp),
+                    modifier = Modifier.size(12.dp),
                 )
             }
         }
+
+        Text(
+            text = "You",
+            color = HWhite,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
 @Composable
-private fun StoryTile(story: ChatStory, onClick: () -> Unit) {
+private fun FriendNoteBubble(
+    friend: FriendUserItem,
+    note: String,
+    hasStory: Boolean,
+    onClick: () -> Unit,
+) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier
-            .widthIn(min = 74.dp, max = 92.dp)
+            .widthIn(min = 78.dp, max = 98.dp)
             .clickable(onClick = onClick),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(22.dp))
-                .background(
-                    Brush.linearGradient(
-                        listOf(
-                            if (story.isMine) HBlue.copy(alpha = 0.24f) else HCard.copy(alpha = 0.92f),
-                            if (story.isMine) HGlow.copy(alpha = 0.22f) else HBg.copy(alpha = 0.85f),
-                        )
-                    )
-                )
-                .border(1.dp, HBlue.copy(alpha = if (story.isMine) 0.9f else 0.45f), RoundedCornerShape(22.dp))
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+                .clip(RoundedCornerShape(999.dp))
+                .background(Color(0xFF2B2F35))
+                .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = story.note.ifBlank { "New note" },
-                    color = HWhite,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    lineHeight = 14.sp,
-                )
-                Text(
-                    text = story.createdAtLabel,
-                    color = HGray4,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Medium,
-                )
-            }
+            Text(
+                text = note,
+                color = Color(0xFFE5E7EB),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+            )
         }
 
         Box(
             modifier = Modifier
-                .size(58.dp)
+                .size(60.dp)
                 .clip(CircleShape)
-                .border(1.8.dp, HBlue.copy(alpha = if (story.isMine) 0.95f else 0.6f), CircleShape),
+                .border(3.dp, if (hasStory) Color(0xFFF6C177) else HGray6.copy(alpha = 0.55f), CircleShape),
             contentAlignment = Alignment.Center,
+        ) {
+            if (friend.profileImageUrl.isNotBlank()) {
+                AsyncImage(
+                    model = friend.profileImageUrl,
+                    contentDescription = friend.name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(3.dp)
+                        .clip(CircleShape),
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(3.dp)
+                        .clip(CircleShape)
+                        .background(HChipBg),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = friend.avatarEmoji.ifBlank { "👤" },
+                        color = HWhite,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 22.sp,
+                    )
+                }
+            }
+        }
+
+        Text(
+            text = friend.name,
+            color = HGray2,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun StoryNoteBubble(
+    story: ChatStory,
+    onClick: () -> Unit,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier
+            .widthIn(min = 78.dp, max = 98.dp)
+            .clickable(onClick = onClick),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(999.dp))
+                .background(Color(0xFF2B2F35))
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+        ) {
+            Text(
+                text = story.note.ifBlank { "New note" },
+                color = Color(0xFFE5E7EB),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+            )
+        }
+
+        Box(
+            contentAlignment = Alignment.BottomEnd,
+            modifier = Modifier
+                .size(60.dp)
+                .clip(CircleShape)
+                .border(3.dp, Color(0xFFF6C177), CircleShape),
         ) {
             if (story.ownerProfileImageUrl.isNotBlank()) {
                 AsyncImage(
@@ -570,14 +959,14 @@ private fun StoryTile(story: ChatStory, onClick: () -> Unit) {
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(2.dp)
+                        .padding(3.dp)
                         .clip(CircleShape),
                 )
             } else {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(2.dp)
+                        .padding(3.dp)
                         .clip(CircleShape)
                         .background(Color(story.ownerAvatarColor).copy(alpha = 0.25f)),
                     contentAlignment = Alignment.Center,
@@ -615,11 +1004,15 @@ private fun StoryViewerOverlay(
     }
     val progress = remember { Animatable(0f) }
     var isHolding by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
 
     val currentStory = stories.getOrNull(currentIndex) ?: return
     val viewersFlow = remember(currentStory.id) { viewModel.observeStoryViewers(currentStory.id) }
     val viewersResult by viewersFlow.collectAsStateWithLifecycle(initialValue = Result.success(emptyList<StoryViewer>()))
     val viewers = viewersResult.getOrNull().orEmpty()
+    var showReplyComposer by remember(currentStory.id) { mutableStateOf(false) }
+    var replyText by remember(currentStory.id) { mutableStateOf("") }
+    var sendingReply by remember(currentStory.id) { mutableStateOf(false) }
 
     fun goNext() {
         if (currentIndex < stories.lastIndex) {
@@ -839,10 +1232,76 @@ private fun StoryViewerOverlay(
             Spacer(Modifier.height(14.dp))
 
             StoryViewerActions(
-                onReply = {},
-                onReact = {},
+                onReply = { showReplyComposer = true },
+                onReact = {
+                    showReplyComposer = true
+                    if (replyText.isBlank()) {
+                        replyText = "❤️"
+                    }
+                },
                 onMore = onDismiss,
             )
+
+            // Reply composer sheet
+            if (showReplyComposer) {
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        listOf("❤️", "😂", "🔥", "👏", "😮").forEach { emoji ->
+                            AssistChip(
+                                onClick = {
+                                    if (sendingReply) return@AssistChip
+                                    sendingReply = true
+                                    coroutineScope.launch {
+                                        try {
+                                            viewModel.createStoryReply(currentStory, emoji)
+                                            replyText = ""
+                                            showReplyComposer = false
+                                        } catch (_: Exception) {
+                                        } finally {
+                                            sendingReply = false
+                                        }
+                                    }
+                                },
+                                label = { Text(emoji) },
+                            )
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = replyText,
+                        onValueChange = { replyText = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Reply to story") },
+                    )
+                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                        TextButton(onClick = { showReplyComposer = false }) {
+                            Text("Cancel")
+                        }
+                        TextButton(
+                            enabled = replyText.isNotBlank() && !sendingReply,
+                            onClick = {
+                                if (replyText.isBlank() || sendingReply) return@TextButton
+                                sendingReply = true
+                                coroutineScope.launch {
+                                    try {
+                                        viewModel.createStoryReply(currentStory, replyText)
+                                        replyText = ""
+                                        showReplyComposer = false
+                                    } catch (_: Exception) {
+                                    } finally {
+                                        sendingReply = false
+                                    }
+                                }
+                            }
+                        ) {
+                            Text(if (sendingReply) "Sending..." else "Send")
+                        }
+                    }
+                }
+            }
 
             Spacer(Modifier.height(12.dp))
 
@@ -1052,6 +1511,7 @@ private fun ChatRow(
     onLongPress: () -> Unit,
     onTogglePin: () -> Unit,
     strings : com.example.kampus.ui.localization.UiStrings,
+    currentUserName: String,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -1103,7 +1563,7 @@ private fun ChatRow(
                     )
                 }
                 Text(
-                    text     = chatPreviewText(chat, strings),
+                    text     = chatPreviewText(chat, strings, currentUserName),
                     color    = if (chat.unreadCount > 0) HGray2.copy(alpha = 0.85f) else HGray4,
                     fontSize = 13.sp,
                     maxLines = 1,

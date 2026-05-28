@@ -30,6 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.launch
 import com.example.kampus.ui.theme.ThemeController
 import com.example.kampus.ui.groups.GroupColors as C
 
@@ -64,6 +65,8 @@ fun GroupListScreen(
     val strings     = com.example.kampus.ui.localization.rememberUiStrings()
     var searchQuery by remember { mutableStateOf("") }
     var selectedTab by remember { mutableIntStateOf(0) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
     // Groups tab is always index 1 in the global nav
     val selectedNavIndex = 1
@@ -74,6 +77,16 @@ fun GroupListScreen(
 
     Scaffold(
         containerColor = C.Bg,
+        snackbarHost = {
+            SnackbarHost(snackbarHostState) { data ->
+                Snackbar(
+                    containerColor = C.Surface,
+                    contentColor = C.White,
+                    actionColor = C.Blue,
+                    snackbarData = data,
+                )
+            }
+        },
 
         // ── FIXED TOP BAR ────────────────────────────────────────────────────
         topBar = {
@@ -93,9 +106,10 @@ fun GroupListScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(
-                        Brush.verticalGradient(
-                            listOf(Color.Transparent, C.Bg.copy(alpha = 0.98f))
-                        )
+                        run {
+                            val fadeEnd = if (ThemeController.isDark) C.Bg.copy(alpha = 0.98f) else Color.Transparent
+                            Brush.verticalGradient(listOf(Color.Transparent, fadeEnd))
+                        }
                     )
                     .padding(horizontal = 14.dp, vertical = 10.dp)
                     .navigationBarsPadding(),
@@ -139,11 +153,33 @@ fun GroupListScreen(
                 ) {
                     itemsIndexed(displayed, key = { _, g -> g.id }) { index, group ->
                         val isJoined = group.id in state.joinedIds
+                        val isRequested = group.id in state.requestedIds
                         StaggeredGroupCard(
                             group    = group,
                             isJoined = isJoined,
+                            isRequested = isRequested,
                             index    = index,
-                            onJoin   = { viewModel.toggleJoin(group.id) },
+                            onJoin   = {
+                                scope.launch {
+                                    when (val result = viewModel.handleJoinAction(group)) {
+                                        GroupViewModel.JoinActionResult.Joined -> {
+                                            snackbarHostState.showSnackbar("Joined ${group.name}")
+                                        }
+                                        GroupViewModel.JoinActionResult.Requested -> {
+                                            snackbarHostState.showSnackbar("Request sent to ${group.name}")
+                                        }
+                                        GroupViewModel.JoinActionResult.AlreadyRequested -> {
+                                            snackbarHostState.showSnackbar("Request already sent")
+                                        }
+                                        GroupViewModel.JoinActionResult.NotAuthenticated -> {
+                                            snackbarHostState.showSnackbar("Sign in to join groups")
+                                        }
+                                        is GroupViewModel.JoinActionResult.Failed -> {
+                                            snackbarHostState.showSnackbar(result.message)
+                                        }
+                                    }
+                                }
+                            },
                             onClick  = { onGroupClick(group) },
                             strings  = strings,
                         )
@@ -419,6 +455,7 @@ private fun GroupTopBar(
 private fun StaggeredGroupCard(
     group    : GroupData,
     isJoined : Boolean,
+    isRequested : Boolean,
     index    : Int,
     onJoin   : () -> Unit,
     onClick  : () -> Unit,
@@ -433,7 +470,7 @@ private fun StaggeredGroupCard(
         visible = visible,
         enter   = fadeIn(tween(280)) + slideInVertically(tween(280, easing = EaseOutCubic)) { it / 3 },
     ) {
-        GroupCard(group = group, isJoined = isJoined, onJoin = onJoin, onClick = onClick, strings = strings)
+        GroupCard(group = group, isJoined = isJoined, isRequested = isRequested, onJoin = onJoin, onClick = onClick, strings = strings)
     }
 }
 
@@ -444,6 +481,7 @@ private fun StaggeredGroupCard(
 private fun GroupCard(
     group    : GroupData,
     isJoined : Boolean,
+    isRequested : Boolean,
     onJoin   : () -> Unit,
     onClick  : () -> Unit,
     strings  : com.example.kampus.ui.localization.UiStrings,
@@ -483,7 +521,13 @@ private fun GroupCard(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(group.name, color = C.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp)
-                Text(group.category.uppercase(), color = C.Blue, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.5.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(group.category.uppercase(), color = C.Blue, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.5.sp)
+                    PrivacyBadge(isPrivate = group.privacy.equals("private", ignoreCase = true))
+                    if (isRequested) {
+                        StatusBadge(text = "Requested", tint = C.Gray3)
+                    }
+                }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     StatChip(
@@ -504,22 +548,73 @@ private fun GroupCard(
                         .height(42.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(
-                            if (isJoined) Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
+                            if (isJoined || isRequested) Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
                             else Brush.linearGradient(listOf(C.Blue, C.BlueGlow))
                         )
-                        .border(1.dp, if (isJoined) C.Border else Color.Transparent, RoundedCornerShape(12.dp))
+                        .border(1.dp, if (isJoined || isRequested) C.Border else Color.Transparent, RoundedCornerShape(12.dp))
                         .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onJoin),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text       = if (isJoined) strings.joined else strings.joinGroup,
-                        color      = if (isJoined) C.Gray3 else C.White,
+                        text       = when {
+                            isJoined -> strings.joined
+                            isRequested -> "Requested"
+                            group.privacy.equals("private", ignoreCase = true) -> "Request Join"
+                            else -> strings.joinGroup
+                        },
+                        color      = if (isJoined || isRequested) C.Gray3 else C.White,
                         fontSize   = 14.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun PrivacyBadge(isPrivate: Boolean) {
+    val label = if (isPrivate) "Private" else "Public"
+    val background = if (isPrivate) C.Red.copy(alpha = 0.14f) else C.Blue.copy(alpha = 0.14f)
+    val contentColor = if (isPrivate) C.Red else C.Blue
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(background)
+            .border(1.dp, background, RoundedCornerShape(50))
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(6.dp)
+                .clip(CircleShape)
+                .background(contentColor),
+        )
+        Text(label, color = contentColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun StatusBadge(text: String, tint: Color) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(tint.copy(alpha = 0.12f))
+            .border(1.dp, tint.copy(alpha = 0.16f), RoundedCornerShape(50))
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(6.dp)
+                .clip(CircleShape)
+                .background(tint),
+        )
+        Text(text, color = tint, fontSize = 10.sp, fontWeight = FontWeight.Bold)
     }
 }
 

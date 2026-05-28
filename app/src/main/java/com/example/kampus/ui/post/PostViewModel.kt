@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.kampus.data.repository.PostEngagementRepository
 import com.example.kampus.di.SupabaseModule
 import com.example.kampus.ui.feed.PostItem
+import com.example.kampus.utils.ActivityLogger
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -152,7 +153,6 @@ class PostViewModel : ViewModel() {
                 commentsListener?.remove()
                 commentsListener = firestore.collection("post_comments")
                     .whereEqualTo("postId", postId)
-                    .orderBy("createdAt", Query.Direction.DESCENDING)
                     .addSnapshotListener { commentSnapshot, commentError ->
                         if (commentError != null) {
                             _uiState.update { it.copy(error = commentError.message) }
@@ -178,7 +178,7 @@ class PostViewModel : ViewModel() {
                                 } catch (_: Exception) {
                                     null
                                 }
-                            }.orEmpty()
+                            }.orEmpty().sortedByDescending { it.createdAt }
 
                             val repliesByParent = mappedComments
                                 .filter { !it.parentCommentId.isNullOrBlank() }
@@ -186,7 +186,6 @@ class PostViewModel : ViewModel() {
 
                             val comments = mappedComments
                                 .filter { it.parentCommentId.isNullOrBlank() }
-                                .sortedByDescending { it.createdAt }
                                 .map { comment ->
                                     comment.copy(
                                         replies = repliesByParent[comment.id].orEmpty().sortedBy { it.createdAt },
@@ -217,6 +216,24 @@ class PostViewModel : ViewModel() {
             }
 
             val username = profile.username
+            val activityType = if (parentCommentId.isNullOrBlank()) "comment" else "reply"
+            val activityText = if (parentCommentId.isNullOrBlank()) {
+                "Commented on a post"
+            } else {
+                "Replied to a comment"
+            }
+
+            ActivityLogger.logAction(
+                type = activityType,
+                text = activityText,
+                metadata = mapOf(
+                    "postId" to postId.toString(),
+                    "parentCommentId" to parentCommentId.orEmpty(),
+                    "previewTitle" to (text.takeIf { it.isNotBlank() } ?: "Comment"),
+                    "previewSubtitle" to username,
+                ),
+            )
+
             firestore.collection("post_comments")
                 .document()
                 .set(

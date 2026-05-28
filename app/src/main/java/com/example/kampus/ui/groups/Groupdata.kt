@@ -37,7 +37,16 @@ data class GroupData(
     val members     : String,
     val posts       : String,
     val isJoined    : Boolean = false,
+    val privacy     : String  = "public",
+    val ownerId     : String  = "",
     val description : String  = "",
+)
+
+data class GroupJoinRequest(
+    val requesterId   : String,
+    val requesterName : String,
+    val requestedAt   : Long,
+    val status        : String = "pending",
 )
 
 data class GroupPost(

@@ -27,6 +27,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import com.example.kampus.ui.groups.GroupColors as C
 
 private val emojiOptions = listOf("🎨","🌀","💻","📷","✏️","🎵","🚀","🌸","⚽","🎮","📚","🍕","🌍","🎬","🏋️")
@@ -59,11 +61,26 @@ fun CreateGroupScreen(
     var category    by remember { mutableStateOf(categoryOptions.first()) }
     var emoji       by remember { mutableStateOf(emojiOptions.first()) }
     var gradIndex   by remember { mutableIntStateOf(0) }
+    var privacy     by remember { mutableStateOf("public") }
+    var isCreating  by remember { mutableStateOf(false) }
+    var statusText  by remember { mutableStateOf<String?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
-    val canCreate = name.isNotBlank() && description.isNotBlank()
+    val canCreate = name.isNotBlank() && description.isNotBlank() && !isCreating
 
     Scaffold(
         containerColor = C.Bg,
+        snackbarHost = {
+            SnackbarHost(snackbarHostState) { data ->
+                Snackbar(
+                    containerColor = C.Surface,
+                    contentColor = C.White,
+                    actionColor = C.Blue,
+                    snackbarData = data,
+                )
+            }
+        },
         topBar = {
             Row(
                 modifier = Modifier
@@ -126,17 +143,33 @@ fun CreateGroupScreen(
                                 members     = "1",
                                 posts       = "0",
                                 isJoined    = true,
+                                privacy     = privacy,
                                 description = description,
                             )
-                            // Create the group and log activity
-                            viewModel.createGroup(groupData)
-                            // Also call the original onCreate callback for navigation
-                            onCreate(groupData)
+                            scope.launch {
+                                isCreating = true
+                                statusText = null
+                                val result = viewModel.createGroup(groupData)
+                                isCreating = false
+
+                                result
+                                    .onSuccess {
+                                        statusText = "Group created"
+                                        snackbarHostState.showSnackbar("Group created")
+                                        delay(350)
+                                        onCreate(groupData)
+                                    }
+                                    .onFailure { error ->
+                                        val message = error.message ?: "Could not create group"
+                                        statusText = message
+                                        snackbarHostState.showSnackbar(message)
+                                    }
+                            }
                         },
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text       = "Create Group",
+                        text       = if (isCreating) "Creating..." else if (statusText != null) "Created" else "Create Group",
                         color      = if (canCreate) C.White else C.Gray3,
                         fontSize   = 15.sp,
                         fontWeight = FontWeight.SemiBold,
@@ -241,6 +274,45 @@ fun CreateGroupScreen(
                     }
                 }
 
+                // Privacy
+                FormField(label = "Group Privacy") {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("public" to "Public", "private" to "Private").forEach { (value, label) ->
+                            val selected = privacy == value
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(
+                                        if (selected) Brush.linearGradient(listOf(C.Blue, C.BlueGlow))
+                                        else Brush.linearGradient(listOf(C.Surface, C.Surface))
+                                    )
+                                    .border(
+                                        1.dp,
+                                        if (selected) Color.Transparent else C.Border,
+                                        RoundedCornerShape(10.dp),
+                                    )
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                    ) { privacy = value }
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                            ) {
+                                Text(
+                                    text = label,
+                                    color = if (selected) C.White else C.Gray3,
+                                    fontSize = 13.sp,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                )
+                            }
+                        }
+                    }
+                    Text(
+                        text = if (privacy == "public") "Anyone can join immediately." else "People must request access and wait for approval.",
+                        color = C.Gray3,
+                        fontSize = 12.sp,
+                    )
+                }
+
                 // Emoji picker
                 FormField(label = "Cover Emoji") {
                     LazyRow(
@@ -300,6 +372,15 @@ fun CreateGroupScreen(
                 }
 
                 Spacer(Modifier.height(8.dp))
+
+                statusText?.let { message ->
+                    Text(
+                        text = message,
+                        color = if (message == "Group created") C.Blue else Color(0xFFFF6B6B),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
             }
         }
     }

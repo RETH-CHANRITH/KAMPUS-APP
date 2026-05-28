@@ -66,6 +66,15 @@ class KampusFirebaseMessagingService : FirebaseMessagingService() {
                 chatId = data["chatId"].orEmpty(),
                 senderId = data["senderId"].orEmpty(),
             )
+            } else if (data["type"] == "story_reply") {
+                // Special handling for story replies to deep-link to the chat + highlight
+                showStoryReplyNotification(
+                    title = title,
+                    body = body,
+                    chatId = data["chatId"].orEmpty(),
+                    storyId = data["storyId"].orEmpty(),
+                    replyId = data["replyId"].orEmpty(),
+                )
         } else {
             showGenericNotification(title, body)
         }
@@ -78,6 +87,37 @@ class KampusFirebaseMessagingService : FirebaseMessagingService() {
             body = body,
             chatId = chatId,
         )
+    }
+
+    private fun showStoryReplyNotification(title: String, body: String, chatId: String, storyId: String, replyId: String) {
+        ensureCallChannel()
+
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            if (chatId.isNotBlank()) putExtra("openChatId", chatId)
+            if (storyId.isNotBlank()) putExtra("storyId", storyId)
+            if (replyId.isNotBlank()) putExtra("replyId", replyId)
+        }
+
+        val notificationId = stableNotificationId("story_reply_$replyId")
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            notificationId,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or pendingIntentImmutableFlag(),
+        )
+
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+
+        NotificationManagerCompat.from(this).notify(notificationId, notification)
     }
 
     private fun showGenericNotification(title: String, body: String) {

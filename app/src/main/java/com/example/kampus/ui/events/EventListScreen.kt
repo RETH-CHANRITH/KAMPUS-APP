@@ -94,7 +94,12 @@ fun EventListScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Brush.verticalGradient(colors = listOf(Color.Transparent, C.Bg.copy(alpha = 0.98f))))
+                    .background(
+                        run {
+                            val fadeEnd = if (ThemeController.isDark) C.Bg.copy(alpha = 0.98f) else Color.Transparent
+                            Brush.verticalGradient(colors = listOf(Color.Transparent, fadeEnd))
+                        }
+                    )
                     .padding(horizontal = 14.dp, vertical = 10.dp)
                     .navigationBarsPadding(),
             ) {

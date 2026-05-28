@@ -155,6 +155,7 @@ service cloud.firestore {
         // Or the client is only updating allowed preview/typing/pin/mute/archive fields
         || request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'lastMessage','lastMessageSenderName','lastMessageSenderId','lastMessageTime',
+          'lastMessageType','lastCallType','lastCallStatus',
           'timestamp','typingUserIds','typingUpdatedAt','unreadCount','unreadCounts','isPinned','pinnedAt',
           'isMuted','isArchived'
         ])
@@ -180,7 +181,7 @@ service cloud.firestore {
         // 4) reactions and hidden text (by any participant)
         allow update: if isChatParticipant(chatId) && (
           (
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead', 'status'])
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead', 'seen', 'status'])
           )
           ||
           (
@@ -275,7 +276,24 @@ service cloud.firestore {
 
     // ============ STORIES ============
     match /stories/{storyId} {
-      allow read: if isSignedIn();
+      // Allow read only for signed-in users and only if story is not expired
+      // and the privacy rules permit it (public, friends, or owner).
+      function isFollowerOfOwner() {
+        return exists(/databases/$(database)/documents/users/$(resource.data.ownerId)/followers/$(request.auth.uid));
+      }
+
+      allow get: if isSignedIn() &&
+        // story must not be expired
+        resource.data.expiresAt is number && request.time.toMillis() < resource.data.expiresAt &&
+        (
+          resource.data.privacy == 'public' ||
+          request.auth.uid == resource.data.ownerId ||
+          (resource.data.privacy == 'friends' && isFollowerOfOwner())
+        );
+
+      // Allow the story feed query to load for signed-in users; the client still
+      // filters expired stories and the UI only surfaces story actions to owners.
+      allow list: if isSignedIn();
 
       allow create: if isSignedIn() &&
         request.auth.uid == request.resource.data.ownerId &&
@@ -285,10 +303,36 @@ service cloud.firestore {
       allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
 
       match /views/{viewerId} {
-        allow read: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+        // Only the story owner may read the viewers list for privacy.
+        allow read: if isSignedIn() && request.auth.uid == resource.data.ownerId;
+        // A user may create or update their own view record.
         allow create, update: if isSignedIn() && viewerId == request.auth.uid;
         allow delete: if false;
       }
+    }
+
+    // ============ STORY DRAFTS ============
+    match /storyDrafts/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // ============ STORY REPLIES ============
+    match /storyReplies/{replyId} {
+      allow create: if isSignedIn() &&
+        request.resource.data.senderId == request.auth.uid &&
+        request.resource.data.storyId is string &&
+        request.resource.data.receiverId is string &&
+        request.resource.data.storyOwnerId is string &&
+        request.resource.data.createdAt is number;
+
+      // Sender, receiver, and story owner may read replies
+      allow read: if isSignedIn() && (
+        request.auth.uid == resource.data.senderId ||
+        request.auth.uid == resource.data.receiverId ||
+        request.auth.uid == resource.data.storyOwnerId
+      );
+
+      allow update, delete: if isSignedIn() && request.auth.uid == resource.data.senderId;
     }
 
     // ============ POSTS ============
@@ -301,10 +345,11 @@ service cloud.firestore {
 
       allow update: if isSignedIn() && (
         resource.data.authorId == request.auth.uid ||
+        (resource.data.userId == request.auth.uid) ||
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'comments', 'shares', 'likedBy'])
       );
 
-      allow delete: if isSignedIn() && resource.data.authorId == request.auth.uid;
+      allow delete: if isSignedIn() && (resource.data.authorId == request.auth.uid || resource.data.userId == request.auth.uid);
 
       match /comments/{commentId} {
         allow read: if isSignedIn();
@@ -318,6 +363,10 @@ service cloud.firestore {
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likedBy', 'likesCount', 'updatedAt'])
         );
         allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      }
+
+      match /reports/{reporterId} {
+        allow read, write: if isSignedIn();
       }
     }
 
@@ -388,6 +437,32 @@ service cloud.firestore {
       allow create: if isSignedIn();
       allow update: if isSignedIn();
       allow delete: if false;
+
+      // Members subcollection
+      match /members/{memberId} {
+        allow read: if isSignedIn();
+        allow write: if isSignedIn();
+      }
+
+      // Join requests subcollection
+      match /joinRequests/{requesterId} {
+        allow read: if isSignedIn();
+        allow write: if isSignedIn();
+      }
+
+      // Posts subcollection
+      match /posts/{postId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn();
+        allow update: if isSignedIn();
+        allow delete: if isSignedIn();
+
+        // Post reports subcollection
+        match /reports/{reporterId} {
+          allow read: if isSignedIn();
+          allow write: if isSignedIn();
+        }
+      }
     }
 
     // ============ FRIENDS (under users) ============
@@ -402,6 +477,17 @@ service cloud.firestore {
     // Each user's blockedUsers collection is managed only by that user.
     match /users/{userId}/blockedUsers/{blockedUserId} {
       allow read, create, update, delete: if isOwner(userId);
+    }
+
+    // ============ COLLECTION GROUPS ============
+    // Required for collectionGroup("members") queries (e.g. observeMyMemberGroupIds).
+    match /{path=**}/members/{memberId} {
+      allow read: if isSignedIn();
+    }
+
+    // Required for collectionGroup("joinRequests") queries (e.g. observeMyPendingGroupIds).
+    match /{path=**}/joinRequests/{requesterId} {
+      allow read: if isSignedIn();
     }
 
     // ============ DENY EVERYTHING ELSE ============

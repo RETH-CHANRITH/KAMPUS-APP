@@ -1,12 +1,8 @@
 package com.example.kampus.ui.events
 
 import androidx.compose.ui.graphics.Color
+import com.example.kampus.ui.theme.ThemeController
 import com.example.kampus.ui.theme.AccentYellow
-import com.example.kampus.ui.theme.BgDark
-import com.example.kampus.ui.theme.BorderSubtle
-import com.example.kampus.ui.theme.CardSurface
-import com.example.kampus.ui.theme.Primary
-import com.example.kampus.ui.theme.SurfaceDark
 import com.example.kampus.ui.theme.TextPrimary
 import com.example.kampus.ui.theme.TextSecondary
 import com.example.kampus.ui.theme.TextTertiary
@@ -15,23 +11,25 @@ import com.example.kampus.ui.theme.TextTertiary
 //  Shared colour palette — mirrors KAMPUS dark theme
 // ─────────────────────────────────────────────────────────────────────────────
 object EventColors {
-    val Bg         = BgDark
-    val Card       = CardSurface
-    val Surface    = SurfaceDark
-    val Border     = BorderSubtle
-    val Blue       = Primary
-    val BlueGlow   = Primary
-    val BlueSoft   = Primary.copy(alpha = 0.16f)
-    val White      = TextPrimary
-    val Gray1      = TextPrimary
-    val Gray2      = TextSecondary
-    val Gray3      = TextTertiary
-    val Gray4      = TextTertiary
-    val Gray5      = TextTertiary.copy(alpha = 0.55f)
-    val Red        = Color(0xFFEF4444)
-    val Green      = Color(0xFF22C55E)
-    val Amber      = AccentYellow
-    val NavBg      = Color(0xFF0C1018)
+    private val isDark get() = ThemeController.isDark
+
+    val Bg: Color get() = if (isDark) Color(0xFF0F0F17) else Color(0xFFFFFFFF)
+    val Card: Color get() = if (isDark) Color(0xFF26262C) else Color(0xFFF7F7FA)
+    val Surface: Color get() = if (isDark) Color(0xFF2A2D34) else Color(0xFFF3F4F8)
+    val Border: Color get() = if (isDark) Color(0xFF3F3F46) else Color(0xFFD1D5DB)
+    val Blue: Color get() = ThemeController.accent.color
+    val BlueGlow: Color get() = ThemeController.accent.color
+    val BlueSoft: Color get() = ThemeController.accent.color.copy(alpha = 0.16f)
+    val White: Color get() = TextPrimary
+    val Gray1: Color get() = if (isDark) TextPrimary else Color(0xFF111827)
+    val Gray2: Color get() = TextSecondary
+    val Gray3: Color get() = TextTertiary
+    val Gray4: Color get() = TextTertiary
+    val Gray5: Color get() = TextTertiary.copy(alpha = 0.55f)
+    val Red: Color get() = Color(0xFFEF4444)
+    val Green: Color get() = Color(0xFF22C55E)
+    val Amber: Color get() = AccentYellow
+    val NavBg: Color get() = if (isDark) Color(0xFF0C1018) else Color(0xFFFFFFFF)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

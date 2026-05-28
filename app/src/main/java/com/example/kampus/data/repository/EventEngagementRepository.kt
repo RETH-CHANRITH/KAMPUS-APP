@@ -4,10 +4,14 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
+import com.example.kampus.utils.ActivityLogger
 import com.example.kampus.utils.NotificationLogger
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
 data class EventEngagementSummary(
@@ -29,6 +33,7 @@ data class EventComment(
     val authorId: String = "",
     val authorName: String = "",
     val authorEmoji: String = "👤",
+    val authorProfileImageUrl: String = "",
     val text: String = "",
     val imageUrl: String? = null,
     val createdAt: Long? = null,
@@ -114,6 +119,7 @@ class EventEngagementRepository(
                         authorId = doc.getString("authorId") ?: "",
                         authorName = doc.getString("authorName") ?: "Unknown",
                         authorEmoji = doc.getString("authorEmoji") ?: "👤",
+                        authorProfileImageUrl = doc.getString("authorProfileImageUrl") ?: "",
                         text = text,
                         imageUrl = doc.getString("imageUrl")?.takeIf { it.isNotBlank() },
                         createdAt = doc.getLong("createdAt"),
@@ -123,22 +129,53 @@ class EventEngagementRepository(
                     )
                 }
 
-                val repliesByParent = mapped
-                    .filter { !it.parentCommentId.isNullOrBlank() }
-                    .groupBy { it.parentCommentId!! }
+                launch {
+                    val enriched = enrichEventCommentsWithProfiles(mapped)
+                    val repliesByParent = enriched
+                        .filter { !it.parentCommentId.isNullOrBlank() }
+                        .groupBy { it.parentCommentId!! }
 
-                val comments = mapped
-                    .filter { it.parentCommentId.isNullOrBlank() }
-                    .map { comment ->
-                        comment.copy(
-                            replies = repliesByParent[comment.id].orEmpty().sortedBy { it.createdAt ?: 0L },
-                        )
-                    }
+                    val comments = enriched
+                        .filter { it.parentCommentId.isNullOrBlank() }
+                        .map { comment ->
+                            comment.copy(
+                                replies = repliesByParent[comment.id].orEmpty().sortedBy { it.createdAt ?: 0L },
+                            )
+                        }
 
-                trySend(Result.success(comments))
+                    trySend(Result.success(comments))
+                }
             }
 
         awaitClose { listener.remove() }
+    }
+
+    private suspend fun enrichEventCommentsWithProfiles(comments: List<EventComment>): List<EventComment> = coroutineScope {
+        val cachedProfiles = comments
+            .map { it.authorId }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .associateWith { authorId ->
+                async {
+                    val profileImageUrl = firestore.collection("users")
+                        .document(authorId)
+                        .get()
+                        .await()
+                        .getString("profileImageUrl")
+                        ?.takeIf { it.isNotBlank() }
+                        .orEmpty()
+                    profileImageUrl
+                }
+            }
+
+        comments.map { comment ->
+            if (comment.authorProfileImageUrl.isNotBlank() || comment.authorId.isBlank()) {
+                comment
+            } else {
+                val fallbackImageUrl = cachedProfiles[comment.authorId]?.await().orEmpty()
+                if (fallbackImageUrl.isBlank()) comment else comment.copy(authorProfileImageUrl = fallbackImageUrl)
+            }
+        }
     }
 
     suspend fun toggleFlag(
@@ -191,6 +228,7 @@ class EventEngagementRepository(
         userId: String,
         authorName: String,
         authorEmoji: String,
+        authorProfileImageUrl: String = "",
         text: String,
         imageUrl: String? = null,
         parentCommentId: String? = null,
@@ -210,6 +248,17 @@ class EventEngagementRepository(
                 .orEmpty()
             val isReply = parentAuthorId.isNotBlank()
 
+            ActivityLogger.logAction(
+                type = if (isReply) "reply" else "comment",
+                text = if (isReply) "Replied to an event comment" else "Commented on an event",
+                metadata = mapOf(
+                    "eventId" to eventId,
+                    "parentCommentId" to parentCommentId.orEmpty(),
+                    "previewTitle" to (cleanText.takeIf { it.isNotBlank() } ?: "Comment"),
+                    "previewSubtitle" to authorName,
+                ),
+            )
+
             firestore.runTransaction { transaction ->
                 val summarySnapshot = transaction.get(summaryRef)
                 val currentCount = (summarySnapshot.getLong("commentsCount") ?: 0L).toInt()
@@ -220,6 +269,7 @@ class EventEngagementRepository(
                         "authorId" to userId,
                         "authorName" to authorName,
                         "authorEmoji" to authorEmoji,
+                        "authorProfileImageUrl" to authorProfileImageUrl,
                         "text" to cleanText,
                         "imageUrl" to imageUrl,
                         "parentCommentId" to parentCommentId,

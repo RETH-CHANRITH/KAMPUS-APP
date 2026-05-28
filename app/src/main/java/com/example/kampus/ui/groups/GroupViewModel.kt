@@ -20,6 +20,7 @@ data class GroupUiState(
     val myGroups       : List<GroupData> = emptyList(),
     val discoverGroups : List<GroupData> = emptyList(),
     val joinedIds      : Set<Int>        = emptySet(),
+    val requestedIds   : Set<Int>        = emptySet(),
     val likedPostIds   : Set<Int>        = emptySet(),
     val selectedTab    : Int             = 0,
     val searchQuery    : String          = "",
@@ -66,6 +67,14 @@ class GroupViewModel : ViewModel() {
     }
 
     // ── Actions ───────────────────────────────────────────────────────────────
+    sealed class JoinActionResult {
+        data object Joined : JoinActionResult()
+        data object Requested : JoinActionResult()
+        data object AlreadyRequested : JoinActionResult()
+        data object NotAuthenticated : JoinActionResult()
+        data class Failed(val message: String) : JoinActionResult()
+    }
+
     fun toggleJoin(groupId: Int) {
         _uiState.update { state ->
             state.copy(
@@ -75,6 +84,45 @@ class GroupViewModel : ViewModel() {
                     state.joinedIds + groupId,
             )
         }
+    }
+
+    suspend fun handleJoinAction(group: GroupData): JoinActionResult {
+        if (group.privacy.equals("private", ignoreCase = true)) {
+            if (group.id in _uiState.value.requestedIds || group.id in _uiState.value.joinedIds) {
+                return JoinActionResult.AlreadyRequested
+            }
+
+            val currentUser = FirebaseAuth.getInstance().currentUser ?: return JoinActionResult.NotAuthenticated
+            val requesterId = currentUser.uid
+            if (requesterId.isBlank()) return JoinActionResult.NotAuthenticated
+
+            val requesterName = currentUser.displayName
+                ?: currentUser.email
+                ?: "Student"
+
+            val result = groupRepository.requestJoinGroup(
+                groupId = group.id.toString(),
+                request = GroupJoinRequest(
+                    requesterId = requesterId,
+                    requesterName = requesterName,
+                    requestedAt = System.currentTimeMillis(),
+                )
+            )
+
+            return result
+                .onSuccess {
+                    _uiState.update { state ->
+                        state.copy(requestedIds = state.requestedIds + group.id)
+                    }
+                }
+                .fold(
+                    onSuccess = { JoinActionResult.Requested },
+                    onFailure = { JoinActionResult.Failed(it.message ?: "Could not send join request") }
+                )
+        }
+
+        toggleJoin(group.id)
+        return JoinActionResult.Joined
     }
 
     fun toggleLike(postId: Int) {
@@ -96,41 +144,36 @@ class GroupViewModel : ViewModel() {
         _uiState.update { it.copy(searchQuery = query) }
     }
 
-    fun createGroup(groupData: GroupData) {
-        viewModelScope.launch {
-            val currentUserId = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
-            val groupPayload = mapOf(
-                "id" to groupData.id,
-                "name" to groupData.name,
-                "category" to groupData.category,
-                "coverColor1" to groupData.coverColor1.value,
-                "coverColor2" to groupData.coverColor2.value,
-                "coverEmoji" to groupData.coverEmoji,
-                "description" to groupData.description,
-                "members" to groupData.members,
-                "posts" to groupData.posts,
-                "isJoined" to true,
-                "createdAt" to System.currentTimeMillis(),
-                "ownerId" to currentUserId,
-            )
+    suspend fun createGroup(groupData: GroupData): Result<String> {
+        val currentUserId = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
+        val groupPayload = mapOf(
+            "id" to groupData.id,
+            "name" to groupData.name,
+            "category" to groupData.category,
+            "coverColor1" to groupData.coverColor1.value.toLong(),
+            "coverColor2" to groupData.coverColor2.value.toLong(),
+            "coverEmoji" to groupData.coverEmoji,
+            "description" to groupData.description,
+            "members" to groupData.members,
+            "posts" to groupData.posts,
+            "isJoined" to false,
+            "privacy" to groupData.privacy.lowercase(),
+            "createdAt" to System.currentTimeMillis(),
+            "ownerId" to currentUserId,
+        )
 
-            groupRepository.createGroup(groupPayload)
-                .onSuccess { groupId ->
-                    // Log the group creation activity
-                    ActivityLogger.logAction(
-                        type = "create_group",
-                        text = "Created group: ${groupData.name}",
-                        metadata = mapOf("groupId" to groupId),
-                    )
-                    // Add to myGroups
-                    _uiState.update { state ->
-                        state.copy(myGroups = listOf(groupData) + state.myGroups)
-                    }
-                }
-                .onFailure {
-                    // Handle error if needed
-                }
+        val result = groupRepository.createGroup(groupPayload)
+        result.onSuccess { groupId ->
+            ActivityLogger.logAction(
+                type = "create_group",
+                text = "Created group: ${groupData.name}",
+                metadata = mapOf("groupId" to groupId),
+            )
+            _uiState.update { state ->
+                state.copy(myGroups = listOf(groupData) + state.myGroups)
+            }
         }
+        return result
     }
 
     // ── Computed helpers ──────────────────────────────────────────────────────

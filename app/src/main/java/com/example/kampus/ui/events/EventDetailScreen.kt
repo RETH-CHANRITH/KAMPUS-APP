@@ -1133,7 +1133,16 @@ private fun CommentRow(
                 .border(1.dp, if (isReply) C.Blue.copy(alpha = 0.18f) else C.Blue.copy(alpha = 0.22f), CircleShape),
             contentAlignment = Alignment.Center,
         ) {
-            Text(comment.authorEmoji, fontSize = if (isReply) 14.sp else 16.sp)
+            if (comment.authorProfileImageUrl.isNotBlank()) {
+                AsyncImage(
+                    model = comment.authorProfileImageUrl,
+                    contentDescription = comment.authorName,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize().clip(CircleShape),
+                )
+            } else {
+                Text(comment.authorEmoji, fontSize = if (isReply) 14.sp else 16.sp)
+            }
         }
 
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {

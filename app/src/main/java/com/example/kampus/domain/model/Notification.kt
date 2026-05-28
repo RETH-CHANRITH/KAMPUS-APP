@@ -11,5 +11,8 @@ data class AppNotification(
 	val targetId: String = "",
 	val createdAt: Long = 0L,
 	val isRead: Boolean = false,
+	val actorProfileImageUrl: String = "",
+	val actorAvatarEmoji: String = "",
+	val postImageUrl: String = "",
 )
 

@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.automirrored.outlined.VolumeOff
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -32,6 +33,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -166,7 +168,7 @@ fun HomeScreen(
     val stories = uiState.stories.map { it.toFeedStoryItem() }
 
     var selectedNav by remember { mutableIntStateOf(0) }
-    var notifCount  by remember { mutableIntStateOf(3) }
+    val unreadNotifsCount by vm.unreadCount.collectAsStateWithLifecycle()
     val listState   = rememberLazyListState()
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -174,6 +176,8 @@ fun HomeScreen(
     var pendingDeletePost by remember { mutableStateOf<PostItem?>(null) }
     var confirmDeleteVisible by rememberSaveable { mutableStateOf(false) }
     var recentlyDeletedPost by remember { mutableStateOf<PostItem?>(null) }
+    var pendingReportPost by remember { mutableStateOf<PostItem?>(null) }
+    var pendingBlockPost by remember { mutableStateOf<PostItem?>(null) }
 
     Scaffold(
         containerColor = HBg,
@@ -185,8 +189,8 @@ fun HomeScreen(
                 shadowElevation = 0.dp,
             ) {
                 TopBar(
-                    notifCount    = notifCount,
-                    onNotifClick  = { notifCount = 0; onNotifClick() },
+                    notifCount    = unreadNotifsCount,
+                    onNotifClick  = onNotifClick,
                     onSearchClick = onSearchClick,
                 )
             }
@@ -244,9 +248,10 @@ fun HomeScreen(
             item {
                 Spacer(Modifier.height(8.dp))
                 StoriesRow(
-                    stories = stories,
+                    stories                    = stories,
                     currentUserProfileImageUrl = uiState.currentUserProfileImageUrl,
-                    currentUserAvatarEmoji = uiState.currentUserAvatarEmoji,
+                    currentUserAvatarEmoji     = uiState.currentUserAvatarEmoji,
+                    friendsAndFollowers        = uiState.friendsAndFollowers,
                 )
                 Spacer(Modifier.height(14.dp))
                 HorizontalDivider(
@@ -259,6 +264,7 @@ fun HomeScreen(
                 PostCard(
                     post    = post,
                     isLiked = post.id in likedPosts || (currentUserId.isNotBlank() && currentUserId in post.likedBy),
+                    isSaved = post.id in uiState.savedPostIds,
                     onLike  = {
                         vm.toggleLike(post.id)
                     },
@@ -323,6 +329,46 @@ fun HomeScreen(
                                 vm.hideFromProfileBackend(targetPost.id)
                                 coroutineScope.launch { snackbarHostState.showSnackbar("Hidden from profile") }
                             }
+                            "save" -> {
+                                vm.savePost(targetPost.id, true)
+                                coroutineScope.launch { snackbarHostState.showSnackbar("Post saved") }
+                            }
+                            "unsave" -> {
+                                vm.savePost(targetPost.id, false)
+                                coroutineScope.launch { snackbarHostState.showSnackbar("Post unsaved") }
+                            }
+                            "share" -> {
+                                vm.incrementShareCount(targetPost.id)
+                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_SUBJECT, "${targetPost.author} on Kampus")
+                                    putExtra(Intent.EXTRA_TEXT, "${targetPost.author}: ${targetPost.content}")
+                                }
+                                context.startActivity(Intent.createChooser(shareIntent, "Share post"))
+                            }
+                            "copy_link" -> {
+                                val clipboard = context.getSystemService(ClipboardManager::class.java)
+                                clipboard?.setPrimaryClip(ClipData.newPlainText("post_link", "https://kampus.app/post/${targetPost.id}"))
+                                coroutineScope.launch { snackbarHostState.showSnackbar("Link copied to clipboard") }
+                            }
+                            "not_interested" -> {
+                                vm.notInterested(targetPost.id)
+                                coroutineScope.launch { snackbarHostState.showSnackbar("Marked as Not Interested") }
+                            }
+                            "hide_post" -> {
+                                vm.hidePost(targetPost.id)
+                                coroutineScope.launch { snackbarHostState.showSnackbar("Post hidden") }
+                            }
+                            "mute_user" -> {
+                                vm.muteUser(targetPost.authorId)
+                                coroutineScope.launch { snackbarHostState.showSnackbar("Muted posts from ${targetPost.author}") }
+                            }
+                            "report" -> {
+                                pendingReportPost = targetPost
+                            }
+                            "block" -> {
+                                pendingBlockPost = targetPost
+                            }
                             else -> {
                                 ActivityLogger.logAction(type = "post_menu_action", text = "$action for ${targetPost.id}")
                             }
@@ -362,6 +408,54 @@ fun HomeScreen(
             dismissButton = {
                 TextButton(onClick = { confirmDeleteVisible = false; pendingDeletePost = null }) { Text("Cancel") }
             }
+        )
+    }
+
+    if (pendingReportPost != null) {
+        val target = pendingReportPost!!
+        AlertDialog(
+            onDismissRequest = { pendingReportPost = null },
+            title = { Text("Report Post", color = HWhite) },
+            text = { Text("Are you sure you want to report this post? We will review it within 24 hours.", color = HGray4) },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.reportPost(target.id)
+                    pendingReportPost = null
+                    coroutineScope.launch { snackbarHostState.showSnackbar("Post reported. Thank you!") }
+                }) {
+                    Text("Report", color = HRed)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingReportPost = null }) {
+                    Text("Cancel", color = HWhite)
+                }
+            },
+            containerColor = HCard
+        )
+    }
+
+    if (pendingBlockPost != null) {
+        val target = pendingBlockPost!!
+        AlertDialog(
+            onDismissRequest = { pendingBlockPost = null },
+            title = { Text("Block ${target.author}?", color = HWhite) },
+            text = { Text("You will no longer see posts or receive messages from this user.", color = HGray4) },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.blockUser(target.authorId)
+                    pendingBlockPost = null
+                    coroutineScope.launch { snackbarHostState.showSnackbar("Blocked ${target.author}") }
+                }) {
+                    Text("Block", color = HRed)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingBlockPost = null }) {
+                    Text("Cancel", color = HWhite)
+                }
+            },
+            containerColor = HCard
         )
     }
 }
@@ -449,17 +543,25 @@ private fun TopBar(
                     )
                 }
                 if (notifCount > 0) {
+                    val badgeText = if (notifCount > 99) "99+" else "$notifCount"
                     Box(
                         modifier = Modifier
-                            .size(17.dp)
                             .align(Alignment.TopEnd)
-                            .offset(2.dp, (-2).dp)
+                            .offset(x = 3.dp, y = (-3).dp)
+                            .defaultMinSize(minWidth = 16.dp, minHeight = 16.dp)
                             .clip(CircleShape)
                             .background(HRed)
-                            .border(1.5.dp, HBg, CircleShape),
+                            .border(1.5.dp, HBg, CircleShape)
+                            .padding(horizontal = if (badgeText.length > 1) 4.dp else 0.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text("$notifCount", color = HWhite, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = badgeText,
+                            color = HWhite,
+                            fontSize = 8.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                        )
                     }
                 }
             }
@@ -468,193 +570,325 @@ private fun TopBar(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Stories
+// Friends / Followers Row  (real-time + real profiles)
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Main horizontal row: shows the current user (“You”) first, then every
+ * friend / follower fetched in real-time from Firestore.  Falls back to the
+ * story list when the friends list is still empty (e.g. first load).
+ */
 @Composable
 private fun StoriesRow(
     stories: List<StoryItem>,
     currentUserProfileImageUrl: String,
     currentUserAvatarEmoji: String,
+    friendsAndFollowers: List<FriendUserItem> = emptyList(),
 ) {
     LazyRow(
         contentPadding        = PaddingValues(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
+        // “You” bubble — always first
         item {
-            StoryAddTile(
+            MeBubble(
                 profileImageUrl = currentUserProfileImageUrl,
-                avatarEmoji = currentUserAvatarEmoji,
-                onLabelClick = {},
-                onAvatarClick = {},
-                label = "Create note",
+                avatarEmoji     = currentUserAvatarEmoji,
             )
         }
-        items(stories) { StoryBubble(it) }
+
+        if (friendsAndFollowers.isNotEmpty()) {
+            // Real Firestore friends / followers
+            items(friendsAndFollowers, key = { it.userId }) { friend ->
+                FriendBubble(friend = friend)
+            }
+        } else {
+            // Fallback: story data while Firestore loads
+            items(stories) { story ->
+                StoryBubble(story)
+            }
+        }
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Me Bubble  (“You” with animated glow + plus button)
+// ─────────────────────────────────────────────────────────────────────────────
+
 @Composable
-private fun StoryAddTile(
-    profileImageUrl: String,
-    avatarEmoji: String,
-    onLabelClick: () -> Unit,
-    onAvatarClick: () -> Unit,
-    label: String,
+private fun MeBubble(
+    profileImageUrl : String,
+    avatarEmoji     : String,
+    onClick         : () -> Unit = {},
 ) {
+    // Subtle pulsing glow on the ring
+    val infiniteTransition = rememberInfiniteTransition(label = "me_ring")
+    val ringAlpha by infiniteTransition.animateFloat(
+        initialValue    = 0.60f,
+        targetValue     = 1.00f,
+        animationSpec   = infiniteRepeatable(
+            animation   = tween(1400, easing = FastOutSlowInEasing),
+            repeatMode  = RepeatMode.Reverse,
+        ),
+        label = "ring_alpha",
+    )
+
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.widthIn(min = 92.dp, max = 112.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication        = null,
+                onClick           = onClick,
+            ),
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(22.dp))
-                .background(
-                    Brush.linearGradient(
-                        listOf(
-                            HCard.copy(alpha = 0.98f),
-                            HCard.copy(alpha = 0.88f),
-                        ),
-                    ),
-                )
-                .border(1.dp, HBorder.copy(alpha = 0.82f), RoundedCornerShape(22.dp))
-                .clickable(onClick = onLabelClick)
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = label,
-                    color = HWhite,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Start,
-                )
-                Text(
-                    text = "Create note",
-                    color = HGray4,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Start,
-                )
-            }
-        }
-
         Box(contentAlignment = Alignment.BottomEnd) {
+            // Glowing ring
             Box(
                 modifier = Modifier
-                    .size(62.dp)
+                    .size(70.dp)
                     .clip(CircleShape)
-                    .background(HChipBg)
-                    .border(2.dp, HBlue.copy(alpha = 0.55f), CircleShape),
+                    .background(
+                        Brush.sweepGradient(
+                            listOf(
+                                HBlue.copy(alpha = ringAlpha),
+                                Color(0xFF93C5FD).copy(alpha = ringAlpha),
+                                HGlow.copy(alpha = ringAlpha),
+                                HBlue.copy(alpha = ringAlpha),
+                            )
+                        )
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
-                if (profileImageUrl.isNotBlank()) {
-                    AsyncImage(
-                        model = profileImageUrl,
-                        contentDescription = "Your note",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(CircleShape)
-                            .clickable(onClick = onAvatarClick),
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clickable(onClick = onAvatarClick),
-                        contentAlignment = Alignment.Center,
-                    ) {
+                // Inner avatar
+                Box(
+                    modifier = Modifier
+                        .size(62.dp)
+                        .clip(CircleShape)
+                        .background(HCard)
+                        .border(2.5.dp, HBg, CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (profileImageUrl.isNotBlank()) {
+                        AsyncImage(
+                            model              = profileImageUrl,
+                            contentDescription = "Your profile",
+                            contentScale       = ContentScale.Crop,
+                            modifier           = Modifier.fillMaxSize().clip(CircleShape),
+                        )
+                    } else {
                         Text(
-                            text = avatarEmoji.ifBlank { "👤" },
-                            color = HWhite,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 22.sp,
+                            text     = avatarEmoji.ifBlank { "👤" },
+                            fontSize = 28.sp,
                         )
                     }
                 }
             }
+            // Blue “+” badge
             Box(
                 modifier = Modifier
                     .size(22.dp)
                     .offset(x = 2.dp, y = 2.dp)
                     .clip(CircleShape)
-                    .background(HBlue)
-                    .border(2.dp, HBg, CircleShape)
-                    .clickable(onClick = onAvatarClick),
+                    .background(
+                        Brush.radialGradient(listOf(HBlue, HBlue.copy(0.75f)))
+                    )
+                    .border(2.dp, HBg, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    Icons.Default.Add,
+                    imageVector        = Icons.Default.Add,
                     contentDescription = null,
-                    tint = HWhite,
-                    modifier = Modifier.size(13.dp),
+                    tint               = HWhite,
+                    modifier           = Modifier.size(13.dp),
                 )
             }
         }
+
+        Text(
+            text       = "You",
+            color      = HWhite,
+            fontSize   = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines   = 1,
+            overflow   = TextOverflow.Ellipsis,
+        )
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Friend Bubble  (real profile from Firestore, with online dot)
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun FriendBubble(friend: FriendUserItem) {
+    // Pop-in scale on first composition
+    var visible by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue   = if (visible) 1f else 0.6f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness    = Spring.StiffnessMediumLow,
+        ),
+        label = "bubble_scale",
+    )
+    LaunchedEffect(friend.userId) { visible = true }
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication        = null,
+                onClick           = {},
+            ),
+    ) {
+        Box(contentAlignment = Alignment.BottomEnd) {
+            // Outer ring — solid blue when online, muted when offline
+            Box(
+                modifier = Modifier
+                    .size(70.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (friend.isOnline)
+                            Brush.sweepGradient(
+                                listOf(HBlue, Color(0xFF93C5FD), HGlow, HBlue)
+                            )
+                        else
+                            Brush.sweepGradient(
+                                listOf(HGray6.copy(0.55f), HGray6.copy(0.55f))
+                            )
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                // Inner avatar
+                Box(
+                    modifier = Modifier
+                        .size(62.dp)
+                        .clip(CircleShape)
+                        .background(HChipBg)
+                        .border(2.5.dp, HBg, CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (friend.profileImageUrl.isNotBlank()) {
+                        AsyncImage(
+                            model              = friend.profileImageUrl,
+                            contentDescription = friend.name,
+                            contentScale       = ContentScale.Crop,
+                            modifier           = Modifier.fillMaxSize().clip(CircleShape),
+                        )
+                    } else {
+                        Text(
+                            text     = friend.avatarEmoji.ifBlank { "👤" },
+                            fontSize = 28.sp,
+                        )
+                    }
+                }
+            }
+
+            // Green online indicator
+            if (friend.isOnline) {
+                Box(
+                    modifier = Modifier
+                        .size(14.dp)
+                        .offset(x = 2.dp, y = 2.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF22C55E))
+                        .border(2.dp, HBg, CircleShape),
+                )
+            }
+        }
+
+        Text(
+            text       = friend.name.split(" ").firstOrNull() ?: friend.name,
+            color      = HGray2,
+            fontSize   = 11.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines   = 1,
+            overflow   = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Story Bubble  (fallback — used when friendsAndFollowers is still empty)
+// ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
 private fun StoryBubble(story: StoryItem) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
-        modifier            = Modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
+        modifier = Modifier.clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication        = null,
+        ) {},
     ) {
-        Box(modifier = Modifier.size(66.dp)) {
+        Box(contentAlignment = Alignment.BottomEnd) {
             Box(
                 modifier = Modifier
-                    .size(66.dp)
+                    .size(70.dp)
                     .clip(CircleShape)
                     .background(
                         if (story.hasNew)
                             Brush.sweepGradient(listOf(HBlue, Color(0xFF93C5FD), HGlow, HBlue))
                         else
-                            Brush.sweepGradient(listOf(HGray6.copy(0.6f), HGray6.copy(0.6f)))
+                            Brush.sweepGradient(listOf(HGray6.copy(0.55f), HGray6.copy(0.55f)))
                     ),
                 contentAlignment = Alignment.Center,
             ) {
                 Box(
                     modifier = Modifier
-                        .size(59.dp)
+                        .size(62.dp)
                         .clip(CircleShape)
-                        .background(HCard)
+                        .background(HChipBg)
                         .border(2.5.dp, HBg, CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
                     if (story.profileImageUrl.isNotBlank()) {
                         AsyncImage(
-                            model = story.profileImageUrl,
+                            model              = story.profileImageUrl,
                             contentDescription = story.name,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize().clip(CircleShape),
+                            contentScale       = ContentScale.Crop,
+                            modifier           = Modifier.fillMaxSize().clip(CircleShape),
                         )
                     } else {
-                        Text(story.emoji, fontSize = 26.sp)
+                        Text(story.emoji, fontSize = 28.sp)
                     }
                 }
             }
+            // "Add" badge only on the “Me” story (should not appear here normally)
             if (story.isMe) {
                 Box(
                     modifier = Modifier
-                        .size(21.dp)
-                        .align(Alignment.BottomEnd)
+                        .size(22.dp)
+                        .offset(x = 2.dp, y = 2.dp)
                         .clip(CircleShape)
                         .background(HBlue)
                         .border(2.dp, HBg, CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.Default.Add, "Add", tint = HWhite, modifier = Modifier.size(13.dp))
+                    Icon(
+                        imageVector        = Icons.Default.Add,
+                        contentDescription = "Add",
+                        tint               = HWhite,
+                        modifier           = Modifier.size(13.dp),
+                    )
                 }
             }
         }
 
+        Text(
+            text       = story.name,
+            color      = HGray2,
+            fontSize   = 11.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines   = 1,
+            overflow   = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -666,12 +900,14 @@ private fun StoryBubble(story: StoryItem) {
 private fun PostCard(
     post: PostItem,
     isLiked: Boolean,
+    isSaved: Boolean,
     onLike: () -> Unit,
     onShare: () -> Unit,
     onComment: () -> Unit = {},
     onMenuAction: (PostItem, String) -> Unit = { _, _ -> },
 ) {
     val context = LocalContext.current
+    val currentUserId = remember { FirebaseAuth.getInstance().currentUser?.uid.orEmpty() }
     val likeScale by animateFloatAsState(
         if (isLiked) 1.35f else 1f,
         spring(dampingRatio = Spring.DampingRatioMediumBouncy), label = "ls",
@@ -774,7 +1010,6 @@ private fun PostCard(
                                 )
                             }
 
-                            // Top group (main post actions)
                             Surface(
                                 shape = RoundedCornerShape(16.dp),
                                 color = HCard,
@@ -783,81 +1018,58 @@ private fun PostCard(
                                     .padding(horizontal = 12.dp)
                             ) {
                                 Column(modifier = Modifier.padding(vertical = 10.dp)) {
-                                    Text("Post options", color = HWhite, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 18.dp, top = 6.dp, end = 18.dp, bottom = 2.dp))
-                                    Text("Choose what to do with this post.", color = HGray4, fontSize = 13.sp, modifier = Modifier.padding(start = 18.dp, end = 18.dp, bottom = 8.dp))
+                                    Text("Post Options", color = HWhite, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 18.dp, top = 6.dp, end = 18.dp, bottom = 2.dp))
+                                    Text("Choose how you want to interact with this post.", color = HGray4, fontSize = 13.sp, modifier = Modifier.padding(start = 18.dp, end = 18.dp, bottom = 8.dp))
 
-                                    MenuItemLarge(icon = Icons.AutoMirrored.Outlined.Send, label = "Open post", tint = HBlue) {
-                                        onMenuAction(post, "open")
-                                        closeMenu()
-                                    }
-                                    MenuItemLarge(icon = Icons.Outlined.ContentCopy, label = "Copy post text", tint = HGray2) {
-                                        onMenuAction(post, "copy")
+                                    MenuItemLarge(
+                                        icon = if (isSaved) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                                        label = if (isSaved) "Unsave Post" else "Save Post",
+                                        tint = HBlue,
+                                        subtitle = if (isSaved) "Remove from saved items" else "Save this post to your profile"
+                                    ) {
+                                        onMenuAction(post, if (isSaved) "unsave" else "save")
                                         closeMenu()
                                     }
 
                                     HorizontalDivider(color = HBorder.copy(alpha = 0.5f))
 
-                                    MenuItemLarge(icon = Icons.Default.BookmarkAdd, label = if (post.isPinned) "Unpin post" else "Pin post", tint = HBlue, subtitle = "Keep this post at the top") {
-                                        onMenuAction(post, if (post.isPinned) "unpin" else "pin")
+                                    MenuItemLarge(icon = Icons.Outlined.Share, label = "Share", tint = HGray2, subtitle = "Share this post with others") {
+                                        onMenuAction(post, "share")
                                         closeMenu()
                                     }
-                                    MenuItemLarge(icon = Icons.Default.Edit, label = "Edit post", tint = HGray2, subtitle = "Update the content or media") {
-                                        onMenuAction(post, "edit")
+                                    MenuItemLarge(icon = Icons.Outlined.Link, label = "Copy Link", tint = HGray2, subtitle = "Copy post link to clipboard") {
+                                        onMenuAction(post, "copy_link")
                                         closeMenu()
                                     }
-                                    MenuItemLarge(icon = Icons.Default.Lock, label = "Privacy settings", tint = HGray2, subtitle = "Choose who can see this post") {
-                                        onMenuAction(post, "privacy")
-                                        closeMenu()
-                                    }
-                                }
-                            }
 
-                            Spacer(Modifier.height(10.dp))
-
-                            // Privacy presets
-                            Surface(
-                                shape = RoundedCornerShape(16.dp),
-                                color = HCard,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp)
-                            ) {
-                                Column(modifier = Modifier.padding(vertical = 10.dp)) {
-                                    MenuItemLarge(icon = Icons.Outlined.Public, label = "Public", tint = Color(0xFF4CAF50), subtitle = "Anyone can see this post") {
-                                        onMenuAction(post, "privacy_public")
-                                        closeMenu()
-                                    }
                                     HorizontalDivider(color = HBorder.copy(alpha = 0.5f))
-                                    MenuItemLarge(icon = Icons.Outlined.Group, label = "Friends", tint = HBlue, subtitle = "Only your friends can see it") {
-                                        onMenuAction(post, "privacy_friends")
-                                        closeMenu()
-                                    }
-                                    HorizontalDivider(color = HBorder.copy(alpha = 0.5f))
-                                    MenuItemLarge(icon = Icons.Outlined.Lock, label = "Only me", tint = HGray2, subtitle = "Visible only to you") {
-                                        onMenuAction(post, "privacy_private")
-                                        closeMenu()
-                                    }
-                                }
-                            }
 
-                            Spacer(Modifier.height(10.dp))
-
-                            // Destructive action
-                            Surface(
-                                shape = RoundedCornerShape(16.dp),
-                                color = HCard,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 8.dp)
-                            ) {
-                                Column(modifier = Modifier.padding(vertical = 10.dp)) {
-                                    MenuItemLarge(icon = Icons.Default.PersonOff, label = "Hide from profile", tint = HGray2, subtitle = "Remove it from your profile only") {
-                                        onMenuAction(post, "hide_profile")
+                                    MenuItemLarge(icon = Icons.Outlined.SentimentDissatisfied, label = "Not Interested", tint = HGray2, subtitle = "Show fewer posts like this") {
+                                        onMenuAction(post, "not_interested")
                                         closeMenu()
                                     }
+                                    MenuItemLarge(icon = Icons.Outlined.VisibilityOff, label = "Hide Post", tint = HGray2, subtitle = "Hide this post from your feed") {
+                                        onMenuAction(post, "hide_post")
+                                        closeMenu()
+                                    }
+                                    MenuItemLarge(
+                                        icon = Icons.AutoMirrored.Outlined.VolumeOff,
+                                        label = "Mute User",
+                                        tint = HGray2,
+                                        subtitle = "Stop seeing posts from ${post.author}"
+                                    ) {
+                                        onMenuAction(post, "mute_user")
+                                        closeMenu()
+                                    }
+
                                     HorizontalDivider(color = HBorder.copy(alpha = 0.5f))
-                                    MenuItemLarge(icon = Icons.Default.Delete, label = "Delete post", tint = HRed, subtitle = "This removes the post from the feed") {
-                                        onMenuAction(post, "trash")
+
+                                    MenuItemLarge(icon = Icons.Outlined.Flag, label = "Report Post", tint = HRed, subtitle = "Report if this post violates guidelines") {
+                                        onMenuAction(post, "report")
+                                        closeMenu()
+                                    }
+                                    MenuItemLarge(icon = Icons.Outlined.Block, label = "Block User", tint = HRed, subtitle = "Block ${post.author} and their posts") {
+                                        onMenuAction(post, "block")
                                         closeMenu()
                                     }
                                 }
