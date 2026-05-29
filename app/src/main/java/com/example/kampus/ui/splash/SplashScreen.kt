@@ -40,6 +40,8 @@ private val GroundColor= Color(0xFF2A3A2E)
 fun SplashScreen(
     onNavigateToOnboarding: () -> Unit,
     onNavigateToHome: () -> Unit = {},
+    onNavigateToLogin: () -> Unit = {},
+    onNavigateToAuthenticated: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val prefs = remember {
@@ -78,8 +80,13 @@ fun SplashScreen(
         dinoAlpha.animateTo(1f, tween(400))
         delay(2800)
 
-        // Always show onboarding after splash.
-        onNavigateToOnboarding()
+        if (!hasSeenOnboarding) {
+            onNavigateToOnboarding()
+        } else if (FirebaseAuth.getInstance().currentUser != null) {
+            onNavigateToAuthenticated()
+        } else {
+            onNavigateToLogin()
+        }
     }
 
     // ── Infinite animations ────────────────────────────────────────────────────

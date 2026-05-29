@@ -36,6 +36,7 @@ fun NavGraphBuilder.groupsNavGraph(
                 },
                 onEventsClick = { navController.navigate("event_list") },
                 onChatClick = { navController.navigate("chat_list") },
+                onAdminClick = { navController.navigate("admin_panel") },
                 onProfileClick = { navController.navigate("profile") },
                 onCreatePost = { navController.navigate("post_create") },
             )
@@ -66,6 +67,7 @@ fun NavGraphBuilder.groupsNavGraph(
                 },
                 onEventsClick = { navController.navigate("event_list") },
                 onChatClick = { navController.navigate("chat_list") },
+                onAdminClick = { navController.navigate("admin_panel") },
                 onProfileClick = { navController.navigate("profile") },
                 onCreatePost = { navController.navigate("post_create") },
             )

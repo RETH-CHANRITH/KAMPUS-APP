@@ -2,9 +2,12 @@ package com.example.kampus.data.remote
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
+import com.google.firebase.storage.FirebaseStorage
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.storage.storage
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -19,6 +22,8 @@ class SupabaseStorageManager(
         private const val EVENTS_BUCKET = "events"
         private const val CHAT_VOICE_BUCKET = "chat-voices"
         private const val STORY_MEDIA_BUCKET = "story-media"
+        // New bucket for group post images
+        private const val GROUP_POSTS_BUCKET = "group-posts"
         // New bucket for comment images — create this in Supabase and make public
         private const val COMMENT_MEDIA_BUCKET = "comment-media"
         private const val SUPABASE_PROJECT_ID = "wcygigxevxohizwstkfg"
@@ -180,6 +185,43 @@ class SupabaseStorageManager(
                 Result.failure(Exception("Story media upload failed: ${e.message}"))
             }
         }
+
+    suspend fun uploadGroupPostImage(userId: String, groupId: String, imageUri: Uri): Result<String> =
+        withContext(Dispatchers.IO) {
+            val fileName = "post_${userId}_${System.currentTimeMillis()}.jpg"
+
+            val inputStream = context.contentResolver.openInputStream(imageUri)
+                ?: return@withContext Result.failure(Exception("Failed to open post image stream"))
+            val byteArray = inputStream.readBytes()
+            inputStream.close()
+
+            // Try the dedicated group-posts bucket first
+            try {
+                supabaseClient.storage
+                    .from(GROUP_POSTS_BUCKET)
+                    .upload("$groupId/$userId/$fileName", byteArray)
+                val url = getPublicUrl(GROUP_POSTS_BUCKET, "$groupId/$userId/$fileName")
+                Log.d("SupabaseStorage", "Uploaded to group-posts bucket: $url")
+                return@withContext Result.success(url)
+            } catch (e1: Exception) {
+                Log.w("SupabaseStorage", "group-posts bucket not found, falling back to story-media: ${e1.message}")
+            }
+
+            // Fallback: story-media bucket (already exists and is public)
+            try {
+                val fallbackPath = "group-posts/$groupId/$userId/$fileName"
+                supabaseClient.storage
+                    .from(STORY_MEDIA_BUCKET)
+                    .upload(fallbackPath, byteArray)
+                val url = getPublicUrl(STORY_MEDIA_BUCKET, fallbackPath)
+                Log.d("SupabaseStorage", "Uploaded to story-media fallback: $url")
+                return@withContext Result.success(url)
+            } catch (e2: Exception) {
+                Log.e("SupabaseStorage", "Both Supabase buckets failed: ${e2.message}")
+                return@withContext Result.failure(Exception("Image upload failed. Please create the 'group-posts' bucket in Supabase Storage."))
+            }
+        }
+
 
     suspend fun uploadEventCommentImage(userId: String, eventId: String, imageUri: Uri): Result<String> =
         withContext(Dispatchers.IO) {

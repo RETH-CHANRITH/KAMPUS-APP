@@ -110,6 +110,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.outlined.Dashboard
 import com.example.kampus.ui.components.CampusBottomNavBar
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -158,6 +160,7 @@ fun ProfileScreen(
 	onGroupsClick: () -> Unit,
 	onEventsClick: () -> Unit,
 	onChatClick: () -> Unit,
+	onAdminClick: () -> Unit = {},
 	onCreatePost: () -> Unit,
 	onOpenActivity: (ProfileActivityItem) -> Unit = {},
 	onCommentClick: (ProfileActivityItem) -> Unit = {},
@@ -215,7 +218,7 @@ fun ProfileScreen(
 			if (state.isLoading) {
 				LoadingState()
 			} else {
-				Header(
+				ProfileHeader(
 					state = state,
 					onBack = onBack,
 					onOpenSettings = onOpenSettings,
@@ -225,8 +228,8 @@ fun ProfileScreen(
 					},
 				)
 				ProfileMeta(state = state)
-				StatsSection(state = state)
-				ActionsSection(
+				ProfileStatsSection(state = state)
+				ProfileActionsSection(
 					state = state,
 					onOpenSettings = onOpenSettings,
 					onShareProfile = {
@@ -249,7 +252,7 @@ fun ProfileScreen(
 					onOpenFriends = onOpenFriends,
 					onOpenDiscoverPeople = onOpenDiscoverPeople,
 				)
-				AboutCard(state = state)
+				ProfileAboutCard(state = state)
 				RecentActivitySection(
 					activities = state.activities,
 					displayName = state.displayName,
@@ -277,15 +280,46 @@ fun ProfileScreen(
 				.padding(horizontal = 14.dp, vertical = 10.dp)
 				.navigationBarsPadding(),
 		) {
+			val strings = com.example.kampus.ui.localization.rememberUiStrings()
+			val isAdmin = state.role == "admin"
+
+			val navItems = remember(strings, isAdmin) {
+				if (isAdmin) {
+					listOf(
+						com.example.kampus.ui.components.NavItem(strings.home, Icons.Outlined.Home, Icons.Filled.Home),
+						com.example.kampus.ui.components.NavItem(strings.groups, Icons.Outlined.Group, Icons.Filled.Group),
+						com.example.kampus.ui.components.NavItem(strings.adminPanel, Icons.Outlined.Dashboard, Icons.Filled.Dashboard),
+						com.example.kampus.ui.components.NavItem(strings.chat, Icons.Outlined.ChatBubbleOutline, Icons.Filled.ChatBubble),
+					)
+				} else {
+					listOf(
+						com.example.kampus.ui.components.NavItem(strings.home, Icons.Outlined.Home, Icons.Filled.Home),
+						com.example.kampus.ui.components.NavItem(strings.groups, Icons.Outlined.Group, Icons.Filled.Group),
+						com.example.kampus.ui.components.NavItem(strings.events, Icons.Outlined.CalendarMonth, Icons.Filled.CalendarMonth),
+						com.example.kampus.ui.components.NavItem(strings.chat, Icons.Outlined.ChatBubbleOutline, Icons.Filled.ChatBubble),
+					)
+				}
+			}
+
 			CampusBottomNavBar(
+				navItems = navItems,
 				selectedIndex = selectedNav.intValue,
 				onItemSelected = { index ->
 					selectedNav.intValue = index
-					when (index) {
-						0 -> onHomeClick()
-						1 -> onGroupsClick()
-						2 -> onEventsClick()
-						3 -> onChatClick()
+					if (isAdmin) {
+						when (index) {
+							0 -> onHomeClick()
+							1 -> onGroupsClick()
+							2 -> onAdminClick()
+							3 -> onChatClick()
+						}
+					} else {
+						when (index) {
+							0 -> onHomeClick()
+							1 -> onGroupsClick()
+							2 -> onEventsClick()
+							3 -> onChatClick()
+						}
 					}
 				},
 				onFabClick = onCreatePost,
@@ -506,12 +540,14 @@ fun ProfileScreen(
 }
 
 @Composable
-private fun Header(
+fun ProfileHeader(
 	state: ProfileUiState,
 	onBack: () -> Unit,
 	onOpenSettings: () -> Unit,
 	isOnline: Boolean,
 	onEditCoverImage: () -> Unit,
+	showBackButton: Boolean = true,
+	showSettingsButton: Boolean = true
 ) {
 	Box(modifier = Modifier.fillMaxWidth()) {
 		// Background/Cover Image Container
@@ -592,8 +628,17 @@ private fun Header(
 			horizontalArrangement = Arrangement.SpaceBetween,
 			verticalAlignment = Alignment.CenterVertically,
 		) {
-			CircleIconButton(icon = Icons.AutoMirrored.Outlined.ArrowBack, onClick = onBack)
-			CircleIconButton(icon = Icons.Filled.Settings, onClick = onOpenSettings)
+			if (showBackButton) {
+				ProfileCircleIconButton(icon = Icons.AutoMirrored.Outlined.ArrowBack, onClick = onBack)
+			} else {
+				Spacer(Modifier.size(40.dp))
+			}
+			
+			if (showSettingsButton) {
+				ProfileCircleIconButton(icon = Icons.Filled.Settings, onClick = onOpenSettings)
+			} else {
+				Spacer(Modifier.size(40.dp))
+			}
 		}
 
 		Box(
@@ -637,7 +682,7 @@ private fun Header(
 }
 
 @Composable
-private fun ProfileMeta(state: ProfileUiState) {
+fun ProfileMeta(state: ProfileUiState) {
 	Column(
 		modifier = Modifier
 			.fillMaxWidth()
@@ -655,7 +700,7 @@ private fun ProfileMeta(state: ProfileUiState) {
 }
 
 @Composable
-private fun StatsSection(state: ProfileUiState) {
+fun ProfileStatsSection(state: ProfileUiState) {
 	Row(
 		modifier = Modifier
 			.fillMaxWidth()
@@ -681,7 +726,7 @@ private fun StatItem(value: String, label: String) {
 }
 
 @Composable
-private fun ActionsSection(
+fun ProfileActionsSection(
 	state: ProfileUiState,
 	onOpenSettings: () -> Unit,
 	onShareProfile: () -> Unit,
@@ -697,14 +742,14 @@ private fun ActionsSection(
 		verticalArrangement = Arrangement.spacedBy(12.dp),
 	) {
 		Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-			ActionCard(
+			ProfileActionCard(
 				title = "Requests",
 				icon = Icons.Outlined.PersonAdd,
 				badge = if (state.stats.friendRequests > 0) state.stats.friendRequests.toString() else null,
 				modifier = Modifier.weight(1f),
 				onClick = onOpenFriendRequests,
 			)
-			ActionCard(
+			ProfileActionCard(
 				title = "Friends",
 				icon = Icons.Outlined.Badge,
 				modifier = Modifier.weight(1f),
@@ -746,12 +791,12 @@ private fun ActionsSection(
 			}
 		}
 
-		StoryRow()
+		ProfileStoryRow()
 	}
 }
 
 @Composable
-private fun ActionCard(
+fun ProfileActionCard(
 	title: String,
 	icon: ImageVector,
 	modifier: Modifier = Modifier,
@@ -784,7 +829,7 @@ private fun ActionCard(
 }
 
 @Composable
-private fun StoryRow() {
+fun ProfileStoryRow() {
 	Row(
 		modifier = Modifier
 			.fillMaxWidth()
@@ -814,7 +859,7 @@ private fun StoryChip(title: String, icon: ImageVector, selected: Boolean) {
 }
 
 @Composable
-private fun AboutCard(state: ProfileUiState) {
+fun ProfileAboutCard(state: ProfileUiState) {
 	Column(
 		modifier = Modifier
 			.fillMaxWidth()
@@ -826,9 +871,9 @@ private fun AboutCard(state: ProfileUiState) {
 		verticalArrangement = Arrangement.spacedBy(12.dp),
 	) {
 		Text(text = "About", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-		InfoLine(icon = { Icon(Icons.Outlined.Badge, contentDescription = null, tint = TextSecondary) }, text = state.faculty.ifEmpty { "Add faculty" })
-		InfoLine(icon = { Icon(Icons.Outlined.CalendarMonth, contentDescription = null, tint = TextSecondary) }, text = state.year.ifEmpty { "Add year" })
-		InfoLine(icon = { Icon(Icons.Outlined.LocationOn, contentDescription = null, tint = TextSecondary) }, text = state.location.ifEmpty { "Add location" })
+		ProfileInfoLine(icon = { Icon(Icons.Outlined.Badge, contentDescription = null, tint = TextSecondary) }, text = state.faculty.ifEmpty { "Add faculty" })
+		ProfileInfoLine(icon = { Icon(Icons.Outlined.CalendarMonth, contentDescription = null, tint = TextSecondary) }, text = state.year.ifEmpty { "Add year" })
+		ProfileInfoLine(icon = { Icon(Icons.Outlined.LocationOn, contentDescription = null, tint = TextSecondary) }, text = state.location.ifEmpty { "Add location" })
 	}
 }
 
@@ -843,7 +888,20 @@ fun RecentActivitySection(
 	onCommentClick: (ProfileActivityItem) -> Unit,
 	onMenuClick: (ProfileActivityItem) -> Unit,
 ) {
-	val displayTypes = setOf("create_post", "create_event", "share_post", "create_group")
+	val displayTypes = setOf(
+		"create_post",
+		"create_event",
+		"share_post",
+		"create_group",
+		"share_profile",
+		"comment",
+		"reply",
+		"pin_post",
+		"unpin_post",
+		"edit_post",
+		"edit_privacy",
+		"archive_activity",
+	)
 	val itemsToShow = activities.filter { it.type in displayTypes }
 
 	Column(
@@ -903,6 +961,12 @@ fun RecentActivitySection(
 						onCommentClick = { onCommentClick(activity) },
 						onCardClick = { onOpenActivity(activity) },
 						onMenuClick = { onMenuClick(activity) }
+					)
+					"share_profile" -> ActivityShareProfileCard(activity)
+					else -> ActivityGenericCard(
+						activity = activity,
+						onCardClick = { onOpenActivity(activity) },
+						onMenuClick = { onMenuClick(activity) },
 					)
 				}
 			}
@@ -1600,6 +1664,60 @@ private fun ActivityShareProfileCard(activity: ProfileActivityItem) {
 	}
 }
 
+@Composable
+private fun ActivityGenericCard(
+	activity: ProfileActivityItem,
+	onCardClick: () -> Unit,
+	onMenuClick: () -> Unit,
+) {
+	Row(
+		modifier = Modifier
+			.fillMaxWidth()
+			.clip(RoundedCornerShape(18.dp))
+			.background(Card)
+			.border(1.dp, Border, RoundedCornerShape(18.dp))
+			.clickable(onClick = onCardClick)
+			.padding(14.dp),
+		horizontalArrangement = Arrangement.spacedBy(12.dp),
+		verticalAlignment = Alignment.CenterVertically,
+	) {
+		Box(
+			modifier = Modifier
+				.size(44.dp)
+				.clip(CircleShape)
+				.background(Blue.copy(alpha = 0.18f)),
+			contentAlignment = Alignment.Center,
+		) {
+			Icon(Icons.Outlined.Public, contentDescription = null, tint = Blue, modifier = Modifier.size(22.dp))
+		}
+
+		Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+			Text(
+				text = activity.previewTitle.ifBlank { activity.text.ifBlank { "Recent activity" } },
+				color = TextPrimary,
+				fontSize = 14.sp,
+				fontWeight = FontWeight.SemiBold,
+				maxLines = 2,
+			)
+			Text(
+				text = activity.previewSubtitle.ifBlank { formatActivityTime(activity.createdAt) },
+				color = TextSecondary,
+				fontSize = 12.sp,
+				maxLines = 2,
+			)
+		}
+
+		Icon(
+			Icons.Outlined.MoreVert,
+			contentDescription = null,
+			tint = TextSecondary,
+			modifier = Modifier
+				.size(18.dp)
+				.clickable { onMenuClick() }
+		)
+	}
+}
+
 /* ─────────────────── utilities ─────────────────── */
 
 private fun formatActivityTime(timestamp: Long): String {
@@ -1614,7 +1732,7 @@ private fun formatActivityTime(timestamp: Long): String {
 }
 
 @Composable
-private fun InfoLine(icon: @Composable () -> Unit, text: String) {
+fun ProfileInfoLine(icon: @Composable () -> Unit, text: String) {
 	Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
 		icon()
 		val textColor = com.example.kampus.ui.theme.KampusColors.TextMuted
@@ -1645,7 +1763,7 @@ private fun TimelineActionChip(
 }
 
 @Composable
-private fun CircleIconButton(icon: ImageVector, onClick: () -> Unit) {
+fun ProfileCircleIconButton(icon: ImageVector, onClick: () -> Unit) {
 	Box(
 		modifier = Modifier
 			.size(40.dp)

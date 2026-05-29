@@ -34,6 +34,7 @@ import com.example.kampus.ui.events.NewEventData
 import com.example.kampus.ui.feed.CreatePostScreen
 import com.example.kampus.ui.feed.FeedViewModel
 import com.example.kampus.ui.feed.HomeScreen
+import com.example.kampus.ui.admin.AdminPanelScreen
 import com.example.kampus.ui.screens.groups.groupsNavGraph
 import com.example.kampus.viewmodel.GroupsViewModel
 import com.example.kampus.ui.screens.groups.GroupRoutes
@@ -59,7 +60,9 @@ import com.example.kampus.ui.profile.PublicFriendsScreen
 import com.example.kampus.ui.profile.SettingsScreen
 import com.example.kampus.ui.post.PostDetailScreen
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 object Routes {
     const val SPLASH          = "splash"
@@ -71,6 +74,7 @@ object Routes {
     const val OTP             = "otp/{method}/{contact}"
     const val RESET_PASSWORD  = "reset_password"
     const val HOME            = "home"
+    const val ADMIN_PANEL     = "admin_panel"
     const val NOTIFICATIONS   = "notifications"
 
     // Feed
@@ -134,6 +138,33 @@ object Routes {
 fun NavGraph(navController: NavHostController) {
     val globalChatViewModel: ChatViewModel = viewModel()
     val context = navController.context
+    val scope = rememberCoroutineScope()
+
+    suspend fun resolveRoleBasedDestination(): String {
+        val currentUser = FirebaseAuth.getInstance().currentUser ?: return Routes.LOGIN
+        return runCatching {
+            val snapshot = FirebaseFirestore.getInstance()
+                .collection("users")
+                .document(currentUser.uid)
+                .get()
+                .await()
+            if (snapshot.getString("role").equals("admin", ignoreCase = true)) {
+                Routes.ADMIN_PANEL
+            } else {
+                Routes.HOME
+            }
+        }.getOrDefault(Routes.HOME)
+    }
+
+    fun navigateToRoleAwareDestination(clearFrom: String) {
+        scope.launch {
+            val destination = resolveRoleBasedDestination()
+            navController.navigate(destination) {
+                popUpTo(clearFrom) { inclusive = true }
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
         try {
             val activity = context as? android.app.Activity
@@ -176,10 +207,13 @@ fun NavGraph(navController: NavHostController) {
                         popUpTo(Routes.SPLASH) { inclusive = true }
                     }
                 },
-                onNavigateToHome = {
-                    navController.navigate(Routes.HOME) {
+                onNavigateToLogin = {
+                    navController.navigate(Routes.LOGIN) {
                         popUpTo(Routes.SPLASH) { inclusive = true }
                     }
+                },
+                onNavigateToAuthenticated = {
+                    navigateToRoleAwareDestination(Routes.SPLASH)
                 },
             )
         }
@@ -196,8 +230,12 @@ fun NavGraph(navController: NavHostController) {
                         .apply()
 
                     val isLoggedIn = FirebaseAuth.getInstance().currentUser != null
-                    navController.navigate(if (isLoggedIn) Routes.HOME else Routes.LOGIN) {
-                        popUpTo(Routes.ONBOARDING) { inclusive = true }
+                    if (isLoggedIn) {
+                        navigateToRoleAwareDestination(Routes.ONBOARDING)
+                    } else {
+                        navController.navigate(Routes.LOGIN) {
+                            popUpTo(Routes.ONBOARDING) { inclusive = true }
+                        }
                     }
                 }
             )
@@ -220,9 +258,7 @@ fun NavGraph(navController: NavHostController) {
             )
             LoginScreen(
                 onLoginSuccess   = {
-                    navController.navigate(Routes.HOME) {
-                        popUpTo(Routes.LOGIN) { inclusive = true }
-                    }
+                    navigateToRoleAwareDestination(Routes.LOGIN)
                 },
                 onRegisterClick  = { navController.navigate(Routes.REGISTER) },
                 onForgotPassword = { navController.navigate(Routes.FORGOT_PASSWORD) },
@@ -312,7 +348,30 @@ fun NavGraph(navController: NavHostController) {
                 onGroupsClick  = { navController.navigate(Routes.GROUP_LIST) },
                 onEventsClick  = { navController.navigate(Routes.EVENT_LIST) },
                 onChatClick    = { navController.navigate(Routes.CHAT_LIST) },
+                onAdminClick   = { navController.navigate(Routes.ADMIN_PANEL) },
                 viewModel      = feedViewModel,
+                chatViewModel  = globalChatViewModel,
+            )
+        }
+
+        // ── Admin Panel ────────────────────────────────────────────────────────
+        composable(Routes.ADMIN_PANEL) {
+            AdminPanelScreen(
+                onLogout = {
+                    FirebaseAuth.getInstance().signOut()
+                    navController.navigate(Routes.LOGIN) {
+                        popUpTo(0) { inclusive = true }
+                    }
+                },
+                onViewUserProfile = { userId ->
+                    navController.navigate(Routes.profilePublic(userId))
+                },
+                onChatClick = {
+                    navController.navigate(Routes.CHAT_LIST)
+                },
+                onChatWithUser = { userId ->
+                    navController.navigate(Routes.chatWithUser(userId))
+                }
             )
         }
 
@@ -383,6 +442,7 @@ fun NavGraph(navController: NavHostController) {
                 },
                 onGroupsClick  = { navController.navigate(Routes.GROUP_LIST) },
                 onChatClick    = { navController.navigate(Routes.CHAT_LIST) },
+                onAdminClick   = { navController.navigate(Routes.ADMIN_PANEL) },
                 onFabClick     = { navController.navigate(Routes.POST_CREATE) },
                 onProfileClick = { navController.navigate(Routes.PROFILE) },
             )
@@ -459,6 +519,7 @@ fun NavGraph(navController: NavHostController) {
                 },
                 onGroupsClick  = { navController.navigate(Routes.GROUP_LIST) },
                 onEventsClick  = { navController.navigate(Routes.EVENT_LIST) },
+                onAdminClick   = { navController.navigate(Routes.ADMIN_PANEL) },
                 onProfileClick = { navController.navigate(Routes.PROFILE) },
                 onCreatePost   = { navController.navigate(Routes.POST_CREATE) },
             )
@@ -557,6 +618,7 @@ fun NavGraph(navController: NavHostController) {
                 onGroupsClick = { navController.navigate(Routes.GROUP_LIST) },
                 onEventsClick = { navController.navigate(Routes.EVENT_LIST) },
                 onChatClick = { navController.navigate(Routes.CHAT_LIST) },
+                onAdminClick = { navController.navigate(Routes.ADMIN_PANEL) },
                 onCreatePost = { navController.navigate(Routes.POST_CREATE) },
                 onOpenActivity = { activity ->
                     when (activity.type) {
@@ -749,6 +811,7 @@ fun NavGraph(navController: NavHostController) {
                 onGroupsClick = { navController.navigate(Routes.GROUP_LIST) },
                 onEventsClick = { navController.navigate(Routes.EVENT_LIST) },
                 onChatClick = { navController.navigate(Routes.CHAT_LIST) },
+                onAdminClick = { navController.navigate(Routes.ADMIN_PANEL) },
                 onCreatePost = { navController.navigate(Routes.POST_CREATE) },
                 onProfileClick = { navController.navigate(Routes.PROFILE) },
             )

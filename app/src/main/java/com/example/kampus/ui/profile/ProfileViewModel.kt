@@ -55,6 +55,7 @@ data class ProfileUiState(
 	val notificationSettings: NotificationSettingsState = NotificationSettingsState(),
 	val privacySettings: PrivacySettingsState = PrivacySettingsState(),
 	val timelinePosts: List<PostItem> = emptyList(),
+	val role: String = "student",
 )
 
 data class ProfileActivityItem(
@@ -242,6 +243,7 @@ class ProfileViewModel(
 								profileImageUrl = sanitizedUser.profileImageUrl,
 								coverImageUrl = sanitizedUser.coverImageUrl,
 								isOnline = sanitizedUser.isOnline,
+								role = sanitizedUser.role,
 								stats = ProfileStats(
 									posts = max(sanitizedUser.stats.posts, it.stats.posts),
 									// Keep live counters sourced from dedicated real-time listeners, but never

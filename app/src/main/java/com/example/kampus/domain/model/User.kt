@@ -18,6 +18,7 @@ data class User(
     val stats: UserStats = UserStats(),
     val isVerified: Boolean = false,
     val isOnline: Boolean = false,
+    val role: String = "student",
     val lastActive: LocalDateTime? = null,
     val createdAt: LocalDateTime? = null,
     val updatedAt: LocalDateTime? = null,

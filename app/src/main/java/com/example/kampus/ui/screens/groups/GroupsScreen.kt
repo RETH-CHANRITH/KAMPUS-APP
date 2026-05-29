@@ -60,6 +60,7 @@ fun GroupsScreen(
     onHomeClick: () -> Unit = {},
     onEventsClick: () -> Unit = {},
     onChatClick: () -> Unit = {},
+    onAdminClick: () -> Unit = {},
     onProfileClick: () -> Unit = {},
     onCreatePost: () -> Unit = {},
 ) {
@@ -73,6 +74,10 @@ fun GroupsScreen(
     Scaffold(
         containerColor = C.Background,
         bottomBar = {
+            val currentUserRole = com.example.kampus.ui.components.rememberCurrentUserRole()
+            val isAdmin = currentUserRole.equals("admin", ignoreCase = true)
+            val navItems = com.example.kampus.ui.components.rememberCampusNavItems(isAdmin)
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -86,12 +91,21 @@ fun GroupsScreen(
             ) {
                 CampusBottomNavBar(
                     selectedIndex = 1,          // Groups tab is index 1
+                    navItems = navItems,
                     onItemSelected = { index ->
-                        when (index) {
-                            0 -> onHomeClick()
-                            1 -> { /* already here */ }
-                            2 -> onEventsClick()
-                            3 -> onChatClick()
+                        when {
+                            isAdmin -> when (index) {
+                                0 -> onHomeClick()
+                                1 -> { /* already here */ }
+                                2 -> onAdminClick()
+                                3 -> onChatClick()
+                            }
+                            else -> when (index) {
+                                0 -> onHomeClick()
+                                1 -> { /* already here */ }
+                                2 -> onEventsClick()
+                                3 -> onChatClick()
+                            }
                         }
                     },
                     onFabClick = onCreatePost,

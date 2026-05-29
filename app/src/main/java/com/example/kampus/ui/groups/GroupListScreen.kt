@@ -56,6 +56,7 @@ fun GroupListScreen(
     onCreateGroupClick : () -> Unit          = {},
     onHomeClick        : () -> Unit          = {},   // ← navigate back to Home
     onEventsClick      : () -> Unit          = {},   // ← future
+    onAdminClick       : () -> Unit          = {},
     onChatClick        : () -> Unit          = {},   // ← future
     onFabClick         : () -> Unit          = {},   // ← create post FAB
     onProfileClick     : () -> Unit          = {},   // ← profile
@@ -102,6 +103,10 @@ fun GroupListScreen(
 
         // ── FIXED BOTTOM NAV ─────────────────────────────────────────────────
         bottomBar = {
+            val currentUserRole = com.example.kampus.ui.components.rememberCurrentUserRole()
+            val isAdmin = currentUserRole.equals("admin", ignoreCase = true)
+            val navItems = com.example.kampus.ui.components.rememberCampusNavItems(isAdmin)
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -114,18 +119,28 @@ fun GroupListScreen(
                     .padding(horizontal = 14.dp, vertical = 10.dp)
                     .navigationBarsPadding(),
             ) {
-                GroupBottomNav(
+                com.example.kampus.ui.components.CampusBottomNavBar(
                     selectedIndex  = selectedNavIndex,
+                    navItems       = navItems,
                     onItemSelected = { index ->
-                        when (index) {
-                            0 -> onHomeClick()
-                            1 -> { /* already here */ }
-                            2 -> onEventsClick()
-                            3 -> onChatClick()
+                        when {
+                            isAdmin -> when (index) {
+                                0 -> onHomeClick()
+                                1 -> { /* already here */ }
+                                2 -> onAdminClick()
+                                3 -> onChatClick()
+                            }
+                            else -> when (index) {
+                                0 -> onHomeClick()
+                                1 -> { /* already here */ }
+                                2 -> onEventsClick()
+                                3 -> onChatClick()
+                            }
                         }
                     },
                     onFabClick     = onFabClick,
                     onProfileClick = onProfileClick,
+                    isProfileSelected = false,
                 )
             }
         },

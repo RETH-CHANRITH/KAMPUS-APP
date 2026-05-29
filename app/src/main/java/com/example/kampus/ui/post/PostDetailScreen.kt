@@ -61,6 +61,8 @@ import coil.compose.AsyncImage
 import com.example.kampus.ui.events.rememberMediaPickers
 import com.example.kampus.ui.feed.PostItem
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.navigationBarsPadding
+import com.google.firebase.auth.FirebaseAuth
 
 @Composable
 fun PostDetailScreen(
@@ -97,10 +99,61 @@ fun PostDetailScreen(
         }
     }
 
-    Surface(modifier = Modifier.fillMaxSize(), color = colors.background) {
+    androidx.compose.material3.Scaffold(
+        containerColor = colors.background,
+        bottomBar = {
+            if (state.post != null) {
+                Surface(
+                    color = colors.surface,
+                    tonalElevation = 4.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding(),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, colors.outline.copy(alpha = 0.2f))
+                ) {
+                    Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                        CommentComposer(
+                            text = commentText,
+                            imageUri = commentImageUri,
+                            replyingToName = replyingToName,
+                            focusRequester = focusRequester,
+                            onTextChange = { commentText = it },
+                            onPickPhoto = { commentPickers.pickPhoto() },
+                            onCancelReply = {
+                                replyingToCommentId = null
+                                replyingToName = null
+                            },
+                            onRemovePhoto = { commentImageUri = null },
+                            onSubmit = {
+                                val text = commentText.trim()
+                                val hasPhoto = commentImageUri != null
+                                if (text.isBlank() && !hasPhoto) return@CommentComposer
+
+                                scope.launch {
+                                    val result = if (replyingToCommentId == null) {
+                                        viewModel.addComment(postId, text, commentImageUri)
+                                    } else {
+                                        viewModel.addReply(postId, replyingToCommentId.orEmpty(), text, commentImageUri)
+                                    }
+
+                                    if (result.isSuccess) {
+                                        commentText = ""
+                                        commentImageUri = null
+                                        replyingToCommentId = null
+                                        replyingToName = null
+                                    }
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    ) { paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .padding(paddingValues)
                 .statusBarsPadding()
                 .padding(horizontal = 16.dp, vertical = 10.dp),
         ) {
@@ -175,6 +228,7 @@ fun PostDetailScreen(
                                         emoji = post.avatar,
                                         imageUrl = post.profileImageUrl.takeIf { it.isNotBlank() },
                                         size = 42.dp,
+                                        userId = post.authorId,
                                     )
                                     Column {
                                         Text(text = post.author, color = colors.onSurface, fontWeight = FontWeight.SemiBold)
@@ -199,42 +253,6 @@ fun PostDetailScreen(
                                     fontSize = 12.sp,
                                 )
                             }
-                        }
-
-                        item {
-                            CommentComposer(
-                                text = commentText,
-                                imageUri = commentImageUri,
-                                replyingToName = replyingToName,
-                                focusRequester = focusRequester,
-                                onTextChange = { commentText = it },
-                                onPickPhoto = { commentPickers.pickPhoto() },
-                                onCancelReply = {
-                                    replyingToCommentId = null
-                                    replyingToName = null
-                                },
-                                onRemovePhoto = { commentImageUri = null },
-                                onSubmit = {
-                                    val text = commentText.trim()
-                                    val hasPhoto = commentImageUri != null
-                                    if (text.isBlank() && !hasPhoto) return@CommentComposer
-
-                                    scope.launch {
-                                        val result = if (replyingToCommentId == null) {
-                                            viewModel.addComment(postId, text, commentImageUri)
-                                        } else {
-                                            viewModel.addReply(postId, replyingToCommentId.orEmpty(), text, commentImageUri)
-                                        }
-
-                                        if (result.isSuccess) {
-                                            commentText = ""
-                                            commentImageUri = null
-                                            replyingToCommentId = null
-                                            replyingToName = null
-                                        }
-                                    }
-                                },
-                            )
                         }
 
                         if (commentsState.isEmpty()) {
@@ -307,127 +325,144 @@ private fun CommentComposer(
     onSubmit: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
+    val currentUserId = remember { FirebaseAuth.getInstance().currentUser?.uid.orEmpty() }
 
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(colors.surface)
-            .border(1.dp, colors.outline.copy(alpha = 0.35f), RoundedCornerShape(18.dp))
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(
-                text = if (replyingToName == null) "Write a comment" else "Write a reply",
-                color = colors.onSurface,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = "Text, photo, and replies stay in sync instantly.",
-                color = colors.onSurfaceVariant,
-                fontSize = 12.sp,
-            )
-        }
-
+        // Replying to label if replying
         if (replyingToName != null) {
             Row(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
+                    .clip(RoundedCornerShape(12.dp))
                     .background(colors.primary.copy(alpha = 0.10f))
-                    .border(1.dp, colors.primary.copy(alpha = 0.22f), RoundedCornerShape(999.dp))
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .border(1.dp, colors.primary.copy(alpha = 0.20f), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Text("↩", color = colors.primary)
-                Text("Replying to $replyingToName", color = colors.primary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.width(4.dp))
-                Text(
-                    "Cancel",
-                    color = colors.onSurfaceVariant,
-                    fontSize = 12.sp,
-                    modifier = Modifier.clickable(onClick = onCancelReply),
+                Text("Replying to @$replyingToName", color = colors.primary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                Icon(
+                    imageVector = Icons.Outlined.Close,
+                    contentDescription = "Cancel",
+                    tint = colors.primary,
+                    modifier = Modifier
+                        .size(14.dp)
+                        .clickable(onClick = onCancelReply)
                 )
             }
         }
 
-        OutlinedTextField(
-            value = text,
-            onValueChange = onTextChange,
-            modifier = Modifier
-                .fillMaxWidth()
-                .focusRequester(focusRequester),
-            placeholder = { Text(if (replyingToName == null) "Write a comment..." else "Write a reply...") },
-            minLines = 2,
-            shape = RoundedCornerShape(14.dp),
-        )
-
+        // Image preview if any
         if (imageUri != null) {
-            Row(
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(colors.surfaceVariant.copy(alpha = 0.35f))
-                    .border(1.dp, colors.primary.copy(alpha = 0.20f), RoundedCornerShape(16.dp))
-                    .padding(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    .size(60.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .border(1.dp, colors.outline.copy(alpha = 0.25f), RoundedCornerShape(8.dp))
             ) {
                 AsyncImage(
                     model = imageUri,
-                    contentDescription = "Selected comment image",
-                    modifier = Modifier
-                        .size(72.dp)
-                        .clip(RoundedCornerShape(14.dp)),
+                    contentDescription = "Photo preview",
+                    modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,
                 )
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Photo attached", color = colors.onSurface, fontWeight = FontWeight.SemiBold)
-                    Text("Will upload with your comment", color = colors.onSurfaceVariant, fontSize = 12.sp)
-                }
-                Icon(
-                    imageVector = Icons.Outlined.Close,
-                    contentDescription = "Remove photo",
-                    tint = colors.onSurfaceVariant,
+                Box(
                     modifier = Modifier
-                        .size(18.dp)
+                        .align(Alignment.TopEnd)
+                        .padding(2.dp)
+                        .size(16.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.6f))
                         .clickable(onClick = onRemovePhoto),
-                )
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Outlined.Close,
+                        contentDescription = "Remove",
+                        tint = Color.White,
+                        modifier = Modifier.size(10.dp),
+                    )
+                }
             }
         }
 
+        // Main input row
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Box(
+            // Current User Avatar in real-time
+            AvatarChip(
+                emoji = "👤",
+                imageUrl = null,
+                size = 36.dp,
+                userId = currentUserId,
+            )
+
+            // Text field and photo picker inside a search-bar style container
+            Row(
                 modifier = Modifier
-                    .height(42.dp)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(colors.surfaceVariant.copy(alpha = 0.35f))
-                    .border(1.dp, colors.outline.copy(alpha = 0.35f), RoundedCornerShape(999.dp))
-                    .clickable(onClick = onPickPhoto)
-                    .padding(horizontal = 14.dp),
-                contentAlignment = Alignment.Center,
+                    .weight(1f)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(colors.surfaceVariant.copy(alpha = 0.5f))
+                    .border(1.dp, colors.outline.copy(alpha = 0.2f), RoundedCornerShape(20.dp))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(Icons.Outlined.Image, contentDescription = null, tint = colors.primary, modifier = Modifier.size(16.dp))
-                    Text("Photo", color = colors.onSurface, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                }
+                androidx.compose.foundation.text.BasicTextField(
+                    value = text,
+                    onValueChange = onTextChange,
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRequester(focusRequester),
+                    textStyle = androidx.compose.ui.text.TextStyle(
+                        color = colors.onSurface,
+                        fontSize = 14.sp
+                    ),
+                    maxLines = 4,
+                    decorationBox = { inner ->
+                        if (text.isEmpty()) {
+                            Text(
+                                text = if (replyingToName == null) "Write a comment..." else "Reply...",
+                                color = colors.onSurfaceVariant.copy(alpha = 0.6f),
+                                fontSize = 14.sp
+                            )
+                        }
+                        inner()
+                    }
+                )
+
+                // Pick photo icon inside the text input box
+                Icon(
+                    imageVector = Icons.Outlined.Image,
+                    contentDescription = "Add photo",
+                    tint = colors.primary,
+                    modifier = Modifier
+                        .size(20.dp)
+                        .clickable(onClick = onPickPhoto)
+                )
             }
 
-            Button(
-                onClick = onSubmit,
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.White),
+            // Send icon button
+            val enabled = text.isNotBlank() || imageUri != null
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(if (enabled) colors.primary else colors.surfaceVariant)
+                    .clickable(enabled = enabled, onClick = onSubmit),
+                contentAlignment = Alignment.Center,
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.AutoMirrored.Outlined.Send, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Text(if (replyingToName == null) "Post Comment" else "Post Reply", fontWeight = FontWeight.Bold)
-                }
+                Icon(
+                    imageVector = Icons.AutoMirrored.Outlined.Send,
+                    contentDescription = "Send",
+                    tint = if (enabled) Color.White else colors.onSurfaceVariant.copy(alpha = 0.4f),
+                    modifier = Modifier.size(16.dp)
+                )
             }
         }
     }
@@ -462,6 +497,7 @@ private fun CommentThread(
                     emoji = comment.userAvatar,
                     imageUrl = comment.userProfileImageUrl.takeIf { it.isNotBlank() },
                     size = 34.dp,
+                    userId = comment.userId,
                 )
                 Column(modifier = Modifier.weight(1f)) {
                     Text(comment.username, color = colors.onSurface, fontWeight = FontWeight.SemiBold)
@@ -530,11 +566,33 @@ private fun AvatarChip(
     emoji: String,
     imageUrl: String?,
     size: androidx.compose.ui.unit.Dp,
+    userId: String? = null,
 ) {
     val colors = MaterialTheme.colorScheme
-    if (!imageUrl.isNullOrBlank()) {
+    var liveImageUrl by remember(imageUrl, userId) { mutableStateOf(imageUrl) }
+
+    androidx.compose.runtime.DisposableEffect(userId) {
+        var listenerRegistration: com.google.firebase.firestore.ListenerRegistration? = null
+        if (!userId.isNullOrBlank()) {
+            val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+            listenerRegistration = db.collection("users").document(userId)
+                .addSnapshotListener { snapshot, error ->
+                    if (error == null && snapshot != null && snapshot.exists()) {
+                        val dbUrl = snapshot.getString("profileImageUrl")
+                        if (!dbUrl.isNullOrBlank()) {
+                            liveImageUrl = dbUrl
+                        }
+                    }
+                }
+        }
+        onDispose {
+            listenerRegistration?.remove()
+        }
+    }
+
+    if (!liveImageUrl.isNullOrBlank()) {
         AsyncImage(
-            model = imageUrl,
+            model = liveImageUrl,
             contentDescription = null,
             modifier = Modifier
                 .size(size)

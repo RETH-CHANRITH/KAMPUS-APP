@@ -173,6 +173,47 @@ class GroupsRepositoryImpl(private val firestore: FirebaseFirestore) {
 
     // ── Write operations ──────────────────────────────────────────────────────
 
+    private suspend fun fetchUserInfo(userId: String): Pair<String, String> {
+        return try {
+            val doc = firestore.collection("users").document(userId).get().await()
+            // Try multiple field names for name (different parts of the app may use different keys)
+            val name = (doc.getString("displayName")
+                ?: doc.getString("name")
+                ?: doc.getString("fullName")
+                ?: auth.currentUser?.takeIf { it.uid == userId }?.displayName)
+                ?.takeIf { it.isNotBlank() }
+            // Try multiple field names for avatar
+            val avatar = (doc.getString("profileImageUrl")
+                ?: doc.getString("photoUrl")
+                ?: doc.getString("avatarUrl")
+                ?: auth.currentUser?.takeIf { it.uid == userId }?.photoUrl?.toString())
+                ?.takeIf { it.isNotBlank() }
+            Pair(name ?: "User", avatar ?: "")
+        } catch (e: Exception) {
+            // Fallback to FirebaseAuth for current user
+            val fbUser = auth.currentUser?.takeIf { it.uid == userId }
+            Pair(fbUser?.displayName?.takeIf { it.isNotBlank() } ?: "User", fbUser?.photoUrl?.toString() ?: "")
+        }
+    }
+
+    /**
+     * Fetch fresh user info from Firestore and update the member document in-place.
+     * Call this when showing member list to backfill stale "Unknown" entries.
+     */
+    suspend fun refreshMemberInfo(groupId: String, userId: String) {
+        try {
+            val (userName, userAvatarUrl) = fetchUserInfo(userId)
+            if (userName.isNotBlank() && userName != "User") {
+                firestore.collection("groups").document(groupId)
+                    .collection("members").document(userId)
+                    .update(mapOf(
+                        "userName" to userName,
+                        "userAvatarUrl" to userAvatarUrl,
+                    )).await()
+            }
+        } catch (_: Exception) { /* best-effort */ }
+    }
+
     suspend fun createGroup(
         name: String,
         category: String,
@@ -182,6 +223,7 @@ class GroupsRepositoryImpl(private val firestore: FirebaseFirestore) {
     ): Result<String> = try {
         val currentUser = auth.currentUser
             ?: return Result.failure(Exception("Not signed in"))
+        val (userName, userAvatar) = fetchUserInfo(currentUser.uid)
         val now = System.currentTimeMillis()
         val ref = firestore.collection("groups").document()
 
@@ -203,8 +245,8 @@ class GroupsRepositoryImpl(private val firestore: FirebaseFirestore) {
         ref.collection("members").document(currentUser.uid).set(
             mapOf(
                 "userId" to currentUser.uid,
-                "userName" to (currentUser.displayName ?: "Unknown"),
-                "userAvatarUrl" to (currentUser.photoUrl?.toString() ?: ""),
+                "userName" to userName,
+                "userAvatarUrl" to userAvatar,
                 "role" to MemberRole.ADMIN.name,
                 "status" to MembershipStatus.MEMBER.name,
                 "joinedAt" to now,
@@ -223,6 +265,7 @@ class GroupsRepositoryImpl(private val firestore: FirebaseFirestore) {
     ): Result<String> = try {
         val currentUser = auth.currentUser
             ?: return Result.failure(Exception("Not signed in"))
+        val (userName, userAvatar) = fetchUserInfo(currentUser.uid)
         val now = System.currentTimeMillis()
         val ref = firestore.collection("groups").document(groupId)
             .collection("posts").document()
@@ -231,8 +274,8 @@ class GroupsRepositoryImpl(private val firestore: FirebaseFirestore) {
             mapOf(
                 "groupId" to groupId,
                 "authorId" to currentUser.uid,
-                "authorName" to (currentUser.displayName ?: "Unknown"),
-                "authorAvatarUrl" to (currentUser.photoUrl?.toString() ?: ""),
+                "authorName" to userName,
+                "authorAvatarUrl" to userAvatar,
                 "content" to content.trim(),
                 "imageUrl" to imageUrl,
                 "likeCount" to 0,
@@ -256,6 +299,7 @@ class GroupsRepositoryImpl(private val firestore: FirebaseFirestore) {
     suspend fun joinPublicGroup(groupId: String): Result<Unit> = try {
         val currentUser = auth.currentUser
             ?: return Result.failure(Exception("Not signed in"))
+        val (userName, userAvatar) = fetchUserInfo(currentUser.uid)
         val now = System.currentTimeMillis()
 
         firestore.collection("groups").document(groupId)
@@ -263,8 +307,8 @@ class GroupsRepositoryImpl(private val firestore: FirebaseFirestore) {
             .set(
                 mapOf(
                     "userId" to currentUser.uid,
-                    "userName" to (currentUser.displayName ?: "Unknown"),
-                    "userAvatarUrl" to (currentUser.photoUrl?.toString() ?: ""),
+                    "userName" to userName,
+                    "userAvatarUrl" to userAvatar,
                     "role" to MemberRole.MEMBER.name,
                     "status" to MembershipStatus.MEMBER.name,
                     "joinedAt" to now,
@@ -282,6 +326,7 @@ class GroupsRepositoryImpl(private val firestore: FirebaseFirestore) {
     suspend fun requestJoinPrivateGroup(groupId: String): Result<Unit> = try {
         val currentUser = auth.currentUser
             ?: return Result.failure(Exception("Not signed in"))
+        val (userName, userAvatar) = fetchUserInfo(currentUser.uid)
         val now = System.currentTimeMillis()
 
         firestore.collection("groups").document(groupId)
@@ -289,8 +334,8 @@ class GroupsRepositoryImpl(private val firestore: FirebaseFirestore) {
             .set(
                 mapOf(
                     "userId" to currentUser.uid,
-                    "userName" to (currentUser.displayName ?: "Unknown"),
-                    "userAvatarUrl" to (currentUser.photoUrl?.toString() ?: ""),
+                    "userName" to userName,
+                    "userAvatarUrl" to userAvatar,
                     "requestedAt" to now,
                 )
             ).await()
@@ -362,9 +407,29 @@ class GroupsRepositoryImpl(private val firestore: FirebaseFirestore) {
     ): Result<Unit> = try {
         val currentUserId = auth.currentUser?.uid
             ?: return Result.failure(Exception("Not signed in"))
+        val currentUserName = auth.currentUser?.displayName ?: "Anonymous"
         val now = System.currentTimeMillis()
         val postRef = firestore.collection("groups").document(groupId)
             .collection("posts").document(postId)
+        val postSnapshot = postRef.get().await()
+        val contentPreview = (postSnapshot.getString("content") ?: postSnapshot.getString("text") ?: "Reported group post")
+            .take(240)
+
+        firestore.collection("reports").add(
+            mapOf(
+                "reporterId" to currentUserId,
+                "reportedByUserId" to currentUserId,
+                "reportedByName" to currentUserName,
+                "contentType" to "GROUP_POST",
+                "contentId" to postId,
+                "groupId" to groupId,
+                "contentPreview" to contentPreview,
+                "reason" to reason.name,
+                "additionalNote" to note.trim(),
+                "status" to "open",
+                "createdAt" to now,
+            )
+        ).await()
 
         postRef.update(
             "isReported", true,

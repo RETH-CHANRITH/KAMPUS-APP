@@ -56,7 +56,12 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.launch
 import com.example.kampus.ui.components.CampusBottomNavBar
+import com.example.kampus.ui.components.NavItem
 import com.example.kampus.ui.chat.ChatStory
+import com.example.kampus.ui.chat.ChatViewModel
+import com.example.kampus.ui.chat.FullCreateStoryScreen
+import com.example.kampus.ui.chat.StoryEntryMode
+import com.example.kampus.ui.story.StoryViewerOverlay
 import com.example.kampus.ui.theme.ThemeController
 import com.example.kampus.utils.ActivityLogger
 
@@ -157,11 +162,14 @@ fun HomeScreen(
     onGroupsClick  : () -> Unit = {},   // ← ADDED
     onEventsClick  : () -> Unit = {},   // ← ADDED (for future use)
     onChatClick    : () -> Unit = {},   // ← ADDED (for future use)
+    onAdminClick   : () -> Unit = {},
     viewModel      : FeedViewModel = viewModel(),
+    chatViewModel  : ChatViewModel = viewModel(),
 ) {
     val vm = viewModel
     val context = LocalContext.current
     val uiState by vm.uiState.collectAsStateWithLifecycle()
+    val chatListState by chatViewModel.chatListState.collectAsStateWithLifecycle()
     val likedPosts by vm.likedIds.collectAsState()
     val currentUserId = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
     val posts = uiState.posts
@@ -179,284 +187,350 @@ fun HomeScreen(
     var pendingReportPost by remember { mutableStateOf<PostItem?>(null) }
     var pendingBlockPost by remember { mutableStateOf<PostItem?>(null) }
 
-    Scaffold(
-        containerColor = HBg,
-        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
-        topBar = {
-            Surface(
-                color          = HBg,
-                tonalElevation = 0.dp,
-                shadowElevation = 0.dp,
-            ) {
-                TopBar(
-                    notifCount    = unreadNotifsCount,
-                    onNotifClick  = onNotifClick,
-                    onSearchClick = onSearchClick,
-                )
-            }
-        },
-        bottomBar = {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(Color.Transparent, HBg.copy(alpha = 0.98f))
-                        )
+    var showCreateStoryDialog by remember { mutableStateOf(false) }
+    var selectedStoryId by remember { mutableStateOf<String?>(null) }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            containerColor = HBg,
+            snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+            topBar = {
+                Surface(
+                    color          = HBg,
+                    tonalElevation = 0.dp,
+                    shadowElevation = 0.dp,
+                ) {
+                    TopBar(
+                        notifCount    = unreadNotifsCount,
+                        onNotifClick  = onNotifClick,
+                        onSearchClick = onSearchClick,
                     )
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
-                    .navigationBarsPadding(),
-            ) {
-                CampusBottomNavBar(
-                    selectedIndex  = selectedNav,
-                    onItemSelected = { index ->
-                        selectedNav = index
-                        when (index) {
-                            0 -> { /* already on Home, do nothing */ }
-                            1 -> onGroupsClick()
-                            2 -> onEventsClick()
-                            3 -> onChatClick()
-                        }
-                    },
-                    onFabClick     = onCreatePost,
-                    onProfileClick = onProfileClick,
-                    isProfileSelected = false,
-                )
-            }
-        },
-    ) { innerPadding ->
-        LazyColumn(
-            state          = listState,
-            modifier       = Modifier
-                .fillMaxSize()
-                .padding(innerPadding),
-            contentPadding = PaddingValues(bottom = 8.dp),
-        ) {
-            if (uiState.isLoading && posts.isEmpty()) {
-                item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 24.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        CircularProgressIndicator(color = HBlue)
+                }
+            },
+            bottomBar = {
+                val strings = com.example.kampus.ui.localization.rememberUiStrings()
+                val isAdmin = uiState.currentUserRole == "admin"
+                
+                val navItems = remember(strings, isAdmin) {
+                    if (isAdmin) {
+                        listOf(
+                            com.example.kampus.ui.components.NavItem(strings.home, Icons.Outlined.Home, Icons.Filled.Home),
+                            com.example.kampus.ui.components.NavItem(strings.groups, Icons.Outlined.Group, Icons.Filled.Group),
+                            com.example.kampus.ui.components.NavItem(strings.adminPanel, Icons.Outlined.Dashboard, Icons.Filled.Dashboard),
+                            com.example.kampus.ui.components.NavItem(strings.chat, Icons.Outlined.ChatBubbleOutline, Icons.Filled.ChatBubble),
+                        )
+                    } else {
+                        listOf(
+                            com.example.kampus.ui.components.NavItem(strings.home, Icons.Outlined.Home, Icons.Filled.Home),
+                            com.example.kampus.ui.components.NavItem(strings.groups, Icons.Outlined.Group, Icons.Filled.Group),
+                            com.example.kampus.ui.components.NavItem(strings.events, Icons.Outlined.CalendarMonth, Icons.Filled.CalendarMonth),
+                            com.example.kampus.ui.components.NavItem(strings.chat, Icons.Outlined.ChatBubbleOutline, Icons.Filled.ChatBubble),
+                        )
                     }
                 }
-            }
 
-            item {
-                Spacer(Modifier.height(8.dp))
-                StoriesRow(
-                    stories                    = stories,
-                    currentUserProfileImageUrl = uiState.currentUserProfileImageUrl,
-                    currentUserAvatarEmoji     = uiState.currentUserAvatarEmoji,
-                    friendsAndFollowers        = uiState.friendsAndFollowers,
-                )
-                Spacer(Modifier.height(14.dp))
-                HorizontalDivider(
-                    color     = HBorder.copy(alpha = 0.5f),
-                    thickness = 0.5.dp,
-                )
-                Spacer(Modifier.height(6.dp))
-            }
-            items(posts, key = { it.id }) { post ->
-                PostCard(
-                    post    = post,
-                    isLiked = post.id in likedPosts || (currentUserId.isNotBlank() && currentUserId in post.likedBy),
-                    isSaved = post.id in uiState.savedPostIds,
-                    onLike  = {
-                        vm.toggleLike(post.id)
-                    },
-                    onShare = {
-                        vm.incrementShareCount(post.id)
-                        ActivityLogger.logAction(
-                            type = "share_post",
-                            text = "Shared post by ${post.author}",
-                            metadata = mapOf("postId" to post.id.toString(), "author" to post.author),
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color.Transparent, HBg.copy(alpha = 0.98f))
+                            )
                         )
-                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                            type = "text/plain"
-                            putExtra(Intent.EXTRA_SUBJECT, "${post.author} on Kampus")
-                            putExtra(Intent.EXTRA_TEXT, "${post.author}: ${post.content}")
-                        }
-                        context.startActivity(Intent.createChooser(shareIntent, "Share post"))
-                    },
-                    
-                    onMenuAction = { targetPost, action ->
-                        when (action) {
-                            "open" -> {
-                                onPostClick(targetPost.id)
-                            }
-                            "copy" -> {
-                                val clipboard = context.getSystemService(ClipboardManager::class.java)
-                                clipboard?.setPrimaryClip(ClipData.newPlainText("post", targetPost.content))
-                                coroutineScope.launch { snackbarHostState.showSnackbar("Post text copied") }
-                            }
-                            "pin" -> {
-                                vm.pinPostBackend(targetPost.id, true)
-                                coroutineScope.launch { snackbarHostState.showSnackbar("Post pinned") }
-                            }
-                            "unpin" -> {
-                                vm.pinPostBackend(targetPost.id, false)
-                                coroutineScope.launch { snackbarHostState.showSnackbar("Post unpinned") }
-                            }
-                            "trash" -> {
-                                // Ask for confirmation before deleting
-                                pendingDeletePost = targetPost
-                                confirmDeleteVisible = true
-                            }
-                            "edit" -> {
-                                ActivityLogger.logAction(type = "edit_post", text = "Edit requested for ${targetPost.id}")
-                            }
-                            "privacy_public" -> {
-                                vm.updatePostVisibility(targetPost.id, PostItem.PostVisibility.PUBLIC)
-                                coroutineScope.launch { snackbarHostState.showSnackbar("Privacy set to Public") }
-                            }
-                            "privacy_friends" -> {
-                                vm.updatePostVisibility(targetPost.id, PostItem.PostVisibility.FRIENDS)
-                                coroutineScope.launch { snackbarHostState.showSnackbar("Privacy set to Friends") }
-                            }
-                            "privacy_private" -> {
-                                vm.updatePostVisibility(targetPost.id, PostItem.PostVisibility.PRIVATE)
-                                coroutineScope.launch { snackbarHostState.showSnackbar("Privacy set to Only Me") }
-                            }
-                            "privacy" -> {
-                                vm.updatePostVisibility(targetPost.id, targetPost.visibility)
-                                coroutineScope.launch { snackbarHostState.showSnackbar("Privacy updated") }
-                            }
-                            "hide_profile" -> {
-                                vm.hideFromProfileBackend(targetPost.id)
-                                coroutineScope.launch { snackbarHostState.showSnackbar("Hidden from profile") }
-                            }
-                            "save" -> {
-                                vm.savePost(targetPost.id, true)
-                                coroutineScope.launch { snackbarHostState.showSnackbar("Post saved") }
-                            }
-                            "unsave" -> {
-                                vm.savePost(targetPost.id, false)
-                                coroutineScope.launch { snackbarHostState.showSnackbar("Post unsaved") }
-                            }
-                            "share" -> {
-                                vm.incrementShareCount(targetPost.id)
-                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "text/plain"
-                                    putExtra(Intent.EXTRA_SUBJECT, "${targetPost.author} on Kampus")
-                                    putExtra(Intent.EXTRA_TEXT, "${targetPost.author}: ${targetPost.content}")
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                        .navigationBarsPadding(),
+                ) {
+                    CampusBottomNavBar(
+                        navItems       = navItems,
+                        selectedIndex  = selectedNav,
+                        onItemSelected = { index ->
+                            selectedNav = index
+                            if (isAdmin) {
+                                when (index) {
+                                    0 -> { /* already on Home */ }
+                                    1 -> onGroupsClick()
+                                    2 -> onAdminClick()
+                                    3 -> onChatClick()
                                 }
-                                context.startActivity(Intent.createChooser(shareIntent, "Share post"))
+                            } else {
+                                when (index) {
+                                    0 -> { /* already on Home */ }
+                                    1 -> onGroupsClick()
+                                    2 -> onEventsClick()
+                                    3 -> onChatClick()
+                                }
                             }
-                            "copy_link" -> {
-                                val clipboard = context.getSystemService(ClipboardManager::class.java)
-                                clipboard?.setPrimaryClip(ClipData.newPlainText("post_link", "https://kampus.app/post/${targetPost.id}"))
-                                coroutineScope.launch { snackbarHostState.showSnackbar("Link copied to clipboard") }
-                            }
-                            "not_interested" -> {
-                                vm.notInterested(targetPost.id)
-                                coroutineScope.launch { snackbarHostState.showSnackbar("Marked as Not Interested") }
-                            }
-                            "hide_post" -> {
-                                vm.hidePost(targetPost.id)
-                                coroutineScope.launch { snackbarHostState.showSnackbar("Post hidden") }
-                            }
-                            "mute_user" -> {
-                                vm.muteUser(targetPost.authorId)
-                                coroutineScope.launch { snackbarHostState.showSnackbar("Muted posts from ${targetPost.author}") }
-                            }
-                            "report" -> {
-                                pendingReportPost = targetPost
-                            }
-                            "block" -> {
-                                pendingBlockPost = targetPost
-                            }
-                            else -> {
-                                ActivityLogger.logAction(type = "post_menu_action", text = "$action for ${targetPost.id}")
-                            }
+                        },
+                        onFabClick     = onCreatePost,
+                        onProfileClick = onProfileClick,
+                        isProfileSelected = false,
+                    )
+                }
+            },
+        ) { innerPadding ->
+            LazyColumn(
+                state          = listState,
+                modifier       = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+                contentPadding = PaddingValues(bottom = 8.dp),
+            ) {
+                if (uiState.isLoading && posts.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 24.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            CircularProgressIndicator(color = HBlue)
                         }
-                    },
-                    onComment = { onPostClick(post.id) },
-                )
-                Spacer(Modifier.height(6.dp))
+                    }
+                }
+
+                item {
+                    Spacer(Modifier.height(8.dp))
+                    val imageStoriesByOwner = remember(chatListState.stories) {
+                        chatListState.stories.filter { it.storyType == "image" || it.storyType == "video" }.groupBy { it.ownerId }
+                    }
+                    StoriesRow(
+                        stories                    = stories,
+                        currentUserProfileImageUrl = uiState.currentUserProfileImageUrl,
+                        currentUserAvatarEmoji     = uiState.currentUserAvatarEmoji,
+                        friendsAndFollowers        = uiState.friendsAndFollowers,
+                        onCreateStory              = { showCreateStoryDialog = true },
+                        onOpenStory                = { story -> selectedStoryId = story.id },
+                        imageStoriesByOwner        = imageStoriesByOwner,
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    HorizontalDivider(
+                        color     = HBorder.copy(alpha = 0.5f),
+                        thickness = 0.5.dp,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                }
+                items(posts, key = { it.id }) { post ->
+                    PostCard(
+                        post    = post,
+                        isLiked = post.id in likedPosts || (currentUserId.isNotBlank() && currentUserId in post.likedBy),
+                        isSaved = post.id in uiState.savedPostIds,
+                        onLike  = {
+                            vm.toggleLike(post.id)
+                        },
+                        onShare = {
+                            vm.incrementShareCount(post.id)
+                            ActivityLogger.logAction(
+                                type = "share_post",
+                                text = "Shared post by ${post.author}",
+                                metadata = mapOf("postId" to post.id.toString(), "author" to post.author),
+                            )
+                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_SUBJECT, "${post.author} on Kampus")
+                                putExtra(Intent.EXTRA_TEXT, "${post.author}: ${post.content}")
+                            }
+                            context.startActivity(Intent.createChooser(shareIntent, "Share post"))
+                        },
+                        
+                        onMenuAction = { targetPost, action ->
+                            when (action) {
+                                "open" -> {
+                                    onPostClick(targetPost.id)
+                                }
+                                "copy" -> {
+                                    val clipboard = context.getSystemService(ClipboardManager::class.java)
+                                    clipboard?.setPrimaryClip(ClipData.newPlainText("post", targetPost.content))
+                                    coroutineScope.launch { snackbarHostState.showSnackbar("Post text copied") }
+                                }
+                                "pin" -> {
+                                    vm.pinPostBackend(targetPost.id, true)
+                                    coroutineScope.launch { snackbarHostState.showSnackbar("Post pinned") }
+                                }
+                                "unpin" -> {
+                                    vm.pinPostBackend(targetPost.id, false)
+                                    coroutineScope.launch { snackbarHostState.showSnackbar("Post unpinned") }
+                                }
+                                "trash" -> {
+                                    // Ask for confirmation before deleting
+                                    pendingDeletePost = targetPost
+                                    confirmDeleteVisible = true
+                                }
+                                "edit" -> {
+                                    ActivityLogger.logAction(type = "edit_post", text = "Edit requested for ${targetPost.id}")
+                                }
+                                "privacy_public" -> {
+                                    vm.updatePostVisibility(targetPost.id, PostItem.PostVisibility.PUBLIC)
+                                    coroutineScope.launch { snackbarHostState.showSnackbar("Privacy set to Public") }
+                                }
+                                "privacy_friends" -> {
+                                    vm.updatePostVisibility(targetPost.id, PostItem.PostVisibility.FRIENDS)
+                                    coroutineScope.launch { snackbarHostState.showSnackbar("Privacy set to Friends") }
+                                }
+                                "privacy_private" -> {
+                                    vm.updatePostVisibility(targetPost.id, PostItem.PostVisibility.PRIVATE)
+                                    coroutineScope.launch { snackbarHostState.showSnackbar("Privacy set to Only Me") }
+                                }
+                                "privacy" -> {
+                                    vm.updatePostVisibility(targetPost.id, targetPost.visibility)
+                                    coroutineScope.launch { snackbarHostState.showSnackbar("Privacy updated") }
+                                }
+                                "hide_profile" -> {
+                                    vm.hideFromProfileBackend(targetPost.id)
+                                    coroutineScope.launch { snackbarHostState.showSnackbar("Hidden from profile") }
+                                }
+                                "save" -> {
+                                    vm.savePost(targetPost.id, true)
+                                    coroutineScope.launch { snackbarHostState.showSnackbar("Post saved") }
+                                }
+                                "unsave" -> {
+                                    vm.savePost(targetPost.id, false)
+                                    coroutineScope.launch { snackbarHostState.showSnackbar("Post unsaved") }
+                                }
+                                "share" -> {
+                                    vm.incrementShareCount(targetPost.id)
+                                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(Intent.EXTRA_SUBJECT, "${targetPost.author} on Kampus")
+                                        putExtra(Intent.EXTRA_TEXT, "${targetPost.author}: ${targetPost.content}")
+                                    }
+                                    context.startActivity(Intent.createChooser(shareIntent, "Share post"))
+                                }
+                                "copy_link" -> {
+                                    val clipboard = context.getSystemService(ClipboardManager::class.java)
+                                    clipboard?.setPrimaryClip(ClipData.newPlainText("post_link", "https://kampus.app/post/${targetPost.id}"))
+                                    coroutineScope.launch { snackbarHostState.showSnackbar("Link copied to clipboard") }
+                                }
+                                "not_interested" -> {
+                                    vm.notInterested(targetPost.id)
+                                    coroutineScope.launch { snackbarHostState.showSnackbar("Marked as Not Interested") }
+                                }
+                                "hide_post" -> {
+                                    vm.hidePost(targetPost.id)
+                                    coroutineScope.launch { snackbarHostState.showSnackbar("Post hidden") }
+                                }
+                                "mute_user" -> {
+                                    vm.muteUser(targetPost.authorId)
+                                    coroutineScope.launch { snackbarHostState.showSnackbar("Muted posts from ${targetPost.author}") }
+                                }
+                                "report" -> {
+                                    pendingReportPost = targetPost
+                                }
+                                "block" -> {
+                                    pendingBlockPost = targetPost
+                                }
+                                else -> {
+                                    ActivityLogger.logAction(type = "post_menu_action", text = "$action for ${targetPost.id}")
+                                }
+                            }
+                        },
+                        onComment = { onPostClick(post.id) },
+                    )
+                    Spacer(Modifier.height(6.dp))
+                }
             }
         }
-    }
 
-    // Confirmation dialog for destructive action
-    if (confirmDeleteVisible && pendingDeletePost != null) {
-        val target = pendingDeletePost!!
-        AlertDialog(
-            onDismissRequest = { confirmDeleteVisible = false; pendingDeletePost = null },
-            title = { Text("Move to trash", color = HWhite) },
-            text = { Text("Items in your trash are deleted after 30 days.", color = HGray4) },
-            confirmButton = {
-                TextButton(onClick = {
-                    // perform delete
-                    recentlyDeletedPost = target
-                    vm.deletePost(target.id)
-                    vm.hideFromProfileBackend(target.id)
-                    coroutineScope.launch {
-                        val res = snackbarHostState.showSnackbar("Post moved to trash", actionLabel = "UNDO")
-                        if (res == SnackbarResult.ActionPerformed) {
-                            recentlyDeletedPost?.let { vm.restorePost(it) }
-                            recentlyDeletedPost = null
+        // Confirmation dialog for destructive action
+        if (confirmDeleteVisible && pendingDeletePost != null) {
+            val target = pendingDeletePost!!
+            AlertDialog(
+                onDismissRequest = { confirmDeleteVisible = false; pendingDeletePost = null },
+                title = { Text("Move to trash", color = HWhite) },
+                text = { Text("Items in your trash are deleted after 30 days.", color = HGray4) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        // perform delete
+                        recentlyDeletedPost = target
+                        vm.deletePost(target.id)
+                        vm.hideFromProfileBackend(target.id)
+                        coroutineScope.launch {
+                            val res = snackbarHostState.showSnackbar("Post moved to trash", actionLabel = "UNDO")
+                            if (res == SnackbarResult.ActionPerformed) {
+                                recentlyDeletedPost?.let { vm.restorePost(it) }
+                                recentlyDeletedPost = null
+                            }
                         }
+                        confirmDeleteVisible = false
+                        pendingDeletePost = null
+                    }) { Text("Move to trash") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { confirmDeleteVisible = false; pendingDeletePost = null }) { Text("Cancel") }
+                }
+            )
+        }
+
+        if (pendingReportPost != null) {
+            val target = pendingReportPost!!
+            AlertDialog(
+                onDismissRequest = { pendingReportPost = null },
+                title = { Text("Report Post", color = HWhite) },
+                text = { Text("Are you sure you want to report this post? We will review it within 24 hours.", color = HGray4) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        vm.reportPost(target.id)
+                        pendingReportPost = null
+                        coroutineScope.launch { snackbarHostState.showSnackbar("Post reported. Thank you!") }
+                    }) {
+                        Text("Report", color = HRed)
                     }
-                    confirmDeleteVisible = false
-                    pendingDeletePost = null
-                }) { Text("Move to trash") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmDeleteVisible = false; pendingDeletePost = null }) { Text("Cancel") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingReportPost = null }) {
+                        Text("Cancel", color = HWhite)
+                    }
+                },
+                containerColor = HCard
+            )
+        }
+
+        if (pendingBlockPost != null) {
+            val target = pendingBlockPost!!
+            AlertDialog(
+                onDismissRequest = { pendingBlockPost = null },
+                title = { Text("Block ${target.author}?", color = HWhite) },
+                text = { Text("You will no longer see posts or receive messages from this user.", color = HGray4) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        vm.blockUser(target.authorId)
+                        pendingBlockPost = null
+                        coroutineScope.launch { snackbarHostState.showSnackbar("Blocked ${target.author}") }
+                    }) {
+                        Text("Block", color = HRed)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingBlockPost = null }) {
+                        Text("Cancel", color = HWhite)
+                    }
+                },
+                containerColor = HCard
+            )
+        }
+
+        if (showCreateStoryDialog) {
+            FullCreateStoryScreen(
+                onDismiss = { showCreateStoryDialog = false },
+                onStoryCreated = { showCreateStoryDialog = false },
+                entryMode = StoryEntryMode.STORY,
+                viewModel = chatViewModel,
+            )
+        }
+
+        val activeStory = chatListState.stories.firstOrNull { it.id == selectedStoryId }
+        if (activeStory != null) {
+            val userStories = remember(chatListState.stories, activeStory.ownerId) {
+                chatListState.stories.filter { 
+                    it.ownerId == activeStory.ownerId && (it.storyType == "image" || it.storyType == "video")
+                }
             }
-        )
-    }
-
-    if (pendingReportPost != null) {
-        val target = pendingReportPost!!
-        AlertDialog(
-            onDismissRequest = { pendingReportPost = null },
-            title = { Text("Report Post", color = HWhite) },
-            text = { Text("Are you sure you want to report this post? We will review it within 24 hours.", color = HGray4) },
-            confirmButton = {
-                TextButton(onClick = {
-                    vm.reportPost(target.id)
-                    pendingReportPost = null
-                    coroutineScope.launch { snackbarHostState.showSnackbar("Post reported. Thank you!") }
-                }) {
-                    Text("Report", color = HRed)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingReportPost = null }) {
-                    Text("Cancel", color = HWhite)
-                }
-            },
-            containerColor = HCard
-        )
-    }
-
-    if (pendingBlockPost != null) {
-        val target = pendingBlockPost!!
-        AlertDialog(
-            onDismissRequest = { pendingBlockPost = null },
-            title = { Text("Block ${target.author}?", color = HWhite) },
-            text = { Text("You will no longer see posts or receive messages from this user.", color = HGray4) },
-            confirmButton = {
-                TextButton(onClick = {
-                    vm.blockUser(target.authorId)
-                    pendingBlockPost = null
-                    coroutineScope.launch { snackbarHostState.showSnackbar("Blocked ${target.author}") }
-                }) {
-                    Text("Block", color = HRed)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingBlockPost = null }) {
-                    Text("Cancel", color = HWhite)
-                }
-            },
-            containerColor = HCard
-        )
+            StoryViewerOverlay(
+                stories = userStories,
+                startStoryId = activeStory.id,
+                viewModel = chatViewModel,
+                onDismiss = { selectedStoryId = null },
+            )
+        }
     }
 }
 
@@ -573,34 +647,54 @@ private fun TopBar(
 // Friends / Followers Row  (real-time + real profiles)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Main horizontal row: shows the current user (“You”) first, then every
- * friend / follower fetched in real-time from Firestore.  Falls back to the
- * story list when the friends list is still empty (e.g. first load).
- */
 @Composable
 private fun StoriesRow(
     stories: List<StoryItem>,
     currentUserProfileImageUrl: String,
     currentUserAvatarEmoji: String,
     friendsAndFollowers: List<FriendUserItem> = emptyList(),
+    onCreateStory: () -> Unit,
+    onOpenStory: (ChatStory) -> Unit,
+    imageStoriesByOwner: Map<String, List<ChatStory>>,
 ) {
+    val currentUserId = remember { FirebaseAuth.getInstance().currentUser?.uid.orEmpty() }
     LazyRow(
         contentPadding        = PaddingValues(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         // “You” bubble — always first
         item {
+            val myStories = imageStoriesByOwner[currentUserId].orEmpty()
+            val hasActiveStories = myStories.isNotEmpty()
             MeBubble(
                 profileImageUrl = currentUserProfileImageUrl,
                 avatarEmoji     = currentUserAvatarEmoji,
+                hasActiveStories = hasActiveStories,
+                onClick         = {
+                    if (hasActiveStories) {
+                        onOpenStory(myStories.first())
+                    } else {
+                        onCreateStory()
+                    }
+                },
+                onCreateClick   = onCreateStory,
             )
         }
 
         if (friendsAndFollowers.isNotEmpty()) {
             // Real Firestore friends / followers
             items(friendsAndFollowers, key = { it.userId }) { friend ->
-                FriendBubble(friend = friend)
+                val friendStories = imageStoriesByOwner[friend.userId].orEmpty()
+                val hasActiveStories = friendStories.isNotEmpty()
+                FriendBubble(
+                    friend = friend,
+                    hasActiveStories = hasActiveStories,
+                    onClick = {
+                        if (hasActiveStories) {
+                            onOpenStory(friendStories.first())
+                        }
+                    }
+                )
             }
         } else {
             // Fallback: story data while Firestore loads
@@ -619,7 +713,9 @@ private fun StoriesRow(
 private fun MeBubble(
     profileImageUrl : String,
     avatarEmoji     : String,
-    onClick         : () -> Unit = {},
+    hasActiveStories: Boolean,
+    onClick         : () -> Unit,
+    onCreateClick   : () -> Unit,
 ) {
     // Subtle pulsing glow on the ring
     val infiniteTransition = rememberInfiniteTransition(label = "me_ring")
@@ -644,20 +740,31 @@ private fun MeBubble(
             ),
     ) {
         Box(contentAlignment = Alignment.BottomEnd) {
-            // Glowing ring
+            // Glowing ring (orange/purple sweep gradient if hasActiveStories, else standard blue)
             Box(
                 modifier = Modifier
                     .size(70.dp)
                     .clip(CircleShape)
                     .background(
-                        Brush.sweepGradient(
-                            listOf(
-                                HBlue.copy(alpha = ringAlpha),
-                                Color(0xFF93C5FD).copy(alpha = ringAlpha),
-                                HGlow.copy(alpha = ringAlpha),
-                                HBlue.copy(alpha = ringAlpha),
+                        if (hasActiveStories) {
+                            Brush.sweepGradient(
+                                listOf(
+                                    Color(0xFFF97316).copy(alpha = ringAlpha),
+                                    Color(0xFFEC4899).copy(alpha = ringAlpha),
+                                    Color(0xFF8B5CF6).copy(alpha = ringAlpha),
+                                    Color(0xFFF97316).copy(alpha = ringAlpha)
+                                )
                             )
-                        )
+                        } else {
+                            Brush.sweepGradient(
+                                listOf(
+                                    HBlue.copy(alpha = ringAlpha),
+                                    Color(0xFF93C5FD).copy(alpha = ringAlpha),
+                                    HGlow.copy(alpha = ringAlpha),
+                                    HBlue.copy(alpha = ringAlpha),
+                                )
+                            )
+                        }
                     ),
                 contentAlignment = Alignment.Center,
             ) {
@@ -694,7 +801,12 @@ private fun MeBubble(
                     .background(
                         Brush.radialGradient(listOf(HBlue, HBlue.copy(0.75f)))
                     )
-                    .border(2.dp, HBg, CircleShape),
+                    .border(2.dp, HBg, CircleShape)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication        = null,
+                        onClick           = onCreateClick
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -722,7 +834,11 @@ private fun MeBubble(
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun FriendBubble(friend: FriendUserItem) {
+private fun FriendBubble(
+    friend: FriendUserItem,
+    hasActiveStories: Boolean,
+    onClick: () -> Unit,
+) {
     // Pop-in scale on first composition
     var visible by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
@@ -743,17 +859,21 @@ private fun FriendBubble(friend: FriendUserItem) {
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication        = null,
-                onClick           = {},
+                onClick           = onClick,
             ),
     ) {
         Box(contentAlignment = Alignment.BottomEnd) {
-            // Outer ring — solid blue when online, muted when offline
+            // Outer ring — sweep gradient (orange/purple gradient when active stories exist, blue when online, gray when offline)
             Box(
                 modifier = Modifier
                     .size(70.dp)
                     .clip(CircleShape)
                     .background(
-                        if (friend.isOnline)
+                        if (hasActiveStories)
+                            Brush.sweepGradient(
+                                listOf(Color(0xFFF97316), Color(0xFFEC4899), Color(0xFF8B5CF6), Color(0xFFF97316))
+                            )
+                        else if (friend.isOnline)
                             Brush.sweepGradient(
                                 listOf(HBlue, Color(0xFF93C5FD), HGlow, HBlue)
                             )
@@ -892,6 +1012,57 @@ private fun StoryBubble(story: StoryItem) {
     }
 }
 
+@Composable
+private fun RealtimeAvatar(
+    userId: String,
+    fallbackAvatar: String,
+    size: androidx.compose.ui.unit.Dp,
+    modifier: Modifier = Modifier,
+) {
+    var profileImageUrl by remember(userId) { mutableStateOf("") }
+    var avatarEmoji by remember(userId) { mutableStateOf(fallbackAvatar) }
+
+    DisposableEffect(userId) {
+        var listener: com.google.firebase.firestore.ListenerRegistration? = null
+        if (userId.isNotBlank()) {
+            val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+            listener = db.collection("users").document(userId)
+                .addSnapshotListener { snapshot, error ->
+                    if (error == null && snapshot != null && snapshot.exists()) {
+                        profileImageUrl = snapshot.getString("profileImageUrl").orEmpty()
+                        val emoji = snapshot.getString("avatarEmoji") ?: snapshot.getString("avatar")
+                        if (!emoji.isNullOrBlank()) {
+                            avatarEmoji = emoji
+                        }
+                    }
+                }
+        }
+        onDispose {
+            listener?.remove()
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(Brush.radialGradient(listOf(HBlue.copy(0.3f), HGray6.copy(0.45f))))
+            .border(1.5.dp, HBorder, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (profileImageUrl.isNotBlank()) {
+            AsyncImage(
+                model = profileImageUrl,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize().clip(CircleShape),
+                contentScale = ContentScale.Crop,
+            )
+        } else {
+            Text(avatarEmoji.ifBlank { "👤" }, fontSize = (size.value * 0.45f).sp)
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Post Card
 // ─────────────────────────────────────────────────────────────────────────────
@@ -935,25 +1106,11 @@ private fun PostCard(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .background(Brush.radialGradient(listOf(HBlue.copy(0.3f), HGray6.copy(0.45f))))
-                        .border(1.5.dp, HBorder, CircleShape),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (post.profileImageUrl.isNotBlank()) {
-                        AsyncImage(
-                            model = post.profileImageUrl,
-                            contentDescription = post.author,
-                            modifier = Modifier.fillMaxSize().clip(CircleShape),
-                            contentScale = ContentScale.Crop,
-                        )
-                    } else {
-                        Text(post.avatar, fontSize = 20.sp)
-                    }
-                }
+                RealtimeAvatar(
+                    userId = post.authorId,
+                    fallbackAvatar = post.avatar,
+                    size = 44.dp
+                )
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Row(
                         verticalAlignment     = Alignment.CenterVertically,

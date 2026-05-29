@@ -109,6 +109,7 @@ fun ChatListScreen(
     onHomeClick    : () -> Unit,
     onGroupsClick  : () -> Unit,
     onEventsClick  : () -> Unit,
+    onAdminClick   : () -> Unit = {},
     onProfileClick : () -> Unit,
     onCreatePost   : () -> Unit = {},
     viewModel      : ChatViewModel = viewModel(),
@@ -135,6 +136,9 @@ fun ChatListScreen(
         containerColor = HBg,
         bottomBar = {
             if (!showCreateStoryDialog && selectedStoryId == null) {
+                val currentUserRole = com.example.kampus.ui.components.rememberCurrentUserRole()
+                val isAdmin = currentUserRole.equals("admin", ignoreCase = true)
+
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -146,14 +150,25 @@ fun ChatListScreen(
                         .padding(horizontal = 14.dp, vertical = 10.dp)
                         .navigationBarsPadding(),
                 ) {
+                    val navItems = com.example.kampus.ui.components.rememberCampusNavItems(isAdmin)
+
                     CampusBottomNavBar(
                         selectedIndex  = 3,          // Chat tab is index 3
+                        navItems       = navItems,
                         onItemSelected = { index ->
-                            when (index) {
-                                0 -> onHomeClick()
-                                1 -> onGroupsClick()
-                                2 -> onEventsClick()
-                                3 -> { /* already here */ }
+                            when {
+                                isAdmin -> when (index) {
+                                    0 -> onHomeClick()
+                                    1 -> onGroupsClick()
+                                    2 -> onAdminClick()
+                                    3 -> { /* already here */ }
+                                }
+                                else -> when (index) {
+                                    0 -> onHomeClick()
+                                    1 -> onGroupsClick()
+                                    2 -> onEventsClick()
+                                    3 -> { /* already here */ }
+                                }
                             }
                         },
                         onFabClick     = onCreatePost,
@@ -255,8 +270,13 @@ fun ChatListScreen(
 
         val activeStory = state.stories.firstOrNull { it.id == selectedStoryId }
         if (activeStory != null) {
+            val userStories = remember(state.stories, activeStory.ownerId) {
+                state.stories.filter { 
+                    it.ownerId == activeStory.ownerId && (it.storyType == "image" || it.storyType == "video")
+                }
+            }
             StoryViewerOverlay(
-                stories = state.stories,
+                stories = userStories,
                 startStoryId = activeStory.id,
                 viewModel = viewModel,
                 onDismiss = { selectedStoryId = null },

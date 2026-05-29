@@ -50,6 +50,7 @@ fun EventListScreen(
     onCreateClick  : () -> Unit          = {},
     onHomeClick    : () -> Unit          = {},
     onGroupsClick  : () -> Unit          = {},
+    onAdminClick   : () -> Unit          = {},
     onChatClick    : () -> Unit          = {},
     onFabClick     : () -> Unit          = {},
     onProfileClick : () -> Unit          = {},
@@ -91,6 +92,10 @@ fun EventListScreen(
             )
         },
         bottomBar = {
+            val currentUserRole = com.example.kampus.ui.components.rememberCurrentUserRole()
+            val isAdmin = currentUserRole.equals("admin", ignoreCase = true)
+            val navItems = com.example.kampus.ui.components.rememberCampusNavItems(isAdmin)
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -103,19 +108,28 @@ fun EventListScreen(
                     .padding(horizontal = 14.dp, vertical = 10.dp)
                     .navigationBarsPadding(),
             ) {
-                EventBottomNav(
-                    selectedIndex  = 2,   // Events is always index 2
+                com.example.kampus.ui.components.CampusBottomNavBar(
+                    selectedIndex  = 2,
+                    navItems       = navItems,
                     onItemSelected = { index ->
-                        when (index) {
-                            0 -> onHomeClick()
-                            1 -> onGroupsClick()
-                            2 -> { /* already here */ }
-                            3 -> onChatClick()
+                        when {
+                            isAdmin -> when (index) {
+                                0 -> onHomeClick()
+                                1 -> onGroupsClick()
+                                2 -> onAdminClick()
+                                3 -> onChatClick()
+                            }
+                            else -> when (index) {
+                                0 -> onHomeClick()
+                                1 -> onGroupsClick()
+                                2 -> { /* already here */ }
+                                3 -> onChatClick()
+                            }
                         }
                     },
-                    notifCount     = notifCount,
                     onFabClick     = onFabClick,
                     onProfileClick = onProfileClick,
+                    isProfileSelected = false,
                 )
             }
         },
@@ -172,8 +186,7 @@ fun EventListScreen(
                         onLike       = { viewModel.toggleLike(event) },
                         onSave       = { viewModel.toggleSave(event) },
                         onComment    = { onCommentOpen(event) },
-                        onShare      = {
-                            viewModel.shareEvent(event)
+                        onShare      = { 
                             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                 type = "text/plain"
                                 putExtra(Intent.EXTRA_SUBJECT, event.title)
@@ -192,7 +205,6 @@ fun EventListScreen(
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Top bar — title + search + filter chips
-// ─────────────────────────────────────────────────────────────────────────────
 @Composable
 private fun EventTopBar(
     searchQuery       : String,

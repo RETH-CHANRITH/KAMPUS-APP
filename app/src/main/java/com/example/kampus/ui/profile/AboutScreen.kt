@@ -86,6 +86,7 @@ fun AboutScreen(
     onBack: () -> Unit,
     onHomeClick: () -> Unit,
     onGroupsClick: () -> Unit,
+    onAdminClick: () -> Unit = {},
     onEventsClick: () -> Unit,
     onChatClick: () -> Unit,
     onCreatePost: () -> Unit,
@@ -224,15 +225,28 @@ fun AboutScreen(
                 .padding(horizontal = 14.dp, vertical = 10.dp)
                 .navigationBarsPadding(),
         ) {
+            val currentUserRole = com.example.kampus.ui.components.rememberCurrentUserRole()
+            val isAdmin = currentUserRole.equals("admin", ignoreCase = true)
+            val navItems = com.example.kampus.ui.components.rememberCampusNavItems(isAdmin)
+
             CampusBottomNavBar(
                 selectedIndex = selectedNav.intValue,
+                navItems = navItems,
                 onItemSelected = { index ->
                     selectedNav.intValue = index
-                    when (index) {
-                        0 -> onHomeClick()
-                        1 -> onGroupsClick()
-                        2 -> onEventsClick()
-                        3 -> onChatClick()
+                    when {
+                        isAdmin -> when (index) {
+                            0 -> onHomeClick()
+                            1 -> onGroupsClick()
+                            2 -> onAdminClick()
+                            3 -> onChatClick()
+                        }
+                        else -> when (index) {
+                            0 -> onHomeClick()
+                            1 -> onGroupsClick()
+                            2 -> onEventsClick()
+                            3 -> onChatClick()
+                        }
                     }
                 },
                 onFabClick = onCreatePost,

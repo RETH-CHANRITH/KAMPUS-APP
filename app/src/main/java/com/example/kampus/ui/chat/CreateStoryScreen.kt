@@ -52,6 +52,7 @@ import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -59,6 +60,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
@@ -208,8 +210,12 @@ fun FullCreateStoryScreen(
         }
 
         StoryFlowState.COMPLETE -> {
+            val uploadProgress by viewModel.storyUploadProgress.collectAsState()
+            val context = LocalContext.current
+            
             LaunchedEffect(storyCaption, capturedImageUri, selectedPrivacy, storyType) {
                 val result = viewModel.createStory(
+                    context = context,
                     note = storyCaption,
                     imageUri = capturedImageUri,
                     overlayText = storyOverlayText,
@@ -224,6 +230,29 @@ fun FullCreateStoryScreen(
                     onStoryCreated()
                 }
             }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.7f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    CircularProgressIndicator(
+                        color = HBlue,
+                        strokeWidth = 4.dp,
+                    )
+                    Text(
+                        text = "Sharing story... ${((uploadProgress ?: 0.0) * 100).roundToInt()}%",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
         }
     }
 }
@@ -234,6 +263,7 @@ private fun NotesComposerScreen(
     onStoryCreated: () -> Unit,
     viewModel: ChatViewModel = viewModel(),
 ) {
+    val context = LocalContext.current
     val auth = remember { FirebaseAuth.getInstance() }
     val firestore = remember { FirebaseFirestore.getInstance() }
 
@@ -304,6 +334,7 @@ private fun NotesComposerScreen(
                         coroutineScope.launch {
                             val moodPrefix = selectedMood?.takeIf { it.isNotBlank() }?.let { "$it " }.orEmpty()
                             val result = viewModel.createStory(
+                                context = context,
                                 note = "$moodPrefix$cleanNote",
                                 privacy = "friends",
                                 storyType = "note",

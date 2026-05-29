@@ -969,6 +969,7 @@ class UserRepositoryImpl(
             stats = stats,
             isVerified = this.getBoolean("isVerified") ?: false,
             isOnline = this.getBoolean("isOnline") ?: false,
+            role = this.getString("role") ?: "student",
         )
     }
 

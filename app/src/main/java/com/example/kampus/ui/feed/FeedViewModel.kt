@@ -51,6 +51,7 @@ data class FeedUiState(
     val notInterestedPostIds: Set<Int> = emptySet(),
     val mutedUserIds: Set<String> = emptySet(),
     val blockedUserIds: Set<String> = emptySet(),
+    val currentUserRole: String = "student",
 )
 
 /**
@@ -233,15 +234,24 @@ class FeedViewModel : ViewModel() {
                 val doc = FirebaseFirestore.getInstance()
                     .collection("users").document(user.uid)
                     .get().await()
+                
+                // Real-time ban check
+                if (doc.getBoolean("isBanned") == true) {
+                    FirebaseAuth.getInstance().signOut()
+                    return@launch
+                }
+
                 val profileImageUrl = doc.getString("profileImageUrl")
                     ?.takeIf { it.isNotBlank() }
                     ?: user.photoUrl?.toString().orEmpty()
                 val avatarEmoji = doc.getString("avatarEmoji")
                     ?.takeIf { it.isNotBlank() } ?: "👤"
+                val role = doc.getString("role") ?: "student"
                 _uiState.update {
                     it.copy(
                         currentUserProfileImageUrl = profileImageUrl,
                         currentUserAvatarEmoji = avatarEmoji,
+                        currentUserRole = role,
                     )
                 }
             }
@@ -1313,13 +1323,22 @@ class FeedViewModel : ViewModel() {
     fun reportPost(postId: Int) {
         val currentUserId = FirebaseAuth.getInstance().currentUser?.uid ?: return
         val db = FirebaseFirestore.getInstance()
+        val currentUserName = FirebaseAuth.getInstance().currentUser?.displayName ?: "Anonymous"
+        val targetPost = _posts.value.firstOrNull { it.id == postId }
         val reportDoc = mapOf(
             "reporterId" to currentUserId,
-            "reportedAt" to System.currentTimeMillis(),
-            "reason" to "reported_from_feed"
+            "reportedByUserId" to currentUserId,
+            "reportedByName" to currentUserName,
+            "contentType" to "POST",
+            "contentId" to postId.toString(),
+            "contentPreview" to (targetPost?.content ?: "Reported feed post"),
+            "reason" to "reported_from_feed",
+            "status" to "open",
+            "createdAt" to System.currentTimeMillis()
         )
         viewModelScope.launch {
             try {
+                db.collection("reports").add(reportDoc).await()
                 db.collection("posts").document(postId.toString())
                     .collection("reports").document(currentUserId)
                     .set(reportDoc).await()

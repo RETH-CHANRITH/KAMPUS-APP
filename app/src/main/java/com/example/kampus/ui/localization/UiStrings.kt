@@ -297,6 +297,47 @@ data class GroupStrings(
     val createGroup: String,
 )
 
+data class AdminStrings(
+    val adminPanel: String,
+    val superAdmin: String,
+    val adminDashboard: String,
+    val adminUsers: String,
+    val adminReports: String,
+    val adminContent: String,
+    val adminNotifications: String,
+    val welcomeBackAdmin: String,
+    val happeningToday: String,
+    val appStatistics: String,
+    val quickActions: String,
+    val viewProfile: String,
+    val massNotifications: String,
+    val sendAnnouncements: String,
+    val composeAnnouncement: String,
+    val audience: String,
+    val title: String,
+    val message: String,
+    val sendTo: String,
+    val pastAnnouncements: String,
+    val appSettingsTitle: String,
+    val adminDetailsTitle: String,
+    val permissions: String,
+    val lastLogin: String,
+    val region: String,
+    val notificationSentTitle: String,
+    val deliveredToLabel: String,
+    val doneButton: String,
+    val searchUsersPlaceholder: String,
+    val changeRole: String,
+    val banUserAdmin: String,
+    val banConfirmation: String,
+    val totalUsers: String,
+    val activeGroups: String,
+    val postsToday: String,
+    val openReports: String,
+    val totalEvents: String,
+    val bannedUsers: String,
+)
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  UiStrings — holds sub-objects + flat helpers for backward compatibility
 //  NOTE: constructor param is `settingsObj` to avoid clashing with the flat
@@ -312,6 +353,7 @@ data class UiStrings(
     val social: SocialStrings,
     val event: EventStrings,
     val group: GroupStrings,
+    val admin: AdminStrings,
 ) {
     // ── Common ────────────────────────────────────────────────────────────────
     val back                       get() = common.back
@@ -581,6 +623,47 @@ data class UiStrings(
     val joinGroup                  get() = group.joinGroup
     val searchGroupsPlaceholder    get() = group.searchGroupsPlaceholder
     val createGroup                get() = group.createGroup
+    
+    // ── Admin ─────────────────────────────────────────────────────────────────
+    val adminPanel                 get() = admin.adminPanel
+    val superAdmin                 get() = admin.superAdmin
+    val adminDashboard             get() = admin.adminDashboard
+    val adminUsers                 get() = admin.adminUsers
+    val adminReports               get() = admin.adminReports
+    val adminContent               get() = admin.adminContent
+    val adminNotifications         get() = admin.adminNotifications
+    val welcomeBackAdmin           get() = admin.welcomeBackAdmin
+    val happeningToday             get() = admin.happeningToday
+    val appStatistics              get() = admin.appStatistics
+    val quickActions               get() = admin.quickActions
+    val viewProfile                get() = admin.viewProfile
+    val massNotifications          get() = admin.massNotifications
+    val sendAnnouncements          get() = admin.sendAnnouncements
+    val composeAnnouncement        get() = admin.composeAnnouncement
+    val audience                   get() = admin.audience
+    val title                      get() = admin.title
+    val message                    get() = admin.message
+    val sendTo                     get() = admin.sendTo
+    val pastAnnouncements          get() = admin.pastAnnouncements
+    val appSettingsTitle           get() = admin.appSettingsTitle
+    val adminDetailsTitle          get() = admin.adminDetailsTitle
+    val permissions                get() = admin.permissions
+    val lastLogin                  get() = admin.lastLogin
+    val region                     get() = admin.region
+    val notificationSentTitle      get() = admin.notificationSentTitle
+    val deliveredToLabel           get() = admin.deliveredToLabel
+    val doneButton                 get() = admin.doneButton
+    val searchUsersPlaceholder     get() = admin.searchUsersPlaceholder
+    val changeRole                 get() = admin.changeRole
+    val banUserAdmin               get() = admin.banUserAdmin
+    val banConfirmation            get() = admin.banConfirmation
+    val totalUsers                 get() = admin.totalUsers
+    val activeGroups               get() = admin.activeGroups
+    val postsToday                 get() = admin.postsToday
+    val openReports                get() = admin.openReports
+    val totalEvents                get() = admin.totalEvents
+    val bannedUsers                get() = admin.bannedUsers
+
     val cancel                   get() = settingsObj.cancel
     val logoutConfirmTitle       get() = settingsObj.logoutConfirmTitle
     val logoutConfirmMessage     get() = settingsObj.logoutConfirmMessage
@@ -752,6 +835,46 @@ private fun englishStrings() = UiStrings(
         tryDifferentKeyword = "Try a different keyword", myGroups = "My Groups",
         membersLabel = "members", joined = "Joined", joinGroup = "Join Group",
         searchGroupsPlaceholder = "Search groups…", createGroup = "Create Group",
+    ),
+    admin = AdminStrings(
+        adminPanel = "Admin Panel",
+        superAdmin = "SUPER ADMIN",
+        adminDashboard = "Dashboard",
+        adminUsers = "Users",
+        adminReports = "Reports",
+        adminContent = "Content",
+        adminNotifications = "Announcements",
+        welcomeBackAdmin = "Welcome back, Admin",
+        happeningToday = "Here is what's happening on campus today.",
+        appStatistics = "App Statistics",
+        quickActions = "Quick Actions",
+        viewProfile = "View Profile",
+        massNotifications = "Mass Notifications",
+        sendAnnouncements = "Send official announcements to all students",
+        composeAnnouncement = "Compose Announcement",
+        audience = "Audience",
+        title = "Title",
+        message = "Message",
+        sendTo = "Send to",
+        pastAnnouncements = "Past Announcements",
+        appSettingsTitle = "Application Settings",
+        adminDetailsTitle = "Admin Details",
+        permissions = "Permissions",
+        lastLogin = "Last Login",
+        region = "Region",
+        notificationSentTitle = "Notification Sent",
+        deliveredToLabel = "Your announcement has been successfully delivered to",
+        doneButton = "Done",
+        searchUsersPlaceholder = "Search by name or faculty...",
+        changeRole = "Change Role",
+        banUserAdmin = "Ban User",
+        banConfirmation = "Are you sure you want to ban %s? This will prevent them from posting and interacting.",
+        totalUsers = "Total Users",
+        activeGroups = "Active Groups",
+        postsToday = "Posts Today",
+        openReports = "Open Reports",
+        totalEvents = "Total Events",
+        bannedUsers = "Banned Users",
     ),
 )
 
@@ -952,5 +1075,45 @@ private fun khmerStrings() = UiStrings(
         joined = "បានចូលរួម", joinGroup = "ចូលរួមក្រុម",
         searchGroupsPlaceholder = "ស្វែងរកក្រុម…",
         createGroup = "បង្កើតក្រុម",
+    ),
+    admin = AdminStrings(
+        adminPanel = "ផ្ទាំងគ្រប់គ្រង",
+        superAdmin = "អ្នកគ្រប់គ្រងជាន់ខ្ពស់",
+        adminDashboard = "ផ្ទាំងដើម",
+        adminUsers = "អ្នកប្រើប្រាស់",
+        adminReports = "របាយការណ៍",
+        adminContent = "មាតិកា",
+        adminNotifications = "ការប្រកាស",
+        welcomeBackAdmin = "ស្វាគមន៍ត្រឡប់មកវិញ អ្នកគ្រប់គ្រង",
+        happeningToday = "នេះជាអ្វីដែលកំពុងកើតឡើងក្នុងសាលាថ្ងៃនេះ។",
+        appStatistics = "ស្ថិតិកម្មវិធី",
+        quickActions = "សកម្មភាពរហ័ស",
+        viewProfile = "មើលប្រវត្តិរូប",
+        massNotifications = "ការជូនដំណឹងទ្រង់ទ្រាយធំ",
+        sendAnnouncements = "ផ្ញើការប្រកាសផ្លូវការទៅកាន់និស្សិតទាំងអស់",
+        composeAnnouncement = "តែងសេចក្តីប្រកាស",
+        audience = "អ្នកទទួល",
+        title = "ចំណងជើង",
+        message = "សារ",
+        sendTo = "ផ្ញើទៅកាន់",
+        pastAnnouncements = "ការប្រកាសកន្លងមក",
+        appSettingsTitle = "ការកំណត់កម្មវិធី",
+        adminDetailsTitle = "ព័ត៌មានអ្នកគ្រប់គ្រង",
+        permissions = "សិទ្ធិអនុញ្ញាត",
+        lastLogin = "ចូលចុងក្រោយ",
+        region = "តំបន់",
+        notificationSentTitle = "បានផ្ញើការជូនដំណឹង",
+        deliveredToLabel = "សេចក្តីប្រកាសរបស់អ្នកត្រូវបានផ្ញើដោយជោគជ័យទៅកាន់",
+        doneButton = "រួចរាល់",
+        searchUsersPlaceholder = "ស្វែងរកតាមឈ្មោះ ឬមហាវិទ្យាល័យ...",
+        changeRole = "ប្តូរតួនាទី",
+        banUserAdmin = "បិទអ្នកប្រើ",
+        banConfirmation = "តើអ្នកប្រាកដថាចង់បិទ %s មែនទេ? វានឹងរារាំងពួកគេពីការបង្ហោះ និងការប្រាស្រ័យទាក់ទង។",
+        totalUsers = "អ្នកប្រើសរុប",
+        activeGroups = "ក្រុមសកម្ម",
+        postsToday = "ការបង្ហោះថ្ងៃនេះ",
+        openReports = "របាយការណ៍បើកចំហ",
+        totalEvents = "ព្រឹត្តិការណ៍សរុប",
+        bannedUsers = "អ្នកប្រើត្រូវបានបិទ",
     ),
 )

@@ -43,33 +43,46 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     fun login(email: String, password: String) {
         viewModelScope.launch {
             _authState.value = AuthState.Loading
+            
+            // First check if this email is banned (optional, but good UX)
+            // But we can only do this after signing in to get the UID safely.
+            
             auth.signInWithEmailAndPassword(email, password)
                 .addOnSuccessListener {
-                    refreshSession()
                     val uid = auth.currentUser?.uid
                     if (uid == null) {
                         _authState.value = AuthState.Error("Login failed: missing user session")
                         return@addOnSuccessListener
                     }
 
-                    ensureUserProfile(
-                        userId = uid,
-                        email = auth.currentUser?.email ?: email,
-                        displayName = auth.currentUser?.displayName,
-                    ) { ok, err ->
-                        if (ok) {
-                            // Ensure E2E encryption keys are set up
-                            viewModelScope.launch(Dispatchers.IO) {
-                                E2EEManager.ensureUserKeys(uid)
-                                    .onSuccess {
-                                        _authState.value = AuthState.Success("Login successful!")
-                                    }
-                                    .onFailure { e ->
-                                        _authState.value = AuthState.Error("Key setup failed: ${e.message}")
-                                    }
+                    // Check if banned
+                    firestore.collection("users").document(uid).get().addOnSuccessListener { doc ->
+                        if (doc.getBoolean("isBanned") == true) {
+                            auth.signOut()
+                            _authState.value = AuthState.Error("Your account has been banned for violating community guidelines.")
+                            return@addOnSuccessListener
+                        }
+
+                        refreshSession()
+                        ensureUserProfile(
+                            userId = uid,
+                            email = auth.currentUser?.email ?: email,
+                            displayName = auth.currentUser?.displayName,
+                        ) { ok, err ->
+                            if (ok) {
+                                // Ensure E2E encryption keys are set up
+                                viewModelScope.launch(Dispatchers.IO) {
+                                    E2EEManager.ensureUserKeys(uid)
+                                        .onSuccess {
+                                            _authState.value = AuthState.Success("Login successful!")
+                                        }
+                                        .onFailure { e ->
+                                            _authState.value = AuthState.Error("Key setup failed: ${e.message}")
+                                        }
+                                }
+                            } else {
+                                _authState.value = AuthState.Error(err ?: "Login failed while syncing profile")
                             }
-                        } else {
-                            _authState.value = AuthState.Error(err ?: "Login failed while syncing profile")
                         }
                     }
                 }
@@ -124,31 +137,40 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             val credential = GoogleAuthProvider.getCredential(idToken, null)
             auth.signInWithCredential(credential)
                 .addOnSuccessListener {
-                    refreshSession()
                     val uid = auth.currentUser?.uid
                     if (uid == null) {
                         _authState.value = AuthState.Error("Google login failed: missing user session")
                         return@addOnSuccessListener
                     }
 
-                    ensureUserProfile(
-                        userId = uid,
-                        email = auth.currentUser?.email,
-                        displayName = auth.currentUser?.displayName,
-                    ) { ok, err ->
-                        if (ok) {
-                            // Ensure E2E encryption keys are set up
-                            viewModelScope.launch(Dispatchers.IO) {
-                                E2EEManager.ensureUserKeys(uid)
-                                    .onSuccess {
-                                        _authState.value = AuthState.Success("Google login successful!")
-                                    }
-                                    .onFailure { e ->
-                                        _authState.value = AuthState.Error("Key setup failed: ${e.message}")
-                                    }
+                    // Check if banned
+                    firestore.collection("users").document(uid).get().addOnSuccessListener { doc ->
+                        if (doc.getBoolean("isBanned") == true) {
+                            auth.signOut()
+                            _authState.value = AuthState.Error("Your account has been banned.")
+                            return@addOnSuccessListener
+                        }
+
+                        refreshSession()
+                        ensureUserProfile(
+                            userId = uid,
+                            email = auth.currentUser?.email,
+                            displayName = auth.currentUser?.displayName,
+                        ) { ok, err ->
+                            if (ok) {
+                                // Ensure E2E encryption keys are set up
+                                viewModelScope.launch(Dispatchers.IO) {
+                                    E2EEManager.ensureUserKeys(uid)
+                                        .onSuccess {
+                                            _authState.value = AuthState.Success("Google login successful!")
+                                        }
+                                        .onFailure { e ->
+                                            _authState.value = AuthState.Error("Key setup failed: ${e.message}")
+                                        }
+                                }
+                            } else {
+                                _authState.value = AuthState.Error(err ?: "Google login failed while syncing profile")
                             }
-                        } else {
-                            _authState.value = AuthState.Error(err ?: "Google login failed while syncing profile")
                         }
                     }
                 }

@@ -110,6 +110,7 @@ class PostViewModel : ViewModel() {
                 val post = PostItem(
                     id = doc.getLong("id")?.toInt() ?: doc.id.hashCode(),
                     author = doc.getString("author") ?: "Unknown",
+                    authorId = doc.getString("authorId") ?: doc.getString("userId") ?: "",
                     avatar = doc.getString("avatar") ?: "👤",
                     profileImageUrl = doc.getString("profileImageUrl") ?: "",
                     time = doc.getString("time") ?: "now",
