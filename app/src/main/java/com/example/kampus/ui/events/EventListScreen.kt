@@ -30,6 +30,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import com.example.kampus.ui.feed.FeedViewModel
+import com.example.kampus.ui.feed.PostItem
+import com.example.kampus.ui.feed.ShareComposerDialog
 import com.example.kampus.ui.theme.ThemeController
 import com.example.kampus.ui.events.EventColors as C
 
@@ -55,6 +58,7 @@ fun EventListScreen(
     onFabClick     : () -> Unit          = {},
     onProfileClick : () -> Unit          = {},
     notifCount     : Int                 = 3,
+    feedViewModel  : FeedViewModel?      = null,
     viewModel      : EventViewModel      = viewModel(),
 ) {
     val context       = LocalContext.current
@@ -70,6 +74,7 @@ fun EventListScreen(
     }
     var activeFilterIndex by remember { mutableIntStateOf(0) }
     val activeFilterKey = filterKeys[activeFilterIndex]
+    var pendingShareEvent by remember { mutableStateOf<EventItem?>(null) }
 
     val displayed = remember(activeFilterKey, searchQuery, state.events) {
         viewModel.filteredEvents(activeFilterKey, searchQuery)
@@ -155,15 +160,7 @@ fun EventListScreen(
                             onLike       = { viewModel.toggleLike(featured) },
                             onSave       = { viewModel.toggleSave(featured) },
                             onComment    = { onCommentOpen(featured) },
-                            onShare      = {
-                                viewModel.shareEvent(featured)
-                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "text/plain"
-                                    putExtra(Intent.EXTRA_SUBJECT, featured.title)
-                                    putExtra(Intent.EXTRA_TEXT, "Check out this event on Kampus: ${featured.title}\n${featured.description}")
-                                }
-                                context.startActivity(Intent.createChooser(shareIntent, "Share event"))
-                            },
+                            onShare      = { pendingShareEvent = featured },
                             onClick      = { onEventClick(featured) },
                             strings      = strings,
                         )
@@ -186,7 +183,8 @@ fun EventListScreen(
                         onLike       = { viewModel.toggleLike(event) },
                         onSave       = { viewModel.toggleSave(event) },
                         onComment    = { onCommentOpen(event) },
-                        onShare      = { 
+                        onShare      = {
+                            viewModel.shareEvent(event)
                             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                 type = "text/plain"
                                 putExtra(Intent.EXTRA_SUBJECT, event.title)
@@ -200,6 +198,40 @@ fun EventListScreen(
                 }
             }
         }
+    }
+
+    pendingShareEvent?.let { event ->
+        ShareComposerDialog(
+            sourceTitle = event.title,
+            sourceBody = event.description,
+            sourceAvatarUrl = event.coverImageUrl.ifBlank { event.imageUrl.orEmpty() },
+            sourceAvatarText = event.coverEmoji,
+            sourceLabel = "Shared event",
+            onDismiss = { pendingShareEvent = null },
+            onShareNow = { draft ->
+                viewModel.shareEvent(event)
+                val composedText = buildString {
+                    if (draft.caption.isNotBlank()) {
+                        append(draft.caption)
+                    }
+                    if (isNotBlank()) append("\n\n")
+                    append("Shared event: ")
+                    append(event.title)
+                    if (event.description.isNotBlank()) {
+                        append("\n")
+                        append(event.description)
+                    }
+                }
+                val result = feedViewModel?.addPost(
+                    text = composedText,
+                    mediaUris = draft.mediaUris,
+                    mediaTypes = draft.mediaTypes,
+                    visibility = draft.visibility,
+                    taggedPeople = draft.taggedPeople,
+                ) ?: Result.failure(IllegalStateException("Feed sharing is unavailable right now"))
+                result
+            },
+        )
     }
 }
 

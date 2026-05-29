@@ -1,0 +1,135 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "compileDebugKotlin",
+			"type": "shell",
+			"command": "./gradlew",
+			"args": [
+				":app:compileDebugKotlin"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "compileDebugKotlin",
+			"type": "shell",
+			"command": "./gradlew",
+			"args": [
+				":app:compileDebugKotlin"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "compileDebugKotlin",
+			"type": "shell",
+			"command": "./gradlew",
+			"args": [
+				":app:compileDebugKotlin"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "compileDebugKotlin",
+			"type": "shell",
+			"command": "./gradlew",
+			"args": [
+				":app:compileDebugKotlin"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "compileDebugKotlin",
+			"type": "shell",
+			"command": "./gradlew",
+			"args": [
+				":app:compileDebugKotlin"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "compileDebugKotlin",
+			"type": "shell",
+			"command": "./gradlew",
+			"args": [
+				":app:compileDebugKotlin"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "compileDebugKotlin",
+			"type": "shell",
+			"command": "./gradlew",
+			"args": [
+				":app:compileDebugKotlin"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "compileDebugKotlin",
+			"type": "shell",
+			"command": "./gradlew",
+			"args": [
+				":app:compileDebugKotlin"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "compileDebugKotlin",
+			"type": "shell",
+			"command": "./gradlew",
+			"args": [
+				":app:compileDebugKotlin"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "compileDebugKotlin",
+			"type": "shell",
+			"command": "./gradlew",
+			"args": [
+				":app:compileDebugKotlin"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		}
+	]
+}

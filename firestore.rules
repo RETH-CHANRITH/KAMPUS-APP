@@ -79,7 +79,7 @@ service cloud.firestore {
       }
 
       match /friendRequests/{requestId} {
-        allow read: if isOwner(userId);
+        allow read: if isOwner(userId) || isAdmin();
         allow create: if isSignedIn() &&
           request.resource.data.fromUserId == request.auth.uid &&
           request.resource.data.toUserId == userId &&
@@ -88,11 +88,11 @@ service cloud.firestore {
       }
 
       match /outgoingFriendRequests/{requestId} {
-        allow read, write: if isOwner(userId);
+        allow read, write: if isOwner(userId) || isAdmin();
       }
 
       match /notifications/{notificationId} {
-        allow read: if isOwner(userId);
+        allow read: if isOwner(userId) || isAdmin();
         allow create: if isSignedIn() &&
           request.resource.data.actorUserId == request.auth.uid &&
           request.resource.data.toUserId == userId &&
@@ -101,11 +101,11 @@ service cloud.firestore {
       }
 
       match /blocks/{blockedUserId} {
-        allow read: if isOwner(userId);
-        allow create, write: if isOwner(userId) &&
+        allow read: if isOwner(userId) || isAdmin();
+        allow create, write: if (isOwner(userId) &&
           hasRequiredFields(['blockedAt']) &&
-          request.resource.data.blockedAt is number;
-        allow delete: if isOwner(userId);
+          request.resource.data.blockedAt is number) || isAdmin();
+        allow delete: if isOwner(userId) || isAdmin();
       }
 
       match /activities/{activityId} {
@@ -183,6 +183,13 @@ service cloud.firestore {
       }
     }
 
+    // ============ GLOBAL REPORTS ============
+    // NEW: Needed for Admin Moderation feature
+    match /reports/{reportId} {
+      allow create: if isSignedIn();
+      allow read, update, delete: if isAdmin();
+    }
+
     // ============ CHATS ============
     match /chats/{chatId} {
       allow read: if isSignedIn();
@@ -202,21 +209,106 @@ service cloud.firestore {
       }
     }
 
+    // ============ PRESENCE ============
+    match /presence/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isOwner(userId);
+    }
+
+    // ============ PUBLIC KEYS ============
+    match /publicKeys/{userId} {
+      allow read: if isSignedIn();
+
+      allow create, update: if isOwner(userId) &&
+        hasRequiredFields(['publicKey', 'uploadedAt']) &&
+        request.resource.data.publicKey is string &&
+        request.resource.data.publicKey.size() > 100;
+
+      allow delete: if false;
+    }
+
+    // ============ STORIES ============
+    match /stories/{storyId} {
+      // Allow read only for signed-in users and only if story is not expired
+      // and the privacy rules permit it (public, friends, or owner).
+      function isFollowerOfOwner() {
+        return exists(/databases/$(database)/documents/users/$(resource.data.ownerId)/followers/$(request.auth.uid));
+      }
+
+      allow get: if isSignedIn() &&
+        // story must not be expired
+        resource.data.expiresAt is number && request.time.toMillis() < resource.data.expiresAt &&
+        (
+          resource.data.privacy == 'public' ||
+          request.auth.uid == resource.data.ownerId ||
+          (resource.data.privacy == 'friends' && isFollowerOfOwner())
+        );
+
+      // Allow the story feed query to load for signed-in users; the client still
+      // filters expired stories and the UI only surfaces story actions to owners.
+      allow list: if isSignedIn();
+
+      allow create: if isSignedIn() &&
+        request.auth.uid == request.resource.data.ownerId &&
+        hasRequiredFields(['ownerId', 'note', 'privacy', 'createdAt', 'expiresAt']);
+
+      allow update: if false;
+      allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+
+      match /views/{viewerId} {
+        // Only the story owner may read the viewers list for privacy.
+        allow read: if isSignedIn() && request.auth.uid == resource.data.ownerId;
+        // A user may create or update their own view record.
+        allow create, update: if isSignedIn() && viewerId == request.auth.uid;
+        allow delete: if false;
+      }
+    }
+
+    // ============ STORY DRAFTS ============
+    match /storyDrafts/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // ============ STORY REPLIES ============
+    match /storyReplies/{replyId} {
+      allow create: if isSignedIn() &&
+        request.resource.data.senderId == request.auth.uid &&
+        request.resource.data.storyId is string &&
+        request.resource.data.receiverId is string &&
+        request.resource.data.storyOwnerId is string &&
+        request.resource.data.createdAt is number;
+
+      // Sender, receiver, and story owner may read replies
+      allow read: if isSignedIn() && (
+        request.auth.uid == resource.data.senderId ||
+        request.auth.uid == resource.data.receiverId ||
+        request.auth.uid == resource.data.storyOwnerId
+      );
+
+      allow update, delete: if isSignedIn() && request.auth.uid == resource.data.senderId;
+    }
+
     // ============ POSTS ============
     match /posts/{postId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && request.auth.uid == request.resource.data.authorId;
       allow update: if isSignedIn() && (
         resource.data.authorId == request.auth.uid ||
+        (resource.data.userId == request.auth.uid) ||
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'comments', 'shares', 'likedBy'])
       );
       allow delete: if isSignedIn() && resource.data.authorId == request.auth.uid;
 
       match /reports/{reportId} {
         allow read: if isSignedIn();
-        allow create: if isSignedIn() && (
-          request.resource.data.reporterId == request.auth.uid ||
-          request.resource.data.reportedByUserId == request.auth.uid
+        allow create: if isSignedIn() &&
+          request.resource.data.postId is number &&
+          request.resource.data.userId == request.auth.uid &&
+          request.resource.data.text is string &&
+          request.resource.data.text.size() > 0;
+        allow update: if isSignedIn() && (
+          resource.data.userId == request.auth.uid ||
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likedBy', 'likesCount', 'updatedAt'])
         );
         allow update, delete: if isAdmin();
       }
@@ -267,7 +359,7 @@ service cloud.firestore {
 
     // ============ GLOBAL CATCH-ALL ============
     match /{document=**} {
-      allow read, write: if false;
+      allow read, write: if false || isAdmin();
     }
   }
 }

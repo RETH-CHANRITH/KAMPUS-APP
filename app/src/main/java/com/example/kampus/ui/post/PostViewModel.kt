@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.kampus.data.repository.PostEngagementRepository
+import com.example.kampus.data.repository.PostRepositoryImpl
 import com.example.kampus.di.SupabaseModule
 import com.example.kampus.ui.feed.PostItem
 import com.example.kampus.utils.ActivityLogger
@@ -52,6 +53,7 @@ class PostViewModel : ViewModel() {
 
     private val firestore = FirebaseFirestore.getInstance()
     private val postEngagementRepository = PostEngagementRepository(firestore)
+    private val postRepository = PostRepositoryImpl(firestore)
     private val _uiState = MutableStateFlow(PostDetailUiState())
     val uiState: StateFlow<PostDetailUiState> = _uiState.asStateFlow()
 
@@ -79,19 +81,23 @@ class PostViewModel : ViewModel() {
         commentsListener?.remove()
         _uiState.update { it.copy(isLoading = true, error = null) }
 
-        postListener = firestore.collection("posts")
-            .whereEqualTo("id", postId)
-            .limit(1)
+        // Listen directly on the document by postId for instant, real-time updates
+        postListener = firestore.collection("posts").document(postId.toString())
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     _uiState.update { it.copy(isLoading = false, error = error.message) }
                     return@addSnapshotListener
                 }
 
-                val doc = snapshot?.documents?.firstOrNull()
-                if (doc == null) {
-                    _uiState.update { it.copy(isLoading = false, post = null) }
-                    return@addSnapshotListener
+                val doc = snapshot
+                if (doc == null || !doc.exists() || doc.getString("author").isNullOrBlank()) {
+                    viewModelScope.launch {
+                        postRepository.syncPostFromSupabaseToFirestore(postId)
+                    }
+                    if (doc == null || !doc.exists()) {
+                        _uiState.update { it.copy(isLoading = true, post = null) }
+                        return@addSnapshotListener
+                    }
                 }
 
                 val mediaUrls = (doc.get("mediaUrls") as? List<*>)?.mapNotNull { it as? String }.orEmpty()
@@ -108,7 +114,7 @@ class PostViewModel : ViewModel() {
                 val resolvedMediaTypes = if (resolvedMediaUrls.isNotEmpty() && mediaTypes.size == resolvedMediaUrls.size) mediaTypes else resolvedMediaUrls.map { PostItem.MediaType.IMAGE }
 
                 val post = PostItem(
-                    id = doc.getLong("id")?.toInt() ?: doc.id.hashCode(),
+                    id = doc.getLong("id")?.toInt() ?: doc.id.toIntOrNull() ?: doc.id.hashCode(),
                     author = doc.getString("author") ?: "Unknown",
                     authorId = doc.getString("authorId") ?: doc.getString("userId") ?: "",
                     avatar = doc.getString("avatar") ?: "👤",
@@ -130,6 +136,29 @@ class PostViewModel : ViewModel() {
                     taggedPeople = (doc.get("taggedPeople") as? List<*>)?.mapNotNull { it as? String }.orEmpty(),
                     feelingEmoji = doc.getString("feelingEmoji"),
                     isPinned = doc.getBoolean("isPinned") ?: false,
+                    sharedOriginalPostId = (doc.get("sharedOriginalPostId") as? Number)?.toInt(),
+                    sharedOriginalAuthor = doc.getString("sharedOriginalAuthor"),
+                    sharedOriginalAuthorId = doc.getString("sharedOriginalAuthorId"),
+                    sharedOriginalAvatar = doc.getString("sharedOriginalAvatar"),
+                    sharedOriginalProfileImageUrl = doc.getString("sharedOriginalProfileImageUrl"),
+                    sharedOriginalTime = doc.getString("sharedOriginalTime"),
+                    sharedOriginalTimestamp = (doc.get("sharedOriginalTimestamp") as? Number)?.toLong(),
+                    sharedOriginalContent = doc.getString("sharedOriginalContent"),
+                    sharedOriginalMediaUris = (doc.get("sharedOriginalMediaUrls") as? List<*>)?.mapNotNull { it as? String }?.map(Uri::parse).orEmpty(),
+                    sharedOriginalMediaTypes = ((doc.get("sharedOriginalMediaTypes") as? List<*>)?.mapNotNull { value ->
+                        when ((value as? String)?.lowercase()) {
+                            "video" -> PostItem.MediaType.VIDEO
+                            else -> PostItem.MediaType.IMAGE
+                        }
+                    } ?: emptyList()),
+                    sharedOriginalMediaEmojis = (doc.get("sharedOriginalMediaEmojis") as? List<*>)?.mapNotNull { it as? String }.orEmpty(),
+                    sharedOriginalLikes = (doc.get("sharedOriginalLikes") as? Number)?.toInt(),
+                    sharedOriginalComments = (doc.get("sharedOriginalComments") as? Number)?.toInt(),
+                    sharedOriginalShares = (doc.get("sharedOriginalShares") as? Number)?.toInt(),
+                    sharedOriginalVisibility = doc.getString("sharedOriginalVisibility")?.let { value ->
+                        runCatching { PostItem.PostVisibility.valueOf(value.uppercase()) }.getOrNull()
+                    },
+                    sharedOriginalIsVerified = doc.getBoolean("sharedOriginalIsVerified"),
                 )
 
                 _uiState.update { it.copy(post = normalizeForCurrentUser(post), isLoading = false, error = null) }
@@ -153,7 +182,7 @@ class PostViewModel : ViewModel() {
 
                 commentsListener?.remove()
                 commentsListener = firestore.collection("post_comments")
-                    .whereEqualTo("postId", postId)
+                    .whereEqualTo("postId", postId.toLong())
                     .addSnapshotListener { commentSnapshot, commentError ->
                         if (commentError != null) {
                             _uiState.update { it.copy(error = commentError.message) }
@@ -239,7 +268,7 @@ class PostViewModel : ViewModel() {
                 .document()
                 .set(
                     mapOf(
-                        "postId" to postId,
+                        "postId" to postId.toLong(),
                         "userId" to user.uid,
                         "username" to username,
                         "userAvatar" to profile.avatar,
@@ -254,16 +283,79 @@ class PostViewModel : ViewModel() {
                 )
                 .await()
 
-            firestore.collection("posts")
-                .whereEqualTo("id", postId)
-                .limit(1)
-                .get()
-                .await()
-                .documents
-                .firstOrNull()
-                ?.reference
-                ?.update("comments", FieldValue.increment(1))
-                ?.await()
+            // Atomically increment the comments counter on the Firestore post document.
+            // We try two paths: direct doc ID (postId.toString()) and a query fallback.
+            val db = firestore
+            val directRef = db.collection("posts").document(postId.toString())
+            val directSnap = directRef.get().await()
+            if (directSnap.exists()) {
+                directRef.update("comments", FieldValue.increment(1)).await()
+            } else {
+                // Fallback: find the document by its numeric "id" field
+                val querySnap = db.collection("posts")
+                    .whereEqualTo("id", postId.toLong())
+                    .limit(1)
+                    .get()
+                    .await()
+
+                val fallbackDoc = querySnap.documents.firstOrNull()
+                if (fallbackDoc != null) {
+                    fallbackDoc.reference.update("comments", FieldValue.increment(1)).await()
+                } else {
+                    // Create the post document in Firestore using local post details
+                    val currentPost = uiState.value.post
+                    val postPayload = if (currentPost != null && currentPost.id == postId) {
+                        hashMapOf(
+                            "id" to postId.toLong(),
+                            "author" to currentPost.author,
+                            "authorId" to currentPost.authorId,
+                            "avatar" to currentPost.avatar,
+                            "profileImageUrl" to currentPost.profileImageUrl,
+                            "time" to currentPost.time,
+                            "content" to currentPost.content,
+                            "privacy" to "public",
+                            "likes" to currentPost.likes,
+                            "comments" to 1,
+                            "shares" to currentPost.shares,
+                            "timestamp" to (if (currentPost.timestamp > 0) currentPost.timestamp else System.currentTimeMillis()),
+                            "mediaUrls" to currentPost.mediaUris.map { it.toString() },
+                            "mediaTypes" to currentPost.mediaTypes.map { it.name.lowercase() },
+                        )
+                    } else {
+                        hashMapOf(
+                            "id" to postId.toLong(),
+                            "comments" to 1,
+                            "likes" to 0,
+                            "shares" to 0,
+                            "timestamp" to System.currentTimeMillis(),
+                        )
+                    }
+                    directRef.set(postPayload).await()
+                }
+            }
+
+            val postAuthorId = uiState.value.post?.authorId
+            val parentComment = if (!parentCommentId.isNullOrBlank()) {
+                uiState.value.comments.find { it.id == parentCommentId }
+            } else null
+            val recipientId = parentComment?.userId ?: postAuthorId
+
+            if (!recipientId.isNullOrBlank() && recipientId != user.uid) {
+                runCatching {
+                    val notifBody = if (parentCommentId.isNullOrBlank()) {
+                        "${username.ifBlank { "Someone" }} commented: \"$commentText\""
+                    } else {
+                        "${username.ifBlank { "Someone" }} replied: \"$commentText\""
+                    }
+                    com.example.kampus.utils.NotificationLogger.notifyUser(
+                        toUserId = recipientId,
+                        type = "comment",
+                        title = if (parentCommentId.isNullOrBlank()) "New comment" else "New reply",
+                        body = notifBody,
+                        targetId = postId.toString(),
+                    )
+                }
+            }
 
             Result.success(Unit)
         } catch (e: Exception) {
@@ -302,7 +394,65 @@ class PostViewModel : ViewModel() {
                 !currentlyLiked
             }.await()
 
+            if (liked) {
+                val commentAuthorId = uiState.value.comments.find { it.id == commentId }?.userId
+                    ?: firestore.collection("post_comments").document(commentId).get().await().getString("userId")
+                if (!commentAuthorId.isNullOrBlank() && commentAuthorId != userId) {
+                    runCatching {
+                        com.example.kampus.utils.NotificationLogger.notifyUser(
+                            toUserId = commentAuthorId,
+                            type = "like",
+                            title = "New comment like",
+                            body = "Someone liked your comment",
+                            targetId = postId.toString(),
+                        )
+                    }
+                }
+            }
+
             Result.success(liked)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteComment(postId: Int, commentId: String): Result<Unit> {
+        return try {
+            val userId = FirebaseAuth.getInstance().currentUser?.uid
+                ?: return Result.failure(IllegalStateException("Sign in to delete a comment"))
+
+            val commentRef = firestore.collection("post_comments").document(commentId)
+            firestore.runTransaction { transaction ->
+                val snapshot = transaction.get(commentRef)
+                if (!snapshot.exists()) throw IllegalStateException("Comment not found")
+
+                val authorId = snapshot.getString("userId").orEmpty()
+                if (authorId != userId) {
+                    throw IllegalStateException("You can only delete your own comment")
+                }
+
+                transaction.delete(commentRef)
+            }.await()
+
+            val db = firestore
+            val directRef = db.collection("posts").document(postId.toString())
+            val directSnap = directRef.get().await()
+            if (directSnap.exists()) {
+                directRef.update("comments", FieldValue.increment(-1)).await()
+            } else {
+                val querySnap = db.collection("posts")
+                    .whereEqualTo("id", postId.toLong())
+                    .limit(1)
+                    .get()
+                    .await()
+
+                val fallbackDoc = querySnap.documents.firstOrNull()
+                if (fallbackDoc != null) {
+                    fallbackDoc.reference.update("comments", FieldValue.increment(-1)).await()
+                }
+            }
+
+            Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
         }

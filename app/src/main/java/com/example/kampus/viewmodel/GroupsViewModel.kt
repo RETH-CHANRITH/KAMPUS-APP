@@ -1,12 +1,14 @@
 package com.example.kampus.viewmodel
 
 import android.net.Uri
+import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.kampus.data.model.Group
 import com.example.kampus.data.model.GroupMember
 import com.example.kampus.data.model.GroupPost
+import com.example.kampus.data.model.GroupPostComment
 import com.example.kampus.data.model.GroupPrivacy
 import com.example.kampus.data.model.JoinRequest
 import com.example.kampus.data.model.MemberRole
@@ -80,6 +82,9 @@ class GroupsViewModel : ViewModel() {
     private val _selectedImageUri = MutableStateFlow<Uri?>(null)
     val selectedImageUri: StateFlow<Uri?> = _selectedImageUri.asStateFlow()
 
+    private val _commentsState = MutableStateFlow<List<GroupPostComment>>(emptyList())
+    val commentsState: StateFlow<List<GroupPostComment>> = _commentsState.asStateFlow()
+
     // ── Active listeners (cancelled when navigating away) ─────────────────────
 
     private var groupsListJob: Job? = null
@@ -87,6 +92,7 @@ class GroupsViewModel : ViewModel() {
     private var postsJob: Job? = null
     private var membersJob: Job? = null
     private var joinRequestsJob: Job? = null
+    private var commentsJob: Job? = null
     private var userProfileListener: com.google.firebase.firestore.ListenerRegistration? = null
 
     // ── Search ────────────────────────────────────────────────────────────────
@@ -97,6 +103,46 @@ class GroupsViewModel : ViewModel() {
 
     init {
         loadGroups()
+        loadCurrentUserProfile()
+    }
+
+    // ── Current user profile ──────────────────────────────────────────────────
+
+    private fun loadCurrentUserProfile() {
+        val user = auth.currentUser ?: return
+
+        // Immediately set from FirebaseAuth as a fast first-pass
+        _groupDetailUiState.update {
+            it.copy(
+                currentUserName = user.displayName?.takeIf { n -> n.isNotBlank() } ?: user.email?.substringBefore('@') ?: "You",
+                currentUserProfileImageUrl = user.photoUrl?.toString().orEmpty(),
+            )
+        }
+
+        // Real-time Firestore listener so profile photo updates instantly
+        userProfileListener?.remove()
+        userProfileListener = firestore
+            .collection("users")
+            .document(user.uid)
+            .addSnapshotListener { doc, error ->
+                if (error != null || doc == null || !doc.exists()) return@addSnapshotListener
+
+                val name = (doc.getString("displayName")
+                    ?: doc.getString("name")
+                    ?: user.displayName
+                    ?: user.email?.substringBefore('@'))
+                    ?.takeIf { it.isNotBlank() } ?: "You"
+
+                val photoUrl = (doc.getString("profileImageUrl")
+                    ?: doc.getString("photoUrl")
+                    ?: doc.getString("avatarUrl")
+                    ?: user.photoUrl?.toString())
+                    ?.takeIf { it.isNotBlank() } ?: ""
+
+                _groupDetailUiState.update {
+                    it.copy(currentUserName = name, currentUserProfileImageUrl = photoUrl)
+                }
+            }
         loadCurrentUserProfile()
     }
 
@@ -350,6 +396,14 @@ class GroupsViewModel : ViewModel() {
         val imageUri = _selectedImageUri.value
         if (content.isBlank() && imageUri == null) return
 
+    fun onImageSelected(uri: Uri?) {
+        _selectedImageUri.value = uri
+    }
+
+    fun createPost(groupId: String, content: String) {
+        val imageUri = _selectedImageUri.value
+        if (content.isBlank() && imageUri == null) return
+
         viewModelScope.launch {
             _groupDetailUiState.update { it.copy(isLoading = true, uploadError = null) }
 
@@ -389,6 +443,38 @@ class GroupsViewModel : ViewModel() {
     fun toggleLikePost(groupId: String, postId: String) {
         viewModelScope.launch {
             repository.toggleLikePost(groupId, postId)
+        }
+    }
+
+    fun observeComments(groupId: String, postId: String) {
+        commentsJob?.cancel()
+        commentsJob = viewModelScope.launch {
+            repository.observeComments(groupId, postId).collect { result ->
+                result.fold(
+                    onSuccess = { comments ->
+                        _commentsState.value = comments
+                    },
+                    onFailure = { error ->
+                        Log.e("GroupsViewModel", "Failed to observe comments for group $groupId, post $postId", error)
+                        _commentsState.value = emptyList()
+                    }
+                )
+            }
+        }
+    }
+
+    fun stopObservingComments() {
+        commentsJob?.cancel()
+        _commentsState.value = emptyList()
+    }
+
+    fun addComment(groupId: String, postId: String, content: String) {
+        if (content.isBlank()) return
+        viewModelScope.launch {
+            val result = repository.addComment(groupId, postId, content)
+            if (result.isFailure) {
+                Log.e("GroupsViewModel", "Failed to add comment to group $groupId, post $postId", result.exceptionOrNull())
+            }
         }
     }
 
@@ -484,6 +570,7 @@ class GroupsViewModel : ViewModel() {
         postsJob?.cancel()
         membersJob?.cancel()
         joinRequestsJob?.cancel()
+        commentsJob?.cancel()
         userProfileListener?.remove()
     }
 }

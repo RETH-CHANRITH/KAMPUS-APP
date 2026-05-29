@@ -98,6 +98,8 @@ fun GroupListScreen(
                 onTabSelected      = { selectedTab = it; viewModel.selectTab(it) },
                 onCreateGroupClick = onCreateGroupClick,
                 strings            = strings,
+                myGroupCount       = state.myGroups.size,
+                discoverGroupCount = state.discoverGroups.size,
             )
         },
 
@@ -159,7 +161,7 @@ fun GroupListScreen(
             modifier = Modifier.padding(innerPadding),
         ) { _ ->
             if (displayed.isEmpty()) {
-                EmptyState(strings = strings)
+                EmptyState(strings = strings, tab = selectedTab, searchQuery = searchQuery, onCreateGroup = onCreateGroupClick)
             } else {
                 LazyColumn(
                     modifier            = Modifier.fillMaxSize(),
@@ -348,6 +350,8 @@ private fun GroupTopBar(
     onTabSelected      : (Int) -> Unit,
     onCreateGroupClick : () -> Unit,
     strings            : com.example.kampus.ui.localization.UiStrings,
+    myGroupCount       : Int = 0,
+    discoverGroupCount : Int = 0,
 ) {
     Surface(color = C.Bg, shadowElevation = 0.dp) {
         Column(
@@ -428,7 +432,10 @@ private fun GroupTopBar(
                     .padding(3.dp),
                 horizontalArrangement = Arrangement.spacedBy(3.dp),
             ) {
-                listOf(strings.myGroups, strings.discover).forEachIndexed { index, label ->
+                listOf(
+                    "${strings.myGroups} ($myGroupCount)",
+                    "${strings.discover} ($discoverGroupCount)",
+                ).forEachIndexed { index, label ->
                     val selected = selectedTab == index
                     val bgBrush = if (selected)
                         Brush.linearGradient(listOf(C.Blue, C.BlueGlow))
@@ -645,17 +652,82 @@ private fun StatChip(icon: @Composable () -> Unit, label: String) {
 }
 
 @Composable
-private fun EmptyState(strings: com.example.kampus.ui.localization.UiStrings) {
+private fun EmptyState(
+    strings: com.example.kampus.ui.localization.UiStrings,
+    tab: Int = 0,
+    searchQuery: String = "",
+    onCreateGroup: () -> Unit = {},
+) {
+    val isDark = ThemeController.isDark
+    val grayText = if (isDark) Color(0xFF9CA3AF) else Color(0xFF6B7280)
+    val graySubtext = if (isDark) Color(0xFF374151) else Color(0xFF9CA3AF)
+
     Box(modifier = Modifier.fillMaxSize().padding(top = 80.dp), contentAlignment = Alignment.TopCenter) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Box(
-                modifier = Modifier.size(60.dp).clip(CircleShape).background(C.Surface).border(1.dp, C.Border, CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Outlined.Search, null, tint = C.Gray5, modifier = Modifier.size(24.dp))
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.padding(horizontal = 40.dp),
+        ) {
+            if (tab == 0) {
+                // My Groups — empty
+                Box(
+                    modifier = Modifier.size(64.dp).clip(CircleShape).background(C.Surface).border(1.dp, C.Border, CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Outlined.Group, null, tint = C.Gray5, modifier = Modifier.size(28.dp))
+                }
+                Text(
+                    text = "No groups yet",
+                    color = grayText,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "Create your first group or join one from Discover.",
+                    color = graySubtext,
+                    fontSize = 13.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+                Spacer(Modifier.height(4.dp))
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(C.Blue)
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onCreateGroup)
+                        .padding(horizontal = 24.dp, vertical = 12.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("Create a Group", color = C.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                }
+            } else {
+                // Discover tab — no public groups exist OR no search results
+                Box(
+                    modifier = Modifier.size(64.dp).clip(CircleShape).background(C.Surface).border(1.dp, C.Border, CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = if (searchQuery.isBlank()) Icons.Outlined.Group else Icons.Outlined.Search,
+                        contentDescription = null,
+                        tint = C.Gray5,
+                        modifier = Modifier.size(28.dp),
+                    )
+                }
+                Text(
+                    text = if (searchQuery.isBlank()) "No public groups yet" else strings.noGroupsFound,
+                    color = grayText,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = if (searchQuery.isBlank())
+                        "Be the first to create a group for others to discover!"
+                    else
+                        strings.tryDifferentKeyword,
+                    color = graySubtext,
+                    fontSize = 13.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
             }
-            Text(strings.noGroupsFound, color = C.Gray5, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            Text(strings.tryDifferentKeyword, color = C.Border, fontSize = 13.sp)
         }
     }
 }

@@ -174,6 +174,8 @@ fun ProfileScreen(
 	var showImagePicker by remember { mutableStateOf(false) }
 	var activeMenuActivity by remember { mutableStateOf<ProfileActivityItem?>(null) }
 	var confirmDeleteActivity by remember { mutableStateOf<ProfileActivityItem?>(null) }
+	var editingActivity by remember { mutableStateOf<ProfileActivityItem?>(null) }
+	var editPostText by remember { mutableStateOf("") }
 	val context = LocalContext.current
 
 	// Show error as snackbar
@@ -417,7 +419,8 @@ fun ProfileScreen(
 								tint = TextSecondary,
 								subtitle = "Update the content or media"
 							) {
-								viewModel.editPostActivity(activity)
+								editPostText = activity.text
+								editingActivity = activity
 								activeMenuActivity = null
 							}
 							MenuItemLarge(
@@ -531,6 +534,47 @@ fun ProfileScreen(
 				dismissButton = {
 					TextButton(onClick = { confirmDeleteActivity = null }) {
 						Text("Cancel", color = TextPrimary)
+					}
+				},
+				containerColor = Card
+			)
+		}
+
+		if (editingActivity != null) {
+			val activity = editingActivity!!
+			AlertDialog(
+				onDismissRequest = { editingActivity = null },
+				title = { Text("Edit Post", color = TextPrimary) },
+				text = {
+					androidx.compose.material3.OutlinedTextField(
+						value = editPostText,
+						onValueChange = { editPostText = it },
+						placeholder = { Text("What's on your mind?", color = TextSecondary) },
+						modifier = Modifier.fillMaxWidth(),
+						textStyle = androidx.compose.ui.text.TextStyle(color = TextPrimary),
+						colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+							focusedBorderColor = Blue,
+							unfocusedBorderColor = Border,
+							focusedLabelColor = Blue,
+							cursorColor = Blue
+						)
+					)
+				},
+				confirmButton = {
+					TextButton(
+						onClick = {
+							if (editPostText.isNotBlank()) {
+								viewModel.editPostActivity(activity, editPostText)
+								editingActivity = null
+							}
+						}
+					) {
+						Text("Save", color = Blue)
+					}
+				},
+				dismissButton = {
+					TextButton(onClick = { editingActivity = null }) {
+						Text("Cancel", color = TextSecondary)
 					}
 				},
 				containerColor = Card
@@ -1161,22 +1205,57 @@ fun ActivityPostCard(
 			onMenuClick = onMenuClick
 		)
 
-		ActivityMediaGallery(
-			mediaUrls = activity.mediaUrls,
-			mediaTypes = activity.mediaTypes,
-			fallbackImageUrl = activity.previewImageUrl,
-			height = 200.dp
-		)
+		val displayContent = if (activity.sharedOriginalPostId != null) {
+			val sharedPrefix = "Shared from ${activity.sharedOriginalAuthor}"
+			val stripped = activity.text
+				.substringBefore("\n\n$sharedPrefix")
+				.substringBefore("\n$sharedPrefix")
+				.trim()
+			stripped
+		} else {
+			activity.text
+		}
 
-		if (activity.text.isNotBlank()) {
+		if (displayContent.isNotBlank()) {
 			Text(
-				text = activity.text,
+				text = displayContent,
 				color = TextPrimary,
 				fontSize = 15.sp,
 				fontWeight = FontWeight.Medium,
 				lineHeight = 21.sp,
 				maxLines = 4,
 				modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+			)
+		}
+
+		if (activity.sharedOriginalPostId != null) {
+			Box(modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)) {
+				com.example.kampus.ui.post.SharedOriginalCard(
+					author = activity.sharedOriginalAuthor ?: "Unknown",
+					authorId = activity.sharedOriginalAuthorId.orEmpty(),
+					avatar = activity.sharedOriginalAvatar ?: "👤",
+					profileImageUrl = activity.sharedOriginalProfileImageUrl.orEmpty(),
+					time = activity.sharedOriginalTime ?: "now",
+					content = activity.sharedOriginalContent.orEmpty(),
+					mediaUris = activity.sharedOriginalMediaUrls.map { android.net.Uri.parse(it) },
+					mediaTypes = activity.sharedOriginalMediaTypes.map {
+						if (it.lowercase() == "video") com.example.kampus.ui.feed.PostItem.MediaType.VIDEO else com.example.kampus.ui.feed.PostItem.MediaType.IMAGE
+					},
+					mediaEmojis = activity.sharedOriginalMediaEmojis,
+					likes = activity.sharedOriginalLikes ?: 0,
+					comments = activity.sharedOriginalComments ?: 0,
+					shares = activity.sharedOriginalShares ?: 0,
+					isVerified = activity.sharedOriginalIsVerified ?: false,
+					onClick = { onCardClick() }
+				)
+			}
+			Spacer(modifier = Modifier.height(6.dp))
+		} else {
+			ActivityMediaGallery(
+				mediaUrls = activity.mediaUrls,
+				mediaTypes = activity.mediaTypes,
+				fallbackImageUrl = activity.previewImageUrl,
+				height = 200.dp
 			)
 		}
 
@@ -1454,9 +1533,20 @@ fun ActivitySharePostCard(
 			)
 		}
 
-		if (activity.text.isNotBlank()) {
+		val displayContent = if (activity.sharedOriginalPostId != null) {
+			val sharedPrefix = "Shared from ${activity.sharedOriginalAuthor}"
+			val stripped = activity.text
+				.substringBefore("\n\n$sharedPrefix")
+				.substringBefore("\n$sharedPrefix")
+				.trim()
+			stripped
+		} else {
+			activity.text
+		}
+
+		if (displayContent.isNotBlank()) {
 			Text(
-				text = activity.text,
+				text = displayContent,
 				color = TextSecondary,
 				fontSize = 13.sp,
 				maxLines = 3,
@@ -1464,12 +1554,36 @@ fun ActivitySharePostCard(
 			)
 		}
 
-		ActivityMediaGallery(
-			mediaUrls = activity.mediaUrls,
-			mediaTypes = activity.mediaTypes,
-			fallbackImageUrl = activity.previewImageUrl,
-			height = 180.dp
-		)
+		if (activity.sharedOriginalPostId != null) {
+			Box(modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)) {
+				com.example.kampus.ui.post.SharedOriginalCard(
+					author = activity.sharedOriginalAuthor ?: "Unknown",
+					authorId = activity.sharedOriginalAuthorId.orEmpty(),
+					avatar = activity.sharedOriginalAvatar ?: "👤",
+					profileImageUrl = activity.sharedOriginalProfileImageUrl.orEmpty(),
+					time = activity.sharedOriginalTime ?: "now",
+					content = activity.sharedOriginalContent.orEmpty(),
+					mediaUris = activity.sharedOriginalMediaUrls.map { android.net.Uri.parse(it) },
+					mediaTypes = activity.sharedOriginalMediaTypes.map {
+						if (it.lowercase() == "video") com.example.kampus.ui.feed.PostItem.MediaType.VIDEO else com.example.kampus.ui.feed.PostItem.MediaType.IMAGE
+					},
+					mediaEmojis = activity.sharedOriginalMediaEmojis,
+					likes = activity.sharedOriginalLikes ?: 0,
+					comments = activity.sharedOriginalComments ?: 0,
+					shares = activity.sharedOriginalShares ?: 0,
+					isVerified = activity.sharedOriginalIsVerified ?: false,
+					onClick = { onCardClick() }
+				)
+			}
+			Spacer(modifier = Modifier.height(6.dp))
+		} else {
+			ActivityMediaGallery(
+				mediaUrls = activity.mediaUrls,
+				mediaTypes = activity.mediaTypes,
+				fallbackImageUrl = activity.previewImageUrl,
+				height = 180.dp
+			)
+		}
 
 		Row(
 			modifier = Modifier

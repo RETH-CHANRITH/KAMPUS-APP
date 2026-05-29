@@ -1,6 +1,7 @@
 package com.example.kampus.ui.chat
 
 import android.content.Context
+import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -398,9 +399,9 @@ class ChatViewModel : ViewModel() {
         storyType: String = "note",
     ): Result<String> {
         val hasMedia = !imageUri.isNullOrBlank() && (storyType == "image" || storyType == "video" || imageUri.startsWith("content:") || imageUri.startsWith("file:"))
-        if (hasMedia) {
+        val res = if (hasMedia) {
             _storyUploadProgress.value = 0.0
-            val res = StoryRepository().uploadStory(
+            val uploadRes = StoryRepository().uploadStory(
                 context = context,
                 fileUri = Uri.parse(imageUri),
                 caption = note,
@@ -412,45 +413,84 @@ class ChatViewModel : ViewModel() {
                 onProgress = { p -> _storyUploadProgress.value = p }
             )
             _storyUploadProgress.value = null
-            return res
+            uploadRes
+        } else {
+            runCatching {
+                val userId = auth.currentUser?.uid ?: throw IllegalStateException("User not signed in")
+                val now = System.currentTimeMillis()
+                val expiresAt = now + 86_400_000L
+                val userDoc = FirebaseFirestore.getInstance()
+                    .collection("users")
+                    .document(userId)
+                    .get()
+                    .await()
+
+                val storyData = mutableMapOf<String, Any>(
+                    "ownerId" to userId,
+                    "userId" to userId,
+                    "note" to note,
+                    "ownerName" to (userDoc.getString("displayName")?.ifBlank { null }
+                        ?: auth.currentUser?.displayName?.ifBlank { null }
+                        ?: auth.currentUser?.email?.substringBefore("@")
+                        ?: "User"),
+                    "ownerAvatarEmoji" to (userDoc.getString("avatarEmoji")?.ifBlank { null } ?: "👤"),
+                    "ownerProfileImageUrl" to (userDoc.getString("profileImageUrl")?.ifBlank { null } ?: ""),
+                    "ownerAvatarColor" to ((userDoc.get("avatarColor") as? Number)?.toLong() ?: 0xFF3B82F6),
+                    "overlayText" to overlayText,
+                    "overlayX" to overlayX,
+                    "overlayY" to overlayY,
+                    "overlayColor" to overlayColor,
+                    "privacy" to privacy,
+                    "storyType" to storyType,
+                    "createdAt" to now,
+                    "expiresAt" to expiresAt,
+                )
+                FirebaseFirestore.getInstance()
+                    .collection("stories")
+                    .add(storyData)
+                    .await()
+                    .id
+            }
         }
 
-        return runCatching {
-            val userId = auth.currentUser?.uid ?: throw IllegalStateException("User not signed in")
-            val now = System.currentTimeMillis()
-            val expiresAt = now + 86_400_000L
-            val userDoc = FirebaseFirestore.getInstance()
-                .collection("users")
-                .document(userId)
-                .get()
-                .await()
+        res.onSuccess { storyId ->
+            val userId = auth.currentUser?.uid
+            if (!userId.isNullOrBlank()) {
+                viewModelScope.launch {
+                    runCatching {
+                        val userDoc = FirebaseFirestore.getInstance()
+                            .collection("users")
+                            .document(userId)
+                            .get()
+                            .await()
+                        val senderName = userDoc.getString("displayName") ?: auth.currentUser?.displayName ?: "Someone"
 
-            val storyData = mutableMapOf<String, Any>(
-                "ownerId" to userId,
-                "userId" to userId,
-                "note" to note,
-                "ownerName" to (userDoc.getString("displayName")?.ifBlank { null }
-                    ?: auth.currentUser?.displayName?.ifBlank { null }
-                    ?: auth.currentUser?.email?.substringBefore("@")
-                    ?: "User"),
-                "ownerAvatarEmoji" to (userDoc.getString("avatarEmoji")?.ifBlank { null } ?: "👤"),
-                "ownerProfileImageUrl" to (userDoc.getString("profileImageUrl")?.ifBlank { null } ?: ""),
-                "ownerAvatarColor" to ((userDoc.get("avatarColor") as? Number)?.toLong() ?: 0xFF3B82F6),
-                "overlayText" to overlayText,
-                "overlayX" to overlayX,
-                "overlayY" to overlayY,
-                "overlayColor" to overlayColor,
-                "privacy" to privacy,
-                "storyType" to storyType,
-                "createdAt" to now,
-                "expiresAt" to expiresAt,
-            )
-            FirebaseFirestore.getInstance()
-                .collection("stories")
-                .add(storyData)
-                .await()
-                .id
+                        val followersSnapshot = FirebaseFirestore.getInstance()
+                            .collection("users")
+                            .document(userId)
+                            .collection("followers")
+                            .get()
+                            .await()
+                        for (doc in followersSnapshot.documents) {
+                            val followerId = doc.id
+                            if (followerId.isNotBlank() && followerId != userId) {
+                                runCatching {
+                                    NotificationLogger.notifyUser(
+                                        toUserId = followerId,
+                                        type = "story",
+                                        title = "New Story",
+                                        body = "$senderName added a new story",
+                                        targetId = storyId,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
+
+        return res
     }
 
     suspend fun saveStoryDraft(

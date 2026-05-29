@@ -214,6 +214,14 @@ class NotificationViewModel : ViewModel() {
 					title = if (count > 1) "$firstActorName and ${count - 1} others" else firstActorName
 					body = "mentioned you in a post"
 				}
+				"share" -> {
+					title = if (count > 1) "$firstActorName and ${count - 1} others" else firstActorName
+					body = "shared your post"
+				}
+				"story" -> {
+					title = firstActorName
+					body = "added a new story"
+				}
 				else -> {
 					title = notif.title
 					body = notif.body

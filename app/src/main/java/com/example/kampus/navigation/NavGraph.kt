@@ -59,6 +59,8 @@ import com.example.kampus.ui.profile.PublicProfileScreen
 import com.example.kampus.ui.profile.PublicFriendsScreen
 import com.example.kampus.ui.profile.SettingsScreen
 import com.example.kampus.ui.post.PostDetailScreen
+import com.example.kampus.MainActivity
+import android.os.Bundle
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
@@ -430,8 +432,11 @@ fun NavGraph(navController: NavHostController) {
         // ── Event List ─────────────────────────────────────────────────────────
         composable(Routes.EVENT_LIST) {
             val vm: EventViewModel = viewModel()
+            val homeEntry = runCatching { navController.getBackStackEntry(Routes.HOME) }.getOrNull()
+            val feedShareViewModel = homeEntry?.let { viewModel<FeedViewModel>(it) }
             EventListScreen(
                 viewModel      = vm,
+                feedViewModel  = feedShareViewModel,
                 onEventClick   = { navController.navigate(Routes.eventDetail(it.id)) },
                 onCommentOpen  = { navController.navigate(Routes.eventDetail(it.id, true)) },
                 onCreateClick  = { navController.navigate(Routes.EVENT_CREATE) },
@@ -466,6 +471,8 @@ fun NavGraph(navController: NavHostController) {
             } else {
                 viewModel(back)
             }
+            val homeEntry = runCatching { navController.getBackStackEntry(Routes.HOME) }.getOrNull()
+            val feedShareViewModel = homeEntry?.let { viewModel<FeedViewModel>(it) }
             val state = vm.uiState.collectAsStateWithLifecycle().value
             val event = state.events.firstOrNull { it.id == eventId }
             if (event == null) {
@@ -488,6 +495,7 @@ fun NavGraph(navController: NavHostController) {
                     onSave       = { vm.toggleSave(event) },
                     onBack       = { navController.popBackStack() },
                     viewModel    = vm,
+                    feedViewModel = feedShareViewModel,
                     openComposer = openComposer,
                 )
             }

@@ -3,6 +3,7 @@ package com.example.kampus.data.repository
 import com.example.kampus.data.model.Group
 import com.example.kampus.data.model.GroupMember
 import com.example.kampus.data.model.GroupPost
+import com.example.kampus.data.model.GroupPostComment
 import com.example.kampus.data.model.GroupPrivacy
 import com.example.kampus.data.model.JoinRequest
 import com.example.kampus.data.model.MemberRole
@@ -80,6 +81,25 @@ class GroupsRepositoryImpl(private val firestore: FirebaseFirestore) {
                     runCatching { doc.toGroupPost(currentUserId) }.getOrNull()
                 } ?: emptyList()
                 trySend(Result.success(posts))
+            }
+        awaitClose { listener.remove() }
+    }
+
+    /** Observe comments for a group post in real-time. */
+    fun observeComments(groupId: String, postId: String): Flow<Result<List<GroupPostComment>>> = callbackFlow {
+        val listener = firestore.collection("groups").document(groupId)
+            .collection("posts").document(postId)
+            .collection("comments")
+            .orderBy("createdAt", Query.Direction.ASCENDING)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    trySend(Result.failure(error))
+                    return@addSnapshotListener
+                }
+                val comments = snapshot?.documents?.mapNotNull { doc ->
+                    runCatching { doc.toGroupPostComment(postId) }.getOrNull()
+                } ?: emptyList()
+                trySend(Result.success(comments))
             }
         awaitClose { listener.remove() }
     }
@@ -292,6 +312,36 @@ class GroupsRepositoryImpl(private val firestore: FirebaseFirestore) {
             .update("postCount", FieldValue.increment(1)).await()
 
         Result.success(ref.id)
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    suspend fun addComment(groupId: String, postId: String, content: String): Result<Unit> = try {
+        val currentUser = auth.currentUser
+            ?: return Result.failure(Exception("Not signed in"))
+        val (userName, userAvatar) = fetchUserInfo(currentUser.uid)
+        val now = System.currentTimeMillis()
+
+        val postRef = firestore.collection("groups").document(groupId)
+            .collection("posts").document(postId)
+
+        val commentRef = postRef.collection("comments").document()
+
+        firestore.runTransaction { transaction ->
+            transaction.set(
+                commentRef,
+                mapOf(
+                    "authorId" to currentUser.uid,
+                    "authorName" to userName,
+                    "authorAvatarUrl" to userAvatar,
+                    "content" to content.trim(),
+                    "createdAt" to now,
+                )
+            )
+            transaction.update(postRef, "commentCount", FieldValue.increment(1))
+        }.await()
+
+        Result.success(Unit)
     } catch (e: Exception) {
         Result.failure(e)
     }
@@ -556,6 +606,18 @@ class GroupsRepositoryImpl(private val firestore: FirebaseFirestore) {
             isLikedByCurrentUser = currentUserId in likedBy,
             isReported = getBoolean("isReported") ?: false,
             reportCount = (get("reportCount") as? Number)?.toInt() ?: 0,
+            createdAt = (get("createdAt") as? Number)?.toLong() ?: 0L,
+        )
+    }
+
+    private fun com.google.firebase.firestore.DocumentSnapshot.toGroupPostComment(postId: String): GroupPostComment {
+        return GroupPostComment(
+            id = id,
+            postId = postId,
+            authorId = getString("authorId") ?: "",
+            authorName = getString("authorName") ?: "Unknown",
+            authorAvatarUrl = getString("authorAvatarUrl") ?: "",
+            content = getString("content") ?: "",
             createdAt = (get("createdAt") as? Number)?.toLong() ?: 0L,
         )
     }
