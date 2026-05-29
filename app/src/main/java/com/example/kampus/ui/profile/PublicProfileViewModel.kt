@@ -531,6 +531,22 @@ class PublicProfileViewModel : ViewModel() {
                 mediaUrls = post.mediaUris.map { it.toString() },
                 mediaTypes = post.mediaTypes.map { it.name },
                 groupId = null,
+                sharedOriginalPostId = post.sharedOriginalPostId,
+                sharedOriginalAuthor = post.sharedOriginalAuthor,
+                sharedOriginalAuthorId = post.sharedOriginalAuthorId,
+                sharedOriginalAvatar = post.sharedOriginalAvatar,
+                sharedOriginalProfileImageUrl = post.sharedOriginalProfileImageUrl,
+                sharedOriginalTime = post.sharedOriginalTime,
+                sharedOriginalTimestamp = post.sharedOriginalTimestamp,
+                sharedOriginalContent = post.sharedOriginalContent,
+                sharedOriginalMediaUrls = post.sharedOriginalMediaUris.map { it.toString() },
+                sharedOriginalMediaTypes = post.sharedOriginalMediaTypes.map { it.name },
+                sharedOriginalMediaEmojis = post.sharedOriginalMediaEmojis,
+                sharedOriginalLikes = post.sharedOriginalLikes,
+                sharedOriginalComments = post.sharedOriginalComments,
+                sharedOriginalShares = post.sharedOriginalShares,
+                sharedOriginalVisibility = post.sharedOriginalVisibility,
+                sharedOriginalIsVerified = post.sharedOriginalIsVerified,
             )
         }
 

@@ -255,8 +255,13 @@ fun ChatListScreen(
 
         val activeStory = state.stories.firstOrNull { it.id == selectedStoryId }
         if (activeStory != null) {
+            val userStories = remember(state.stories, activeStory.ownerId) {
+                state.stories.filter { 
+                    it.ownerId == activeStory.ownerId && (it.storyType == "image" || it.storyType == "video")
+                }
+            }
             StoryViewerOverlay(
-                stories = state.stories,
+                stories = userStories,
                 startStoryId = activeStory.id,
                 viewModel = viewModel,
                 onDismiss = { selectedStoryId = null },

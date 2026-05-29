@@ -1,9 +1,11 @@
 package com.example.kampus.ui.chat
 
+import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.kampus.di.SupabaseModule
+import com.example.kampus.data.repository.StoryRepository
 import com.example.kampus.data.repository.CallStatus
 import com.example.kampus.data.repository.ChatRepositoryImpl
 import com.example.kampus.data.repository.Message as RepositoryMessage
@@ -81,6 +83,9 @@ class ChatViewModel : ViewModel() {
 
     private val _incomingCallState = MutableStateFlow<IncomingCallInvite?>(null)
     val incomingCallState: StateFlow<IncomingCallInvite?> = _incomingCallState.asStateFlow()
+
+    private val _storyUploadProgress = MutableStateFlow<Double?>(null)
+    val storyUploadProgress: StateFlow<Double?> = _storyUploadProgress.asStateFlow()
 
     private val chatRepository = ChatRepositoryImpl(FirebaseFirestore.getInstance())
     private val auth = FirebaseAuth.getInstance()
@@ -382,6 +387,7 @@ class ChatViewModel : ViewModel() {
     }
 
     suspend fun createStory(
+        context: Context,
         note: String,
         imageUri: String? = null,
         overlayText: String = "",
@@ -390,45 +396,100 @@ class ChatViewModel : ViewModel() {
         overlayColor: Long = 0L,
         privacy: String = "friends",
         storyType: String = "note",
-    ): Result<String> = runCatching {
-        val userId = auth.currentUser?.uid ?: throw IllegalStateException("User not signed in")
-        val now = System.currentTimeMillis()
-        val expiresAt = now + 86_400_000L
-        val userDoc = FirebaseFirestore.getInstance()
-            .collection("users")
-            .document(userId)
-            .get()
-            .await()
+    ): Result<String> {
+        val hasMedia = !imageUri.isNullOrBlank() && (storyType == "image" || storyType == "video" || imageUri.startsWith("content:") || imageUri.startsWith("file:"))
+        val res = if (hasMedia) {
+            _storyUploadProgress.value = 0.0
+            val uploadRes = StoryRepository().uploadStory(
+                context = context,
+                fileUri = Uri.parse(imageUri),
+                caption = note,
+                overlayText = overlayText,
+                overlayX = overlayX,
+                overlayY = overlayY,
+                overlayColor = overlayColor,
+                privacy = privacy,
+                onProgress = { p -> _storyUploadProgress.value = p }
+            )
+            _storyUploadProgress.value = null
+            uploadRes
+        } else {
+            runCatching {
+                val userId = auth.currentUser?.uid ?: throw IllegalStateException("User not signed in")
+                val now = System.currentTimeMillis()
+                val expiresAt = now + 86_400_000L
+                val userDoc = FirebaseFirestore.getInstance()
+                    .collection("users")
+                    .document(userId)
+                    .get()
+                    .await()
 
-        val storyData = mutableMapOf<String, Any>(
-            "ownerId" to userId,
-            "userId" to userId,
-            "note" to note,
-            "ownerName" to (userDoc.getString("displayName")?.ifBlank { null }
-                ?: auth.currentUser?.displayName?.ifBlank { null }
-                ?: auth.currentUser?.email?.substringBefore("@")
-                ?: "User"),
-            "ownerAvatarEmoji" to (userDoc.getString("avatarEmoji")?.ifBlank { null } ?: "👤"),
-            "ownerProfileImageUrl" to (userDoc.getString("profileImageUrl")?.ifBlank { null } ?: ""),
-            "ownerAvatarColor" to ((userDoc.get("avatarColor") as? Number)?.toLong() ?: 0xFF3B82F6),
-            "overlayText" to overlayText,
-            "overlayX" to overlayX,
-            "overlayY" to overlayY,
-            "overlayColor" to overlayColor,
-            "privacy" to privacy,
-            "storyType" to storyType,
-            "createdAt" to now,
-            "expiresAt" to expiresAt,
-        )
-        if (!imageUri.isNullOrBlank()) {
-            storyData["imageUri"] = imageUri
-            storyData["imageUrl"] = imageUri
+                val storyData = mutableMapOf<String, Any>(
+                    "ownerId" to userId,
+                    "userId" to userId,
+                    "note" to note,
+                    "ownerName" to (userDoc.getString("displayName")?.ifBlank { null }
+                        ?: auth.currentUser?.displayName?.ifBlank { null }
+                        ?: auth.currentUser?.email?.substringBefore("@")
+                        ?: "User"),
+                    "ownerAvatarEmoji" to (userDoc.getString("avatarEmoji")?.ifBlank { null } ?: "👤"),
+                    "ownerProfileImageUrl" to (userDoc.getString("profileImageUrl")?.ifBlank { null } ?: ""),
+                    "ownerAvatarColor" to ((userDoc.get("avatarColor") as? Number)?.toLong() ?: 0xFF3B82F6),
+                    "overlayText" to overlayText,
+                    "overlayX" to overlayX,
+                    "overlayY" to overlayY,
+                    "overlayColor" to overlayColor,
+                    "privacy" to privacy,
+                    "storyType" to storyType,
+                    "createdAt" to now,
+                    "expiresAt" to expiresAt,
+                )
+                FirebaseFirestore.getInstance()
+                    .collection("stories")
+                    .add(storyData)
+                    .await()
+                    .id
+            }
         }
-        FirebaseFirestore.getInstance()
-            .collection("stories")
-            .add(storyData)
-            .await()
-            .id
+
+        res.onSuccess { storyId ->
+            val userId = auth.currentUser?.uid
+            if (!userId.isNullOrBlank()) {
+                viewModelScope.launch {
+                    runCatching {
+                        val userDoc = FirebaseFirestore.getInstance()
+                            .collection("users")
+                            .document(userId)
+                            .get()
+                            .await()
+                        val senderName = userDoc.getString("displayName") ?: auth.currentUser?.displayName ?: "Someone"
+
+                        val followersSnapshot = FirebaseFirestore.getInstance()
+                            .collection("users")
+                            .document(userId)
+                            .collection("followers")
+                            .get()
+                            .await()
+                        for (doc in followersSnapshot.documents) {
+                            val followerId = doc.id
+                            if (followerId.isNotBlank() && followerId != userId) {
+                                runCatching {
+                                    NotificationLogger.notifyUser(
+                                        toUserId = followerId,
+                                        type = "story",
+                                        title = "New Story",
+                                        body = "$senderName added a new story",
+                                        targetId = storyId,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return res
     }
 
     suspend fun saveStoryDraft(
@@ -458,6 +519,7 @@ class ChatViewModel : ViewModel() {
 
     suspend fun createStoryReply(story: ChatStory, replyText: String): Result<String> = runCatching {
         val senderId = auth.currentUser?.uid ?: throw IllegalStateException("User not signed in")
+        val receiverId = story.ownerId
         val trimmedReply = replyText.trim()
         if (trimmedReply.isBlank()) {
             throw IllegalArgumentException("Reply cannot be blank")
@@ -473,10 +535,12 @@ class ChatViewModel : ViewModel() {
             .get()
             .await()
 
+        val senderName = userDoc.getString("displayName") ?: auth.currentUser?.displayName ?: "User"
+
         val payload = mapOf(
             "senderId" to senderId,
-            "receiverId" to story.ownerId,
-            "storyOwnerId" to story.ownerId,
+            "receiverId" to receiverId,
+            "storyOwnerId" to receiverId,
             "storyId" to story.id,
             "storyImage" to story.imageUrl,
             "storyThumbnail" to story.imageUrl,
@@ -485,7 +549,7 @@ class ChatViewModel : ViewModel() {
             "replyText" to trimmedReply,
             "mediaPreview" to story.imageUrl,
             "storyOwnerName" to story.ownerName,
-            "senderName" to (userDoc.getString("displayName") ?: auth.currentUser?.displayName ?: "You"),
+            "senderName" to senderName,
             "createdAt" to System.currentTimeMillis(),
             "replyId" to replyId,
         )
@@ -495,6 +559,40 @@ class ChatViewModel : ViewModel() {
             .document(replyId)
             .set(payload)
             .await()
+
+        val chatId = getOrCreateDirectChatWithUser(receiverId) ?: throw IllegalStateException("Cannot resolve chat")
+        val now = System.currentTimeMillis()
+        val clientMessageId = "local-$now"
+        val repositoryMessage = RepositoryMessage(
+            id = clientMessageId,
+            remoteMessageId = clientMessageId,
+            senderId = senderId,
+            receiverId = receiverId,
+            text = trimmedReply,
+            messageType = "story_reply",
+            storyId = story.id,
+            storyImage = story.imageUrl,
+            storyCaption = story.note,
+            storyReplyText = trimmedReply,
+            storyOwnerId = story.ownerId,
+            storyOwnerName = story.ownerName,
+            storyThumbnail = story.imageUrl,
+            timestamp = now,
+            isRead = false,
+            seen = false,
+        )
+
+        chatRepository.sendMessage(chatId, repositoryMessage).getOrThrow()
+
+        runCatching {
+            NotificationLogger.notifyUser(
+                toUserId = receiverId,
+                type = "story_reply",
+                title = senderName,
+                body = "$senderName replied to your story: \"$trimmedReply\"",
+                targetId = chatId,
+            )
+        }
 
         replyId
     }

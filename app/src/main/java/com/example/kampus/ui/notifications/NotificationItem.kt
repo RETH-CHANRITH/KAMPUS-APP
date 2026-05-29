@@ -205,6 +205,8 @@ private fun badgeIconForType(type: String): ImageVector {
 		"chat_message", "direct_message", "story_reply" -> Icons.AutoMirrored.Filled.Send
 		"follow", "friend_request" -> Icons.Default.Person
 		"mention" -> Icons.Default.Tag
+		"share" -> Icons.Default.Share
+		"story" -> Icons.Default.CameraAlt
 		else -> Icons.Default.Notifications
 	}
 }
@@ -216,6 +218,8 @@ private fun badgeColorForType(type: String): Color {
 		"chat_message", "direct_message", "story_reply" -> Color(0xFF3B82F6) // Blue
 		"follow", "friend_request" -> Color(0xFF10B981) // Green
 		"mention" -> Color(0xFFF59E0B) // Amber
+		"share" -> Color(0xFF673AB7) // Indigo/Purple
+		"story" -> Color(0xFFFF9800) // Deep Amber
 		else -> Color(0xFF6B7280) // Gray
 	}
 }

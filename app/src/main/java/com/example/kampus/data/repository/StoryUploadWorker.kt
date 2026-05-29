@@ -15,7 +15,13 @@ class StoryUploadWorker(appContext: Context, params: WorkerParameters) : Corouti
             val privacy = inputData.getString("privacy") ?: "friends"
 
             val repo = StoryRepository()
-            val res = repo.uploadImageStory(applicationContext, Uri.parse(fileUri), caption, privacy) { /* progress ignored in background */ }
+            val res = repo.uploadStory(
+                context = applicationContext,
+                fileUri = Uri.parse(fileUri),
+                caption = caption,
+                privacy = privacy,
+                onProgress = {}
+            )
             return@withContext if (res.isSuccess) Result.success() else Result.retry()
         } catch (e: Exception) {
             return@withContext Result.retry()

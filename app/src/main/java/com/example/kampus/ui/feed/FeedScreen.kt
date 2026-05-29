@@ -1,6 +1,5 @@
 @file:Suppress("SpellCheckingInspection")
 package com.example.kampus.ui.feed
-import android.content.Intent
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.text.format.DateUtils
@@ -57,6 +56,10 @@ import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.launch
 import com.example.kampus.ui.components.CampusBottomNavBar
 import com.example.kampus.ui.chat.ChatStory
+import com.example.kampus.ui.chat.ChatViewModel
+import com.example.kampus.ui.chat.FullCreateStoryScreen
+import com.example.kampus.ui.chat.StoryEntryMode
+import com.example.kampus.ui.story.StoryViewerOverlay
 import com.example.kampus.ui.theme.ThemeController
 import com.example.kampus.utils.ActivityLogger
 
@@ -102,13 +105,7 @@ private fun postMetadataLines(post: PostItem): List<String> = buildList {
 // ─────────────────────────────────────────────────────────────────────────────
 // Models
 // ─────────────────────────────────────────────────────────────────────────────
-data class StoryItem(
-    val name   : String,
-    val emoji  : String,
-    val profileImageUrl: String = "",
-    val isMe   : Boolean = false,
-    val hasNew : Boolean = true,
-)
+
 
 private data class NavItem(
     val label        : String,
@@ -119,15 +116,7 @@ private data class NavItem(
 // ─────────────────────────────────────────────────────────────────────────────
 // Static data
 // ─────────────────────────────────────────────────────────────────────────────
-private val stories = listOf(
-    StoryItem("You",      "🧑‍💻", isMe = true, hasNew = false),
-    StoryItem("Jacob",    "👨‍🎓", hasNew = true),
-    StoryItem("Luna",     "👩‍🎨", hasNew = true),
-    StoryItem("John",     "🧑‍🔬", hasNew = false),
-    StoryItem("Mia",      "👩‍💻", hasNew = true),
-    StoryItem("Netaliya", "👩‍🎤", hasNew = true),
-    StoryItem("Carlos",   "🧑‍🏫", hasNew = false),
-)
+
 
 private val navItems = listOf(
     NavItem("Home",   Icons.Outlined.Home,              Icons.Filled.Home),
@@ -136,13 +125,7 @@ private val navItems = listOf(
     NavItem("Chat",   Icons.Outlined.ChatBubbleOutline, Icons.Filled.ChatBubble),
 )
 
-private fun ChatStory.toFeedStoryItem(): StoryItem = StoryItem(
-    name = ownerName,
-    emoji = ownerAvatarEmoji,
-    profileImageUrl = ownerProfileImageUrl,
-    isMe = isMine,
-    hasNew = true,
-)
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Screen
@@ -158,14 +141,16 @@ fun HomeScreen(
     onEventsClick  : () -> Unit = {},   // ← ADDED (for future use)
     onChatClick    : () -> Unit = {},   // ← ADDED (for future use)
     viewModel      : FeedViewModel = viewModel(),
+    chatViewModel  : ChatViewModel = viewModel(),
 ) {
     val vm = viewModel
     val context = LocalContext.current
     val uiState by vm.uiState.collectAsStateWithLifecycle()
+    val chatListState by chatViewModel.chatListState.collectAsStateWithLifecycle()
     val likedPosts by vm.likedIds.collectAsState()
     val currentUserId = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
     val posts = uiState.posts
-    val stories = uiState.stories.map { it.toFeedStoryItem() }
+
 
     var selectedNav by remember { mutableIntStateOf(0) }
     val unreadNotifsCount by vm.unreadCount.collectAsStateWithLifecycle()
@@ -178,285 +163,359 @@ fun HomeScreen(
     var recentlyDeletedPost by remember { mutableStateOf<PostItem?>(null) }
     var pendingReportPost by remember { mutableStateOf<PostItem?>(null) }
     var pendingBlockPost by remember { mutableStateOf<PostItem?>(null) }
+    var pendingSharePost by remember { mutableStateOf<PostItem?>(null) }
 
-    Scaffold(
-        containerColor = HBg,
-        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
-        topBar = {
-            Surface(
-                color          = HBg,
-                tonalElevation = 0.dp,
-                shadowElevation = 0.dp,
-            ) {
-                TopBar(
-                    notifCount    = unreadNotifsCount,
-                    onNotifClick  = onNotifClick,
-                    onSearchClick = onSearchClick,
-                )
-            }
-        },
-        bottomBar = {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(Color.Transparent, HBg.copy(alpha = 0.98f))
-                        )
+    var showCreateStoryDialog by remember { mutableStateOf(false) }
+    var selectedStoryId by remember { mutableStateOf<String?>(null) }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            containerColor = HBg,
+            snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+            topBar = {
+                Surface(
+                    color          = HBg,
+                    tonalElevation = 0.dp,
+                    shadowElevation = 0.dp,
+                ) {
+                    TopBar(
+                        notifCount    = unreadNotifsCount,
+                        onNotifClick  = onNotifClick,
+                        onSearchClick = onSearchClick,
                     )
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
-                    .navigationBarsPadding(),
+                }
+            },
+            bottomBar = {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color.Transparent, HBg.copy(alpha = 0.98f))
+                            )
+                        )
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                        .navigationBarsPadding(),
+                ) {
+                    CampusBottomNavBar(
+                        selectedIndex  = selectedNav,
+                        onItemSelected = { index ->
+                            selectedNav = index
+                            when (index) {
+                                0 -> { /* already on Home, do nothing */ }
+                                1 -> onGroupsClick()
+                                2 -> onEventsClick()
+                                3 -> onChatClick()
+                            }
+                        },
+                        onFabClick     = onCreatePost,
+                        onProfileClick = onProfileClick,
+                        isProfileSelected = false,
+                    )
+                }
+            },
+        ) { innerPadding ->
+            LazyColumn(
+                state          = listState,
+                modifier       = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+                contentPadding = PaddingValues(bottom = 8.dp),
             ) {
-                CampusBottomNavBar(
-                    selectedIndex  = selectedNav,
-                    onItemSelected = { index ->
-                        selectedNav = index
-                        when (index) {
-                            0 -> { /* already on Home, do nothing */ }
-                            1 -> onGroupsClick()
-                            2 -> onEventsClick()
-                            3 -> onChatClick()
+                if (uiState.isLoading && posts.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 24.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            CircularProgressIndicator(color = HBlue)
                         }
-                    },
-                    onFabClick     = onCreatePost,
-                    onProfileClick = onProfileClick,
-                    isProfileSelected = false,
-                )
-            }
-        },
-    ) { innerPadding ->
-        LazyColumn(
-            state          = listState,
-            modifier       = Modifier
-                .fillMaxSize()
-                .padding(innerPadding),
-            contentPadding = PaddingValues(bottom = 8.dp),
-        ) {
-            if (uiState.isLoading && posts.isEmpty()) {
-                item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 24.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        CircularProgressIndicator(color = HBlue)
                     }
                 }
-            }
 
-            item {
-                Spacer(Modifier.height(8.dp))
-                StoriesRow(
-                    stories                    = stories,
-                    currentUserProfileImageUrl = uiState.currentUserProfileImageUrl,
-                    currentUserAvatarEmoji     = uiState.currentUserAvatarEmoji,
-                    friendsAndFollowers        = uiState.friendsAndFollowers,
-                )
-                Spacer(Modifier.height(14.dp))
-                HorizontalDivider(
-                    color     = HBorder.copy(alpha = 0.5f),
-                    thickness = 0.5.dp,
-                )
-                Spacer(Modifier.height(6.dp))
+                item {
+                    Spacer(Modifier.height(8.dp))
+                    val imageStoriesByOwner = remember(chatListState.stories) {
+                        chatListState.stories.filter { it.storyType == "image" || it.storyType == "video" }.groupBy { it.ownerId }
+                    }
+                    StoriesRow(
+                        following                  = uiState.following,
+                        currentUserProfileImageUrl = uiState.currentUserProfileImageUrl,
+                        currentUserAvatarEmoji     = uiState.currentUserAvatarEmoji,
+                        onCreateStory              = { showCreateStoryDialog = true },
+                        onOpenStory                = { story -> selectedStoryId = story.id },
+                        imageStoriesByOwner        = imageStoriesByOwner,
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    HorizontalDivider(
+                        color     = HBorder.copy(alpha = 0.5f),
+                        thickness = 0.5.dp,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                }
+                items(posts, key = { it.id }) { post ->
+                    PostCard(
+                        post    = post,
+                        isLiked = post.id in likedPosts || (currentUserId.isNotBlank() && currentUserId in post.likedBy),
+                        isSaved = post.id in uiState.savedPostIds,
+                        onLike  = {
+                            vm.toggleLike(post.id)
+                        },
+                        onShare = {
+                            pendingSharePost = post
+                        },
+                        onOpenSharedPost = { sharedPostId ->
+                            onPostClick(sharedPostId)
+                        },
+                        
+                        onMenuAction = { targetPost, action ->
+                            when (action) {
+                                "open" -> {
+                                    onPostClick(targetPost.id)
+                                }
+                                "copy" -> {
+                                    val clipboard = context.getSystemService(ClipboardManager::class.java)
+                                    clipboard?.setPrimaryClip(ClipData.newPlainText("post", targetPost.content))
+                                    coroutineScope.launch { snackbarHostState.showSnackbar("Post text copied") }
+                                }
+                                "pin" -> {
+                                    vm.pinPostBackend(targetPost.id, true)
+                                    coroutineScope.launch { snackbarHostState.showSnackbar("Post pinned") }
+                                }
+                                "unpin" -> {
+                                    vm.pinPostBackend(targetPost.id, false)
+                                    coroutineScope.launch { snackbarHostState.showSnackbar("Post unpinned") }
+                                }
+                                "trash" -> {
+                                    // Ask for confirmation before deleting
+                                    pendingDeletePost = targetPost
+                                    confirmDeleteVisible = true
+                                }
+                                "edit" -> {
+                                    ActivityLogger.logAction(type = "edit_post", text = "Edit requested for ${targetPost.id}")
+                                }
+                                "privacy_public" -> {
+                                    vm.updatePostVisibility(targetPost.id, PostItem.PostVisibility.PUBLIC)
+                                    coroutineScope.launch { snackbarHostState.showSnackbar("Privacy set to Public") }
+                                }
+                                "privacy_friends" -> {
+                                    vm.updatePostVisibility(targetPost.id, PostItem.PostVisibility.FRIENDS)
+                                    coroutineScope.launch { snackbarHostState.showSnackbar("Privacy set to Friends") }
+                                }
+                                "privacy_private" -> {
+                                    vm.updatePostVisibility(targetPost.id, PostItem.PostVisibility.PRIVATE)
+                                    coroutineScope.launch { snackbarHostState.showSnackbar("Privacy set to Only Me") }
+                                }
+                                "privacy" -> {
+                                    vm.updatePostVisibility(targetPost.id, targetPost.visibility)
+                                    coroutineScope.launch { snackbarHostState.showSnackbar("Privacy updated") }
+                                }
+                                "hide_profile" -> {
+                                    vm.hideFromProfileBackend(targetPost.id)
+                                    coroutineScope.launch { snackbarHostState.showSnackbar("Hidden from profile") }
+                                }
+                                "save" -> {
+                                    vm.savePost(targetPost.id, true)
+                                    coroutineScope.launch { snackbarHostState.showSnackbar("Post saved") }
+                                }
+                                "unsave" -> {
+                                    vm.savePost(targetPost.id, false)
+                                    coroutineScope.launch { snackbarHostState.showSnackbar("Post unsaved") }
+                                }
+                                "share" -> {
+                                    pendingSharePost = targetPost
+                                }
+                                "copy_link" -> {
+                                    val clipboard = context.getSystemService(ClipboardManager::class.java)
+                                    clipboard?.setPrimaryClip(ClipData.newPlainText("post_link", "https://kampus.app/post/${targetPost.id}"))
+                                    coroutineScope.launch { snackbarHostState.showSnackbar("Link copied to clipboard") }
+                                }
+                                "not_interested" -> {
+                                    vm.notInterested(targetPost.id)
+                                    coroutineScope.launch { snackbarHostState.showSnackbar("Marked as Not Interested") }
+                                }
+                                "hide_post" -> {
+                                    vm.hidePost(targetPost.id)
+                                    coroutineScope.launch { snackbarHostState.showSnackbar("Post hidden") }
+                                }
+                                "mute_user" -> {
+                                    vm.muteUser(targetPost.authorId)
+                                    coroutineScope.launch { snackbarHostState.showSnackbar("Muted posts from ${targetPost.author}") }
+                                }
+                                "report" -> {
+                                    pendingReportPost = targetPost
+                                }
+                                "block" -> {
+                                    pendingBlockPost = targetPost
+                                }
+                                else -> {
+                                    ActivityLogger.logAction(type = "post_menu_action", text = "$action for ${targetPost.id}")
+                                }
+                            }
+                        },
+                        onComment = { onPostClick(post.id) },
+                    )
+                    Spacer(Modifier.height(6.dp))
+                }
             }
-            items(posts, key = { it.id }) { post ->
-                PostCard(
-                    post    = post,
-                    isLiked = post.id in likedPosts || (currentUserId.isNotBlank() && currentUserId in post.likedBy),
-                    isSaved = post.id in uiState.savedPostIds,
-                    onLike  = {
-                        vm.toggleLike(post.id)
-                    },
-                    onShare = {
+        }
+
+        // Confirmation dialog for destructive action
+        if (confirmDeleteVisible && pendingDeletePost != null) {
+            val target = pendingDeletePost!!
+            AlertDialog(
+                onDismissRequest = { confirmDeleteVisible = false; pendingDeletePost = null },
+                title = { Text("Move to trash", color = HWhite) },
+                text = { Text("Items in your trash are deleted after 30 days.", color = HGray4) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        // perform delete
+                        recentlyDeletedPost = target
+                        vm.deletePost(target.id)
+                        vm.hideFromProfileBackend(target.id)
+                        coroutineScope.launch {
+                            val res = snackbarHostState.showSnackbar("Post moved to trash", actionLabel = "UNDO")
+                            if (res == SnackbarResult.ActionPerformed) {
+                                recentlyDeletedPost?.let { vm.restorePost(it) }
+                                recentlyDeletedPost = null
+                            }
+                        }
+                        confirmDeleteVisible = false
+                        pendingDeletePost = null
+                    }) { Text("Move to trash") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { confirmDeleteVisible = false; pendingDeletePost = null }) { Text("Cancel") }
+                }
+            )
+        }
+
+        if (pendingReportPost != null) {
+            val target = pendingReportPost!!
+            AlertDialog(
+                onDismissRequest = { pendingReportPost = null },
+                title = { Text("Report Post", color = HWhite) },
+                text = { Text("Are you sure you want to report this post? We will review it within 24 hours.", color = HGray4) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        vm.reportPost(target.id)
+                        pendingReportPost = null
+                        coroutineScope.launch { snackbarHostState.showSnackbar("Post reported. Thank you!") }
+                    }) {
+                        Text("Report", color = HRed)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingReportPost = null }) {
+                        Text("Cancel", color = HWhite)
+                    }
+                },
+                containerColor = HCard
+            )
+        }
+
+        if (pendingBlockPost != null) {
+            val target = pendingBlockPost!!
+            AlertDialog(
+                onDismissRequest = { pendingBlockPost = null },
+                title = { Text("Block ${target.author}?", color = HWhite) },
+                text = { Text("You will no longer see posts or receive messages from this user.", color = HGray4) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        vm.blockUser(target.authorId)
+                        pendingBlockPost = null
+                        coroutineScope.launch { snackbarHostState.showSnackbar("Blocked ${target.author}") }
+                    }) {
+                        Text("Block", color = HRed)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingBlockPost = null }) {
+                        Text("Cancel", color = HWhite)
+                    }
+                },
+                containerColor = HCard
+            )
+        }
+
+        pendingSharePost?.let { post ->
+            ShareComposerDialog(
+                originalPost = post,
+                onDismiss = { pendingSharePost = null },
+                onShareNow = { draft ->
+                    val finalText = buildString {
+                        if (draft.caption.isNotBlank()) {
+                            append(draft.caption)
+                        }
+                        if (post.content.isNotBlank()) {
+                            if (isNotBlank()) append("\n\n")
+                            append("Shared from ")
+                            append(post.author)
+                            append("\n")
+                            append(post.content)
+                        }
+                    }
+                    val result = vm.addPost(
+                        text = finalText,
+                        mediaUris = draft.mediaUris,
+                        mediaTypes = draft.mediaTypes,
+                        visibility = draft.visibility,
+                        taggedPeople = draft.taggedPeople,
+                        sharedOriginalPostId = post.id,
+                        sharedOriginalAuthor = post.author,
+                        sharedOriginalAuthorId = post.authorId,
+                        sharedOriginalAvatar = post.avatar,
+                        sharedOriginalProfileImageUrl = post.profileImageUrl,
+                        sharedOriginalTime = post.time,
+                        sharedOriginalTimestamp = post.timestamp,
+                        sharedOriginalContent = post.content,
+                        sharedOriginalMediaUris = post.mediaUris,
+                        sharedOriginalMediaTypes = post.mediaTypes,
+                        sharedOriginalMediaEmojis = post.mediaEmojis,
+                        sharedOriginalLikes = post.likes,
+                        sharedOriginalComments = post.comments,
+                        sharedOriginalShares = post.shares,
+                        sharedOriginalVisibility = post.visibility,
+                        sharedOriginalIsVerified = post.isVerified,
+                    )
+                    result.onSuccess {
                         vm.incrementShareCount(post.id)
                         ActivityLogger.logAction(
                             type = "share_post",
                             text = "Shared post by ${post.author}",
                             metadata = mapOf("postId" to post.id.toString(), "author" to post.author),
                         )
-                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                            type = "text/plain"
-                            putExtra(Intent.EXTRA_SUBJECT, "${post.author} on Kampus")
-                            putExtra(Intent.EXTRA_TEXT, "${post.author}: ${post.content}")
-                        }
-                        context.startActivity(Intent.createChooser(shareIntent, "Share post"))
-                    },
-                    
-                    onMenuAction = { targetPost, action ->
-                        when (action) {
-                            "open" -> {
-                                onPostClick(targetPost.id)
-                            }
-                            "copy" -> {
-                                val clipboard = context.getSystemService(ClipboardManager::class.java)
-                                clipboard?.setPrimaryClip(ClipData.newPlainText("post", targetPost.content))
-                                coroutineScope.launch { snackbarHostState.showSnackbar("Post text copied") }
-                            }
-                            "pin" -> {
-                                vm.pinPostBackend(targetPost.id, true)
-                                coroutineScope.launch { snackbarHostState.showSnackbar("Post pinned") }
-                            }
-                            "unpin" -> {
-                                vm.pinPostBackend(targetPost.id, false)
-                                coroutineScope.launch { snackbarHostState.showSnackbar("Post unpinned") }
-                            }
-                            "trash" -> {
-                                // Ask for confirmation before deleting
-                                pendingDeletePost = targetPost
-                                confirmDeleteVisible = true
-                            }
-                            "edit" -> {
-                                ActivityLogger.logAction(type = "edit_post", text = "Edit requested for ${targetPost.id}")
-                            }
-                            "privacy_public" -> {
-                                vm.updatePostVisibility(targetPost.id, PostItem.PostVisibility.PUBLIC)
-                                coroutineScope.launch { snackbarHostState.showSnackbar("Privacy set to Public") }
-                            }
-                            "privacy_friends" -> {
-                                vm.updatePostVisibility(targetPost.id, PostItem.PostVisibility.FRIENDS)
-                                coroutineScope.launch { snackbarHostState.showSnackbar("Privacy set to Friends") }
-                            }
-                            "privacy_private" -> {
-                                vm.updatePostVisibility(targetPost.id, PostItem.PostVisibility.PRIVATE)
-                                coroutineScope.launch { snackbarHostState.showSnackbar("Privacy set to Only Me") }
-                            }
-                            "privacy" -> {
-                                vm.updatePostVisibility(targetPost.id, targetPost.visibility)
-                                coroutineScope.launch { snackbarHostState.showSnackbar("Privacy updated") }
-                            }
-                            "hide_profile" -> {
-                                vm.hideFromProfileBackend(targetPost.id)
-                                coroutineScope.launch { snackbarHostState.showSnackbar("Hidden from profile") }
-                            }
-                            "save" -> {
-                                vm.savePost(targetPost.id, true)
-                                coroutineScope.launch { snackbarHostState.showSnackbar("Post saved") }
-                            }
-                            "unsave" -> {
-                                vm.savePost(targetPost.id, false)
-                                coroutineScope.launch { snackbarHostState.showSnackbar("Post unsaved") }
-                            }
-                            "share" -> {
-                                vm.incrementShareCount(targetPost.id)
-                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "text/plain"
-                                    putExtra(Intent.EXTRA_SUBJECT, "${targetPost.author} on Kampus")
-                                    putExtra(Intent.EXTRA_TEXT, "${targetPost.author}: ${targetPost.content}")
-                                }
-                                context.startActivity(Intent.createChooser(shareIntent, "Share post"))
-                            }
-                            "copy_link" -> {
-                                val clipboard = context.getSystemService(ClipboardManager::class.java)
-                                clipboard?.setPrimaryClip(ClipData.newPlainText("post_link", "https://kampus.app/post/${targetPost.id}"))
-                                coroutineScope.launch { snackbarHostState.showSnackbar("Link copied to clipboard") }
-                            }
-                            "not_interested" -> {
-                                vm.notInterested(targetPost.id)
-                                coroutineScope.launch { snackbarHostState.showSnackbar("Marked as Not Interested") }
-                            }
-                            "hide_post" -> {
-                                vm.hidePost(targetPost.id)
-                                coroutineScope.launch { snackbarHostState.showSnackbar("Post hidden") }
-                            }
-                            "mute_user" -> {
-                                vm.muteUser(targetPost.authorId)
-                                coroutineScope.launch { snackbarHostState.showSnackbar("Muted posts from ${targetPost.author}") }
-                            }
-                            "report" -> {
-                                pendingReportPost = targetPost
-                            }
-                            "block" -> {
-                                pendingBlockPost = targetPost
-                            }
-                            else -> {
-                                ActivityLogger.logAction(type = "post_menu_action", text = "$action for ${targetPost.id}")
-                            }
-                        }
-                    },
-                    onComment = { onPostClick(post.id) },
-                )
-                Spacer(Modifier.height(6.dp))
-            }
-        }
-    }
-
-    // Confirmation dialog for destructive action
-    if (confirmDeleteVisible && pendingDeletePost != null) {
-        val target = pendingDeletePost!!
-        AlertDialog(
-            onDismissRequest = { confirmDeleteVisible = false; pendingDeletePost = null },
-            title = { Text("Move to trash", color = HWhite) },
-            text = { Text("Items in your trash are deleted after 30 days.", color = HGray4) },
-            confirmButton = {
-                TextButton(onClick = {
-                    // perform delete
-                    recentlyDeletedPost = target
-                    vm.deletePost(target.id)
-                    vm.hideFromProfileBackend(target.id)
-                    coroutineScope.launch {
-                        val res = snackbarHostState.showSnackbar("Post moved to trash", actionLabel = "UNDO")
-                        if (res == SnackbarResult.ActionPerformed) {
-                            recentlyDeletedPost?.let { vm.restorePost(it) }
-                            recentlyDeletedPost = null
-                        }
                     }
-                    confirmDeleteVisible = false
-                    pendingDeletePost = null
-                }) { Text("Move to trash") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmDeleteVisible = false; pendingDeletePost = null }) { Text("Cancel") }
+                    result
+                },
+            )
+        }
+
+        if (showCreateStoryDialog) {
+            FullCreateStoryScreen(
+                onDismiss = { showCreateStoryDialog = false },
+                onStoryCreated = { showCreateStoryDialog = false },
+                entryMode = StoryEntryMode.STORY,
+                viewModel = chatViewModel,
+            )
+        }
+
+        val activeStory = chatListState.stories.firstOrNull { it.id == selectedStoryId }
+        if (activeStory != null) {
+            val userStories = remember(chatListState.stories, activeStory.ownerId) {
+                chatListState.stories.filter { 
+                    it.ownerId == activeStory.ownerId && (it.storyType == "image" || it.storyType == "video")
+                }
             }
-        )
-    }
-
-    if (pendingReportPost != null) {
-        val target = pendingReportPost!!
-        AlertDialog(
-            onDismissRequest = { pendingReportPost = null },
-            title = { Text("Report Post", color = HWhite) },
-            text = { Text("Are you sure you want to report this post? We will review it within 24 hours.", color = HGray4) },
-            confirmButton = {
-                TextButton(onClick = {
-                    vm.reportPost(target.id)
-                    pendingReportPost = null
-                    coroutineScope.launch { snackbarHostState.showSnackbar("Post reported. Thank you!") }
-                }) {
-                    Text("Report", color = HRed)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingReportPost = null }) {
-                    Text("Cancel", color = HWhite)
-                }
-            },
-            containerColor = HCard
-        )
-    }
-
-    if (pendingBlockPost != null) {
-        val target = pendingBlockPost!!
-        AlertDialog(
-            onDismissRequest = { pendingBlockPost = null },
-            title = { Text("Block ${target.author}?", color = HWhite) },
-            text = { Text("You will no longer see posts or receive messages from this user.", color = HGray4) },
-            confirmButton = {
-                TextButton(onClick = {
-                    vm.blockUser(target.authorId)
-                    pendingBlockPost = null
-                    coroutineScope.launch { snackbarHostState.showSnackbar("Blocked ${target.author}") }
-                }) {
-                    Text("Block", color = HRed)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingBlockPost = null }) {
-                    Text("Cancel", color = HWhite)
-                }
-            },
-            containerColor = HCard
-        )
+            StoryViewerOverlay(
+                stories = userStories,
+                startStoryId = activeStory.id,
+                viewModel = chatViewModel,
+                onDismiss = { selectedStoryId = null },
+            )
+        }
     }
 }
 
@@ -573,40 +632,52 @@ private fun TopBar(
 // Friends / Followers Row  (real-time + real profiles)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Main horizontal row: shows the current user (“You”) first, then every
- * friend / follower fetched in real-time from Firestore.  Falls back to the
- * story list when the friends list is still empty (e.g. first load).
- */
 @Composable
 private fun StoriesRow(
-    stories: List<StoryItem>,
+    following: List<FriendUserItem>,
     currentUserProfileImageUrl: String,
     currentUserAvatarEmoji: String,
-    friendsAndFollowers: List<FriendUserItem> = emptyList(),
+    onCreateStory: () -> Unit,
+    onOpenStory: (ChatStory) -> Unit,
+    imageStoriesByOwner: Map<String, List<ChatStory>>,
 ) {
+    val currentUserId = remember { FirebaseAuth.getInstance().currentUser?.uid.orEmpty() }
     LazyRow(
         contentPadding        = PaddingValues(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         // “You” bubble — always first
         item {
+            val myStories = imageStoriesByOwner[currentUserId].orEmpty()
+            val hasActiveStories = myStories.isNotEmpty()
             MeBubble(
-                profileImageUrl = currentUserProfileImageUrl,
-                avatarEmoji     = currentUserAvatarEmoji,
+                profileImageUrl  = currentUserProfileImageUrl,
+                avatarEmoji      = currentUserAvatarEmoji,
+                hasActiveStories = hasActiveStories,
+                onClick          = {
+                    if (hasActiveStories) {
+                        onOpenStory(myStories.first())
+                    } else {
+                        onCreateStory()
+                    }
+                },
+                onCreateClick    = onCreateStory,
             )
         }
 
-        if (friendsAndFollowers.isNotEmpty()) {
-            // Real Firestore friends / followers
-            items(friendsAndFollowers, key = { it.userId }) { friend ->
-                FriendBubble(friend = friend)
-            }
-        } else {
-            // Fallback: story data while Firestore loads
-            items(stories) { story ->
-                StoryBubble(story)
-            }
+        // Only show bubbles for users this account is FOLLOWING (Instagram-style)
+        items(following, key = { it.userId }) { friend ->
+            val friendStories = imageStoriesByOwner[friend.userId].orEmpty()
+            val hasActiveStories = friendStories.isNotEmpty()
+            FriendBubble(
+                friend           = friend,
+                hasActiveStories = hasActiveStories,
+                onClick          = {
+                    if (hasActiveStories) {
+                        onOpenStory(friendStories.first())
+                    }
+                }
+            )
         }
     }
 }
@@ -619,7 +690,9 @@ private fun StoriesRow(
 private fun MeBubble(
     profileImageUrl : String,
     avatarEmoji     : String,
-    onClick         : () -> Unit = {},
+    hasActiveStories: Boolean,
+    onClick         : () -> Unit,
+    onCreateClick   : () -> Unit,
 ) {
     // Subtle pulsing glow on the ring
     val infiniteTransition = rememberInfiniteTransition(label = "me_ring")
@@ -644,20 +717,31 @@ private fun MeBubble(
             ),
     ) {
         Box(contentAlignment = Alignment.BottomEnd) {
-            // Glowing ring
+            // Glowing ring (orange/purple sweep gradient if hasActiveStories, else standard blue)
             Box(
                 modifier = Modifier
                     .size(70.dp)
                     .clip(CircleShape)
                     .background(
-                        Brush.sweepGradient(
-                            listOf(
-                                HBlue.copy(alpha = ringAlpha),
-                                Color(0xFF93C5FD).copy(alpha = ringAlpha),
-                                HGlow.copy(alpha = ringAlpha),
-                                HBlue.copy(alpha = ringAlpha),
+                        if (hasActiveStories) {
+                            Brush.sweepGradient(
+                                listOf(
+                                    Color(0xFFF97316).copy(alpha = ringAlpha),
+                                    Color(0xFFEC4899).copy(alpha = ringAlpha),
+                                    Color(0xFF8B5CF6).copy(alpha = ringAlpha),
+                                    Color(0xFFF97316).copy(alpha = ringAlpha)
+                                )
                             )
-                        )
+                        } else {
+                            Brush.sweepGradient(
+                                listOf(
+                                    HBlue.copy(alpha = ringAlpha),
+                                    Color(0xFF93C5FD).copy(alpha = ringAlpha),
+                                    HGlow.copy(alpha = ringAlpha),
+                                    HBlue.copy(alpha = ringAlpha),
+                                )
+                            )
+                        }
                     ),
                 contentAlignment = Alignment.Center,
             ) {
@@ -694,7 +778,12 @@ private fun MeBubble(
                     .background(
                         Brush.radialGradient(listOf(HBlue, HBlue.copy(0.75f)))
                     )
-                    .border(2.dp, HBg, CircleShape),
+                    .border(2.dp, HBg, CircleShape)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication        = null,
+                        onClick           = onCreateClick
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -722,7 +811,11 @@ private fun MeBubble(
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun FriendBubble(friend: FriendUserItem) {
+private fun FriendBubble(
+    friend: FriendUserItem,
+    hasActiveStories: Boolean,
+    onClick: () -> Unit,
+) {
     // Pop-in scale on first composition
     var visible by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
@@ -743,17 +836,21 @@ private fun FriendBubble(friend: FriendUserItem) {
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication        = null,
-                onClick           = {},
+                onClick           = onClick,
             ),
     ) {
         Box(contentAlignment = Alignment.BottomEnd) {
-            // Outer ring — solid blue when online, muted when offline
+            // Outer ring — sweep gradient (orange/purple gradient when active stories exist, blue when online, gray when offline)
             Box(
                 modifier = Modifier
                     .size(70.dp)
                     .clip(CircleShape)
                     .background(
-                        if (friend.isOnline)
+                        if (hasActiveStories)
+                            Brush.sweepGradient(
+                                listOf(Color(0xFFF97316), Color(0xFFEC4899), Color(0xFF8B5CF6), Color(0xFFF97316))
+                            )
+                        else if (friend.isOnline)
                             Brush.sweepGradient(
                                 listOf(HBlue, Color(0xFF93C5FD), HGlow, HBlue)
                             )
@@ -813,82 +910,56 @@ private fun FriendBubble(friend: FriendUserItem) {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Story Bubble  (fallback — used when friendsAndFollowers is still empty)
-// ─────────────────────────────────────────────────────────────────────────────
+
 
 @Composable
-private fun StoryBubble(story: StoryItem) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-        modifier = Modifier.clickable(
-            interactionSource = remember { MutableInteractionSource() },
-            indication        = null,
-        ) {},
-    ) {
-        Box(contentAlignment = Alignment.BottomEnd) {
-            Box(
-                modifier = Modifier
-                    .size(70.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (story.hasNew)
-                            Brush.sweepGradient(listOf(HBlue, Color(0xFF93C5FD), HGlow, HBlue))
-                        else
-                            Brush.sweepGradient(listOf(HGray6.copy(0.55f), HGray6.copy(0.55f)))
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(62.dp)
-                        .clip(CircleShape)
-                        .background(HChipBg)
-                        .border(2.5.dp, HBg, CircleShape),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (story.profileImageUrl.isNotBlank()) {
-                        AsyncImage(
-                            model              = story.profileImageUrl,
-                            contentDescription = story.name,
-                            contentScale       = ContentScale.Crop,
-                            modifier           = Modifier.fillMaxSize().clip(CircleShape),
-                        )
-                    } else {
-                        Text(story.emoji, fontSize = 28.sp)
+private fun RealtimeAvatar(
+    userId: String,
+    fallbackAvatar: String,
+    size: androidx.compose.ui.unit.Dp,
+    modifier: Modifier = Modifier,
+) {
+    var profileImageUrl by remember(userId) { mutableStateOf("") }
+    var avatarEmoji by remember(userId) { mutableStateOf(fallbackAvatar) }
+
+    DisposableEffect(userId) {
+        var listener: com.google.firebase.firestore.ListenerRegistration? = null
+        if (userId.isNotBlank()) {
+            val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+            listener = db.collection("users").document(userId)
+                .addSnapshotListener { snapshot, error ->
+                    if (error == null && snapshot != null && snapshot.exists()) {
+                        profileImageUrl = snapshot.getString("profileImageUrl").orEmpty()
+                        val emoji = snapshot.getString("avatarEmoji") ?: snapshot.getString("avatar")
+                        if (!emoji.isNullOrBlank()) {
+                            avatarEmoji = emoji
+                        }
                     }
                 }
-            }
-            // "Add" badge only on the “Me” story (should not appear here normally)
-            if (story.isMe) {
-                Box(
-                    modifier = Modifier
-                        .size(22.dp)
-                        .offset(x = 2.dp, y = 2.dp)
-                        .clip(CircleShape)
-                        .background(HBlue)
-                        .border(2.dp, HBg, CircleShape),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector        = Icons.Default.Add,
-                        contentDescription = "Add",
-                        tint               = HWhite,
-                        modifier           = Modifier.size(13.dp),
-                    )
-                }
-            }
         }
+        onDispose {
+            listener?.remove()
+        }
+    }
 
-        Text(
-            text       = story.name,
-            color      = HGray2,
-            fontSize   = 11.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines   = 1,
-            overflow   = TextOverflow.Ellipsis,
-        )
+    Box(
+        modifier = modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(Brush.radialGradient(listOf(HBlue.copy(0.3f), HGray6.copy(0.45f))))
+            .border(1.5.dp, HBorder, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (profileImageUrl.isNotBlank()) {
+            AsyncImage(
+                model = profileImageUrl,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize().clip(CircleShape),
+                contentScale = ContentScale.Crop,
+            )
+        } else {
+            Text(avatarEmoji.ifBlank { "👤" }, fontSize = (size.value * 0.45f).sp)
+        }
     }
 }
 
@@ -904,6 +975,7 @@ private fun PostCard(
     onLike: () -> Unit,
     onShare: () -> Unit,
     onComment: () -> Unit = {},
+    onOpenSharedPost: (Int) -> Unit = {},
     onMenuAction: (PostItem, String) -> Unit = { _, _ -> },
 ) {
     val context = LocalContext.current
@@ -935,25 +1007,11 @@ private fun PostCard(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .background(Brush.radialGradient(listOf(HBlue.copy(0.3f), HGray6.copy(0.45f))))
-                        .border(1.5.dp, HBorder, CircleShape),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (post.profileImageUrl.isNotBlank()) {
-                        AsyncImage(
-                            model = post.profileImageUrl,
-                            contentDescription = post.author,
-                            modifier = Modifier.fillMaxSize().clip(CircleShape),
-                            contentScale = ContentScale.Crop,
-                        )
-                    } else {
-                        Text(post.avatar, fontSize = 20.sp)
-                    }
-                }
+                RealtimeAvatar(
+                    userId = post.authorId,
+                    fallbackAvatar = post.avatar,
+                    size = 44.dp
+                )
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Row(
                         verticalAlignment     = Alignment.CenterVertically,
@@ -1099,32 +1157,56 @@ private fun PostCard(
                     val mediaType = post.mediaTypes.getOrNull(index) ?: PostItem.MediaType.IMAGE
 
                     if (mediaType == PostItem.MediaType.VIDEO) {
+                        // Tap-to-play thumbnail: no ExoPlayer created on compose
+                        var videoPlaying by remember(mediaUri) { mutableStateOf(false) }
                         Box(
                             modifier = Modifier
                                 .width(300.dp)
                                 .height(220.dp)
                                 .fillParentMaxHeight()
+                                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                                    videoPlaying = true
+                                },
                         ) {
-                            val player = remember(mediaUri) {
-                                ExoPlayer.Builder(context).build().apply {
-                                    setMediaItem(MediaItem.fromUri(mediaUri))
-                                    prepare()
-                                    playWhenReady = false
+                            if (videoPlaying) {
+                                val player = remember(mediaUri) {
+                                    ExoPlayer.Builder(context).build().apply {
+                                        setMediaItem(MediaItem.fromUri(mediaUri))
+                                        prepare()
+                                        playWhenReady = true
+                                    }
+                                }
+                                DisposableEffect(player) { onDispose { player.release() } }
+                                AndroidView(
+                                    modifier = Modifier.fillMaxSize(),
+                                    factory = { ctx ->
+                                        PlayerView(ctx).apply {
+                                            useController = true
+                                            this.player = player
+                                        }
+                                    },
+                                    update = { it.player = player },
+                                )
+                            } else {
+                                // Thumbnail preview
+                                AsyncImage(
+                                    model = mediaUri,
+                                    contentDescription = "Video thumbnail",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop,
+                                )
+                                Box(
+                                    modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.28f)),
+                                )
+                                Box(
+                                    modifier = Modifier.align(Alignment.Center)
+                                        .size(52.dp).clip(CircleShape)
+                                        .background(Color.Black.copy(alpha = 0.6f)),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(Icons.Filled.PlayArrow, "Play", tint = Color.White, modifier = Modifier.size(30.dp))
                                 }
                             }
-                            DisposableEffect(player) {
-                                onDispose { player.release() }
-                            }
-                            AndroidView(
-                                modifier = Modifier.fillMaxSize(),
-                                factory = { ctx ->
-                                    PlayerView(ctx).apply {
-                                        useController = true
-                                        this.player = player
-                                    }
-                                },
-                                update = { it.player = player },
-                            )
                         }
                     } else {
                         Box(
@@ -1149,6 +1231,8 @@ private fun PostCard(
             @Suppress("DEPRECATION")
             val imageUri = post.imageUri!!
             Spacer(Modifier.height(6.dp))
+            // Tap-to-play thumbnail: no ExoPlayer until user taps
+            var legacyVideoPlaying by remember(imageUri) { mutableStateOf(false) }
             Box(
                 modifier = Modifier
                     .padding(horizontal = 14.dp)
@@ -1156,28 +1240,47 @@ private fun PostCard(
                     .height(220.dp)
                     .clip(RoundedCornerShape(18.dp))
                     .background(HNavBg)
-                    .border(1.dp, HBorder, RoundedCornerShape(18.dp)),
+                    .border(1.dp, HBorder, RoundedCornerShape(18.dp))
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                        legacyVideoPlaying = true
+                    },
             ) {
-                val player = remember(imageUri) {
-                    ExoPlayer.Builder(context).build().apply {
-                        setMediaItem(MediaItem.fromUri(imageUri))
-                        prepare()
-                        playWhenReady = false
+                if (legacyVideoPlaying) {
+                    val player = remember(imageUri) {
+                        ExoPlayer.Builder(context).build().apply {
+                            setMediaItem(MediaItem.fromUri(imageUri))
+                            prepare()
+                            playWhenReady = true
+                        }
+                    }
+                    DisposableEffect(player) { onDispose { player.release() } }
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize(),
+                        factory = { ctx ->
+                            PlayerView(ctx).apply {
+                                useController = true
+                                this.player = player
+                            }
+                        },
+                        update = { it.player = player },
+                    )
+                } else {
+                    AsyncImage(
+                        model = imageUri,
+                        contentDescription = "Video thumbnail",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                    )
+                    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.28f)))
+                    Box(
+                        modifier = Modifier.align(Alignment.Center)
+                            .size(52.dp).clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.6f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Filled.PlayArrow, "Play", tint = Color.White, modifier = Modifier.size(30.dp))
                     }
                 }
-                DisposableEffect(player) {
-                    onDispose { player.release() }
-                }
-                AndroidView(
-                    modifier = Modifier.fillMaxSize(),
-                    factory = { ctx ->
-                        PlayerView(ctx).apply {
-                            useController = true
-                            this.player = player
-                        }
-                    },
-                    update = { it.player = player },
-                )
             }
             Spacer(Modifier.height(10.dp))
         } else if (isLegacyImagePost(post)) {
@@ -1244,10 +1347,26 @@ private fun PostCard(
             )
             Spacer(Modifier.height(14.dp))
         } else {
-            Text(
-                post.content, color = HGray2, fontSize = 15.sp, lineHeight = 24.sp,
-                modifier = Modifier.padding(horizontal = 14.dp),
-            )
+            // For shared posts: strip the "Shared from X\n" prefix from content
+            // so the sharer's caption is shown cleanly above the embedded card.
+            val displayContent = if (post.sharedOriginalPostId != null) {
+                val sharedPrefix = "Shared from ${post.sharedOriginalAuthor}"
+                val stripped = post.content
+                    .substringBefore("\n\n$sharedPrefix")
+                    .substringBefore("\n$sharedPrefix")
+                    .trim()
+                stripped
+            } else {
+                post.content
+            }
+
+            if (displayContent.isNotBlank()) {
+                Text(
+                    displayContent, color = HGray2, fontSize = 15.sp, lineHeight = 24.sp,
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                )
+            }
+
             val metadataLines = postMetadataLines(post)
             if (metadataLines.isNotEmpty()) {
                 Spacer(Modifier.height(10.dp))
@@ -1260,7 +1379,33 @@ private fun PostCard(
                     }
                 }
             }
-            Spacer(Modifier.height(10.dp))
+
+            if (post.sharedOriginalPostId != null) {
+                Spacer(Modifier.height(10.dp))
+                SharedOriginalCard(
+                    author = post.sharedOriginalAuthor ?: "Unknown",
+                    authorId = post.sharedOriginalAuthorId.orEmpty(),
+                    avatar = post.sharedOriginalAvatar ?: post.avatar,
+                    profileImageUrl = post.sharedOriginalProfileImageUrl.orEmpty(),
+                    time = post.sharedOriginalTime ?: "now",
+                    content = post.sharedOriginalContent.orEmpty(),
+                    mediaUris = post.sharedOriginalMediaUris,
+                    mediaTypes = post.sharedOriginalMediaTypes,
+                    mediaEmojis = post.sharedOriginalMediaEmojis,
+                    likes = post.sharedOriginalLikes ?: 0,
+                    comments = post.sharedOriginalComments ?: 0,
+                    shares = post.sharedOriginalShares ?: 0,
+                    isVerified = post.sharedOriginalIsVerified ?: false,
+                    onLike = { onLike() },
+                    onComment = { onComment() },
+                    onShare = { onShare() },
+                    onClick = { onOpenSharedPost(post.sharedOriginalPostId) },
+                )
+                Spacer(Modifier.height(6.dp))
+            } else {
+                Spacer(Modifier.height(10.dp))
+            }
+
             HorizontalDivider(color = HBorder.copy(0.5f), thickness = 0.5.dp, modifier = Modifier.padding(horizontal = 14.dp))
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp)) {
                 TextAction(
@@ -1272,6 +1417,312 @@ private fun PostCard(
                 TextAction(Icons.AutoMirrored.Outlined.Send, "${post.shares}", HGray4, onClick = onShare)
             }
             Spacer(Modifier.height(4.dp))
+        }
+    }
+}
+
+@Composable
+private fun SharedOriginalCard(
+    author: String,
+    authorId: String,
+    avatar: String,
+    profileImageUrl: String,
+    time: String,
+    content: String,
+    mediaUris: List<android.net.Uri>,
+    mediaTypes: List<PostItem.MediaType>,
+    mediaEmojis: List<String>,
+    likes: Int,
+    comments: Int,
+    shares: Int,
+    isVerified: Boolean,
+    onLike: () -> Unit = {},
+    onComment: () -> Unit = {},
+    onShare: () -> Unit = {},
+    onClick: () -> Unit,
+) {
+    val context = LocalContext.current
+
+    // Optimistic local like state
+    var localLikes by remember(likes) { mutableIntStateOf(likes) }
+    var isLocalLiked by remember { mutableStateOf(false) }
+    val likeIconScale by animateFloatAsState(
+        targetValue = if (isLocalLiked) 1.4f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "fb_like_scale",
+    )
+    val likeIconColor by animateColorAsState(
+        targetValue = if (isLocalLiked) Color(0xFF2196F3) else HGray4,
+        animationSpec = tween(180),
+        label = "fb_like_color",
+    )
+
+    // Card press animation
+    var isPressed by remember { mutableStateOf(false) }
+    val cardScale by animateFloatAsState(
+        targetValue = if (isPressed) 0.988f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
+        label = "fb_card_scale",
+    )
+
+    // Match Facebook's dark embedded card color
+    val cardBg = if (UiIsDark) Color(0xFF1C1E22) else Color(0xFFF2F3F5)
+    val cardBorder = if (UiIsDark) Color(0xFF3A3B3C) else Color(0xFFCDD0D5)
+
+    Column(
+        modifier = Modifier
+            .padding(horizontal = 14.dp)
+            .graphicsLayer { scaleX = cardScale; scaleY = cardScale }
+            .clip(RoundedCornerShape(12.dp))
+            .background(cardBg)
+            .border(1.dp, cardBorder, RoundedCornerShape(12.dp))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            ),
+    ) {
+        // ── Header ────────────────────────────────────────────────────────────
+        Row(
+            modifier = Modifier.padding(start = 12.dp, top = 10.dp, end = 12.dp, bottom = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RealtimeAvatar(userId = authorId, fallbackAvatar = avatar, size = 36.dp)
+            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        author,
+                        color = HWhite,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (isVerified) {
+                        Icon(Icons.Default.Verified, "Verified", tint = HBlue, modifier = Modifier.size(13.dp))
+                    }
+                }
+                Text(time, color = HGray4, fontSize = 11.sp)
+            }
+        }
+
+        // ── Caption ───────────────────────────────────────────────────────────
+        if (content.isNotBlank()) {
+            Text(
+                content,
+                color = HGray2,
+                fontSize = 14.sp,
+                lineHeight = 21.sp,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+            )
+        }
+
+        // ── Media — edge-to-edge (no horizontal padding) ──────────────────────
+        when {
+            mediaUris.isNotEmpty() -> {
+                val firstUri = mediaUris.first()
+                val firstType = mediaTypes.getOrNull(0) ?: PostItem.MediaType.IMAGE
+                Spacer(Modifier.height(6.dp))
+                if (firstType == PostItem.MediaType.VIDEO) {
+                    // Show a lightweight video thumbnail with play button.
+                    // NO ExoPlayer created here — avoids blocking the main thread.
+                    // Tapping the card opens the full post where video plays.
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp)
+                            .background(Color(0xFF0D0D0D)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        // Try to show a thumbnail frame via AsyncImage (works for remote URLs)
+                        AsyncImage(
+                            model = firstUri,
+                            contentDescription = "Video thumbnail",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                        )
+                        // Dark overlay + play button
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.35f)),
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(52.dp)
+                                .clip(CircleShape)
+                                .background(Color.Black.copy(alpha = 0.65f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.Filled.PlayArrow,
+                                contentDescription = "Play video",
+                                tint = Color.White,
+                                modifier = Modifier.size(30.dp),
+                            )
+                        }
+                        if (mediaUris.size > 1) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .padding(10.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color.Black.copy(alpha = 0.65f))
+                                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                            ) {
+                                Text("+${mediaUris.size - 1} more", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                } else {
+                    if (mediaUris.size == 1) {
+                        // Single image: full bleed, edge-to-edge
+                        AsyncImage(
+                            model = firstUri,
+                            contentDescription = "Shared original media",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 180.dp, max = 300.dp),
+                            contentScale = ContentScale.Crop,
+                        )
+                    } else {
+                            Row(modifier = Modifier.fillMaxWidth().height(200.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                AsyncImage(
+                                    model = firstUri,
+                                    contentDescription = "Shared media 1",
+                                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                                    contentScale = ContentScale.Crop,
+                                )
+                                Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                                    AsyncImage(
+                                        model = mediaUris[1],
+                                        contentDescription = "Shared media 2",
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop,
+                                    )
+                                    // "+N more" overlay for 3+ images
+                                    if (mediaUris.size > 2) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(Color.Black.copy(alpha = 0.5f)),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            Text(
+                                                "+${mediaUris.size - 2}",
+                                                color = Color.White,
+                                                fontSize = 22.sp,
+                                                fontWeight = FontWeight.Bold,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                    }
+                }
+            }
+
+            mediaEmojis.isNotEmpty() -> {
+                Spacer(Modifier.height(8.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(100.dp)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(HGray6.copy(0.2f), Color(0xFF050810).copy(0.6f))
+                            )
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(mediaEmojis.joinToString(" "), fontSize = 48.sp)
+                }
+            }
+        }
+
+        // ── Bottom action bar — Facebook style ────────────────────────────────
+        HorizontalDivider(color = cardBorder.copy(alpha = 0.7f), thickness = 0.5.dp)
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // LEFT: 👍 count + comment bubble + forward arrow
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f),
+            ) {
+                // Thumbs-up + count
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                            isLocalLiked = !isLocalLiked
+                            localLikes = if (isLocalLiked) localLikes + 1 else (localLikes - 1).coerceAtLeast(0)
+                            onLike()
+                        }
+                        .padding(horizontal = 4.dp, vertical = 5.dp),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        if (isLocalLiked) Icons.Filled.ThumbUp else Icons.Outlined.ThumbUp,
+                        "Like",
+                        tint = likeIconColor,
+                        modifier = Modifier
+                            .size(20.dp)
+                            .graphicsLayer { scaleX = likeIconScale; scaleY = likeIconScale },
+                    )
+                    if (localLikes > 0) {
+                        Text("$localLikes", color = likeIconColor, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+
+                // Chat bubble — comment
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onComment),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Outlined.ChatBubbleOutline, "Comment", tint = HGray4, modifier = Modifier.size(20.dp))
+                }
+
+                // Forward / share arrow
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onShare),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.AutoMirrored.Outlined.Send, "Share", tint = HGray4, modifier = Modifier.size(19.dp))
+                }
+            }
+
+            // RIGHT: stacked reaction emoji bubbles (👍 ❤️ 😆)
+            Row(horizontalArrangement = Arrangement.spacedBy((-6).dp)) {
+                listOf("", "", "").forEach { emoji ->
+                    Box(
+                        modifier = Modifier
+                            .size(22.dp)
+                            .clip(CircleShape)
+                            .background(if (UiIsDark) Color(0xFF3A3B3C) else Color(0xFFE4E6EB))
+                            .border(1.5.dp, cardBg, CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(emoji, fontSize = 12.sp)
+                    }
+                }
+            }
         }
     }
 }

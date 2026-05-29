@@ -46,6 +46,8 @@ data class FeedUiState(
     val currentUserAvatarEmoji: String = "👤",
     /** Real-time friends + followers from Firestore */
     val friendsAndFollowers: List<FriendUserItem> = emptyList(),
+    /** Only the accounts this user is FOLLOWING (used for story row) */
+    val following: List<FriendUserItem> = emptyList(),
     val savedPostIds: Set<Int> = emptySet(),
     val hiddenPostIds: Set<Int> = emptySet(),
     val notInterestedPostIds: Set<Int> = emptySet(),
@@ -256,7 +258,10 @@ class FeedViewModel : ViewModel() {
         val combined = (latestFollowers + latestFollowing)
             .distinctBy { it.userId }
             .sortedBy { it.name }
-        _uiState.update { it.copy(friendsAndFollowers = combined) }
+        val followingOnly = latestFollowing.sortedBy { it.name }
+        _uiState.update { it.copy(friendsAndFollowers = combined, following = followingOnly) }
+        // Re-filter posts because allowed author set may have changed
+        filterAndPublishPosts()
     }
 
     private fun observeFriendsAndFollowers() {
@@ -388,6 +393,23 @@ class FeedViewModel : ViewModel() {
                 viewModelScope.launch {
                     postRepository.updatePostLikes(postId.toString(), updatedLikeCount, currentUserId, liked)
                 }
+
+                if (liked) {
+                    val authorId = post?.authorId ?: runCatching {
+                        com.google.firebase.firestore.FirebaseFirestore.getInstance().collection("posts").document(postId.toString()).get().await().getString("authorId")
+                    }.getOrNull()
+                    if (!authorId.isNullOrBlank() && authorId != currentUserId) {
+                        runCatching {
+                            com.example.kampus.utils.NotificationLogger.notifyUser(
+                                toUserId = authorId,
+                                type = "like",
+                                title = "New post like",
+                                body = "Someone liked your post",
+                                targetId = postId.toString(),
+                            )
+                        }
+                    }
+                }
             }
             result.onFailure { error ->
                 _likedIds.update { currentLiked ->
@@ -437,6 +459,22 @@ class FeedViewModel : ViewModel() {
         taggedPeople: List<String> = emptyList(),
         feelingEmoji: String? = null,
         location: String? = null,
+        sharedOriginalPostId: Int? = null,
+        sharedOriginalAuthor: String? = null,
+        sharedOriginalAuthorId: String? = null,
+        sharedOriginalAvatar: String? = null,
+        sharedOriginalProfileImageUrl: String? = null,
+        sharedOriginalTime: String? = null,
+        sharedOriginalTimestamp: Long? = null,
+        sharedOriginalContent: String? = null,
+        sharedOriginalMediaUris: List<Uri> = emptyList(),
+        sharedOriginalMediaTypes: List<PostItem.MediaType> = emptyList(),
+        sharedOriginalMediaEmojis: List<String> = emptyList(),
+        sharedOriginalLikes: Int? = null,
+        sharedOriginalComments: Int? = null,
+        sharedOriginalShares: Int? = null,
+        sharedOriginalVisibility: PostItem.PostVisibility? = null,
+        sharedOriginalIsVerified: Boolean? = null,
     ): Result<String> {
         // Validate content
         if (content.isBlank() && mediaUris.isEmpty()) {
@@ -483,6 +521,22 @@ class FeedViewModel : ViewModel() {
                 allowComments = allowComments,
                 taggedPeople = taggedPeople,
                 feelingEmoji = feelingEmoji,
+                sharedOriginalPostId = sharedOriginalPostId,
+                sharedOriginalAuthor = sharedOriginalAuthor,
+                sharedOriginalAuthorId = sharedOriginalAuthorId,
+                sharedOriginalAvatar = sharedOriginalAvatar,
+                sharedOriginalProfileImageUrl = sharedOriginalProfileImageUrl,
+                sharedOriginalTime = sharedOriginalTime,
+                sharedOriginalTimestamp = sharedOriginalTimestamp,
+                sharedOriginalContent = sharedOriginalContent,
+                sharedOriginalMediaUris = sharedOriginalMediaUris,
+                sharedOriginalMediaTypes = sharedOriginalMediaTypes,
+                sharedOriginalMediaEmojis = sharedOriginalMediaEmojis,
+                sharedOriginalLikes = sharedOriginalLikes,
+                sharedOriginalComments = sharedOriginalComments,
+                sharedOriginalShares = sharedOriginalShares,
+                sharedOriginalVisibility = sharedOriginalVisibility,
+                sharedOriginalIsVerified = sharedOriginalIsVerified,
             )
 
             val persistResult = persistPost(newPost)
@@ -524,6 +578,22 @@ class FeedViewModel : ViewModel() {
         taggedPeople: List<String> = emptyList(),
         feelingEmoji: String? = null,
         location: String? = null,
+        sharedOriginalPostId: Int? = null,
+        sharedOriginalAuthor: String? = null,
+        sharedOriginalAuthorId: String? = null,
+        sharedOriginalAvatar: String? = null,
+        sharedOriginalProfileImageUrl: String? = null,
+        sharedOriginalTime: String? = null,
+        sharedOriginalTimestamp: Long? = null,
+        sharedOriginalContent: String? = null,
+        sharedOriginalMediaUris: List<Uri> = emptyList(),
+        sharedOriginalMediaTypes: List<PostItem.MediaType> = emptyList(),
+        sharedOriginalMediaEmojis: List<String> = emptyList(),
+        sharedOriginalLikes: Int? = null,
+        sharedOriginalComments: Int? = null,
+        sharedOriginalShares: Int? = null,
+        sharedOriginalVisibility: PostItem.PostVisibility? = null,
+        sharedOriginalIsVerified: Boolean? = null,
     ): Result<String> {
         // Validate content
         if (content.isBlank() && mediaUri == null) {
@@ -556,6 +626,22 @@ class FeedViewModel : ViewModel() {
                 allowComments = allowComments,
                 taggedPeople = taggedPeople,
                 feelingEmoji = feelingEmoji,
+                sharedOriginalPostId = sharedOriginalPostId,
+                sharedOriginalAuthor = sharedOriginalAuthor,
+                sharedOriginalAuthorId = sharedOriginalAuthorId,
+                sharedOriginalAvatar = sharedOriginalAvatar,
+                sharedOriginalProfileImageUrl = sharedOriginalProfileImageUrl,
+                sharedOriginalTime = sharedOriginalTime,
+                sharedOriginalTimestamp = sharedOriginalTimestamp,
+                sharedOriginalContent = sharedOriginalContent,
+                sharedOriginalMediaUris = sharedOriginalMediaUris,
+                sharedOriginalMediaTypes = sharedOriginalMediaTypes,
+                sharedOriginalMediaEmojis = sharedOriginalMediaEmojis,
+                sharedOriginalLikes = sharedOriginalLikes,
+                sharedOriginalComments = sharedOriginalComments,
+                sharedOriginalShares = sharedOriginalShares,
+                sharedOriginalVisibility = sharedOriginalVisibility,
+                sharedOriginalIsVerified = sharedOriginalIsVerified,
             )
 
             val persistResult = persistPost(newPost)
@@ -598,6 +684,22 @@ class FeedViewModel : ViewModel() {
         taggedPeople: List<String> = emptyList(),
         feelingEmoji: String? = null,
         location: String? = null,
+        sharedOriginalPostId: Int? = null,
+        sharedOriginalAuthor: String? = null,
+        sharedOriginalAuthorId: String? = null,
+        sharedOriginalAvatar: String? = null,
+        sharedOriginalProfileImageUrl: String? = null,
+        sharedOriginalTime: String? = null,
+        sharedOriginalTimestamp: Long? = null,
+        sharedOriginalContent: String? = null,
+        sharedOriginalMediaUris: List<Uri> = emptyList(),
+        sharedOriginalMediaTypes: List<PostItem.MediaType> = emptyList(),
+        sharedOriginalMediaEmojis: List<String> = emptyList(),
+        sharedOriginalLikes: Int? = null,
+        sharedOriginalComments: Int? = null,
+        sharedOriginalShares: Int? = null,
+        sharedOriginalVisibility: PostItem.PostVisibility? = null,
+        sharedOriginalIsVerified: Boolean? = null,
     ): Result<String> {
         return createPostWithMultipleMedia(
             content = text,
@@ -609,6 +711,22 @@ class FeedViewModel : ViewModel() {
             taggedPeople = taggedPeople,
             feelingEmoji = feelingEmoji,
             location = location,
+            sharedOriginalPostId = sharedOriginalPostId,
+            sharedOriginalAuthor = sharedOriginalAuthor,
+            sharedOriginalAuthorId = sharedOriginalAuthorId,
+            sharedOriginalAvatar = sharedOriginalAvatar,
+            sharedOriginalProfileImageUrl = sharedOriginalProfileImageUrl,
+            sharedOriginalTime = sharedOriginalTime,
+            sharedOriginalTimestamp = sharedOriginalTimestamp,
+            sharedOriginalContent = sharedOriginalContent,
+            sharedOriginalMediaUris = sharedOriginalMediaUris,
+            sharedOriginalMediaTypes = sharedOriginalMediaTypes,
+            sharedOriginalMediaEmojis = sharedOriginalMediaEmojis,
+            sharedOriginalLikes = sharedOriginalLikes,
+            sharedOriginalComments = sharedOriginalComments,
+            sharedOriginalShares = sharedOriginalShares,
+            sharedOriginalVisibility = sharedOriginalVisibility,
+            sharedOriginalIsVerified = sharedOriginalIsVerified,
         )
     }
 
@@ -628,6 +746,22 @@ class FeedViewModel : ViewModel() {
         tags: List<String> = emptyList(),
         taggedPeople: List<String> = emptyList(),
         feelingEmoji: String? = null,
+        sharedOriginalPostId: Int? = null,
+        sharedOriginalAuthor: String? = null,
+        sharedOriginalAuthorId: String? = null,
+        sharedOriginalAvatar: String? = null,
+        sharedOriginalProfileImageUrl: String? = null,
+        sharedOriginalTime: String? = null,
+        sharedOriginalTimestamp: Long? = null,
+        sharedOriginalContent: String? = null,
+        sharedOriginalMediaUris: List<Uri> = emptyList(),
+        sharedOriginalMediaTypes: List<PostItem.MediaType> = emptyList(),
+        sharedOriginalMediaEmojis: List<String> = emptyList(),
+        sharedOriginalLikes: Int? = null,
+        sharedOriginalComments: Int? = null,
+        sharedOriginalShares: Int? = null,
+        sharedOriginalVisibility: PostItem.PostVisibility? = null,
+        sharedOriginalIsVerified: Boolean? = null,
     ): Result<String> {
         return createPost(
             content = text,
@@ -638,6 +772,22 @@ class FeedViewModel : ViewModel() {
             taggedPeople = taggedPeople,
             feelingEmoji = feelingEmoji,
             location = location,
+            sharedOriginalPostId = sharedOriginalPostId,
+            sharedOriginalAuthor = sharedOriginalAuthor,
+            sharedOriginalAuthorId = sharedOriginalAuthorId,
+            sharedOriginalAvatar = sharedOriginalAvatar,
+            sharedOriginalProfileImageUrl = sharedOriginalProfileImageUrl,
+            sharedOriginalTime = sharedOriginalTime,
+            sharedOriginalTimestamp = sharedOriginalTimestamp,
+            sharedOriginalContent = sharedOriginalContent,
+            sharedOriginalMediaUris = sharedOriginalMediaUris,
+            sharedOriginalMediaTypes = sharedOriginalMediaTypes,
+            sharedOriginalMediaEmojis = sharedOriginalMediaEmojis,
+            sharedOriginalLikes = sharedOriginalLikes,
+            sharedOriginalComments = sharedOriginalComments,
+            sharedOriginalShares = sharedOriginalShares,
+            sharedOriginalVisibility = sharedOriginalVisibility,
+            sharedOriginalIsVerified = sharedOriginalIsVerified,
         )
     }
 
@@ -806,10 +956,15 @@ class FeedViewModel : ViewModel() {
         _uiState.update { it.copy(posts = _posts.value) }
     }
 
+    /**
+     * Increment share count for a post and sync it to the backend
+     */
     fun incrementShareCount(postId: Int) {
+        val post = _posts.value.firstOrNull { it.id == postId }
+        val currentUserId = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
         _posts.update { postList ->
-            postList.map { post ->
-                if (post.id == postId) post.copy(shares = post.shares + 1) else post
+            postList.map { postItem ->
+                if (postItem.id == postId) postItem.copy(shares = postItem.shares + 1) else postItem
             }
         }
         _uiState.update { it.copy(posts = _posts.value) }
@@ -817,6 +972,22 @@ class FeedViewModel : ViewModel() {
         viewModelScope.launch {
             val updatedShareCount = _posts.value.firstOrNull { it.id == postId }?.shares ?: 0
             val result = postRepository.updatePostShares(postId.toString(), updatedShareCount)
+            result.onSuccess {
+                val authorId = post?.authorId ?: runCatching {
+                    com.google.firebase.firestore.FirebaseFirestore.getInstance().collection("posts").document(postId.toString()).get().await().getString("authorId")
+                }.getOrNull()
+                if (!authorId.isNullOrBlank() && authorId != currentUserId) {
+                    runCatching {
+                        com.example.kampus.utils.NotificationLogger.notifyUser(
+                            toUserId = authorId,
+                            type = "share",
+                            title = "New Share",
+                            body = "Someone shared your post",
+                            targetId = postId.toString(),
+                        )
+                    }
+                }
+            }
             result.onFailure { error ->
                 ActivityLogger.logAction(
                     type = "share_post_sync_failed",
@@ -1058,6 +1229,29 @@ class FeedViewModel : ViewModel() {
             payload["mediaTypes"] = uploadedMediaTypes
         }
 
+        post.sharedOriginalPostId?.let { payload["sharedOriginalPostId"] = it }
+        post.sharedOriginalAuthor?.let { payload["sharedOriginalAuthor"] = it }
+        post.sharedOriginalAuthorId?.let { payload["sharedOriginalAuthorId"] = it }
+        post.sharedOriginalAvatar?.let { payload["sharedOriginalAvatar"] = it }
+        post.sharedOriginalProfileImageUrl?.let { payload["sharedOriginalProfileImageUrl"] = it }
+        post.sharedOriginalTime?.let { payload["sharedOriginalTime"] = it }
+        post.sharedOriginalTimestamp?.let { payload["sharedOriginalTimestamp"] = it }
+        post.sharedOriginalContent?.let { payload["sharedOriginalContent"] = it }
+        if (post.sharedOriginalMediaUris.isNotEmpty()) {
+            payload["sharedOriginalMediaUrls"] = post.sharedOriginalMediaUris.map(Uri::toString)
+        }
+        if (post.sharedOriginalMediaTypes.isNotEmpty()) {
+            payload["sharedOriginalMediaTypes"] = post.sharedOriginalMediaTypes.map { it.name.lowercase() }
+        }
+        if (post.sharedOriginalMediaEmojis.isNotEmpty()) {
+            payload["sharedOriginalMediaEmojis"] = post.sharedOriginalMediaEmojis
+        }
+        post.sharedOriginalLikes?.let { payload["sharedOriginalLikes"] = it }
+        post.sharedOriginalComments?.let { payload["sharedOriginalComments"] = it }
+        post.sharedOriginalShares?.let { payload["sharedOriginalShares"] = it }
+        post.sharedOriginalVisibility?.let { payload["sharedOriginalVisibility"] = it.name.lowercase() }
+        post.sharedOriginalIsVerified?.let { payload["sharedOriginalIsVerified"] = it }
+
         val result = postRepository.createPost(payload)
         result.onSuccess {
             FirebaseFirestore.getInstance()
@@ -1247,6 +1441,8 @@ class FeedViewModel : ViewModel() {
     private fun filterAndPublishPosts() {
         val state = _uiState.value
         val allPosts = _posts.value
+        // Posts are PUBLIC — every logged-in user sees all posts.
+        // Only exclude explicitly hidden / muted / blocked content.
         val filtered = allPosts.filter { post ->
             post.id !in state.hiddenPostIds &&
             post.id !in state.notInterestedPostIds &&
@@ -1313,17 +1509,55 @@ class FeedViewModel : ViewModel() {
     fun reportPost(postId: Int) {
         val currentUserId = FirebaseAuth.getInstance().currentUser?.uid ?: return
         val db = FirebaseFirestore.getInstance()
-        val reportDoc = mapOf(
+        
+        // Find the target post in the current posts state to grab its contents at this exact moment
+        val targetPost = _posts.value.find { it.id == postId }
+        
+        val subCollectionReportDoc = mapOf(
             "reporterId" to currentUserId,
             "reportedAt" to System.currentTimeMillis(),
             "reason" to "reported_from_feed"
         )
+        
+        val globalReportDoc = mutableMapOf<String, Any>(
+            "reporterId" to currentUserId,
+            "reportedAt" to System.currentTimeMillis(),
+            "reason" to "reported_from_feed",
+            "postId" to postId,
+            "type" to "post"
+        )
+        
+        if (targetPost != null) {
+            globalReportDoc["postAuthor"] = targetPost.author
+            globalReportDoc["postAuthorId"] = targetPost.authorId
+            globalReportDoc["postContent"] = targetPost.content
+            globalReportDoc["postAvatar"] = targetPost.avatar
+            globalReportDoc["postProfileImageUrl"] = targetPost.profileImageUrl
+            globalReportDoc["postTimestamp"] = targetPost.timestamp
+            targetPost.getFirstMediaUri()?.toString()?.let { mediaUrl ->
+                globalReportDoc["postMediaUrl"] = mediaUrl
+            }
+        }
+        
         viewModelScope.launch {
             try {
+                // 1. Save report under the post's subcollection
                 db.collection("posts").document(postId.toString())
                     .collection("reports").document(currentUserId)
-                    .set(reportDoc).await()
-            } catch (_: Exception) {}
+                    .set(subCollectionReportDoc).await()
+                
+                // 2. Save report to the root "reports" collection (so it shows up at root level in console)
+                db.collection("reports").document()
+                    .set(globalReportDoc).await()
+                
+                android.util.Log.d("FeedViewModel", "Successfully reported post $postId to global reports collection")
+            } catch (e: Exception) {
+                android.util.Log.e("FeedViewModel", "Failed to report post $postId: ${e.message}", e)
+            }
         }
     }
 }
+
+
+
+
