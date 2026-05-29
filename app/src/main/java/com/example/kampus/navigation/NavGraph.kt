@@ -58,6 +58,8 @@ import com.example.kampus.ui.profile.PublicProfileScreen
 import com.example.kampus.ui.profile.PublicFriendsScreen
 import com.example.kampus.ui.profile.SettingsScreen
 import com.example.kampus.ui.post.PostDetailScreen
+import com.example.kampus.MainActivity
+import android.os.Bundle
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.launch
 
@@ -134,17 +136,39 @@ object Routes {
 fun NavGraph(navController: NavHostController) {
     val globalChatViewModel: ChatViewModel = viewModel()
     val context = navController.context
+    fun handleIntent(intent: android.content.Intent?) {
+        val extras = intent?.extras ?: return
+        val openChatId = extras.getString("openChatId")
+        val storyId = extras.getString("storyId")
+        val replyId = extras.getString("replyId")
+        val openPostId = extras.getInt("openPostId", -1)
+        val openNotifications = extras.getBoolean("openNotifications", false)
+
+        if (!openChatId.isNullOrBlank()) {
+            navController.navigate(Routes.chatScreen(openChatId))
+            if (!replyId.isNullOrBlank()) {
+                globalChatViewModel.openChatAndFocusMessage(openChatId, replyId)
+            }
+        } else if (openPostId != -1) {
+            navController.navigate(Routes.postDetail(openPostId))
+        } else if (openNotifications) {
+            navController.navigate(Routes.NOTIFICATIONS)
+        }
+    }
+
     LaunchedEffect(Unit) {
         try {
-            val activity = context as? android.app.Activity
-            val extras = activity?.intent?.extras
-            val openChatId = extras?.getString("openChatId")
-            val storyId = extras?.getString("storyId")
-            val replyId = extras?.getString("replyId")
-            if (!openChatId.isNullOrBlank()) {
-                navController.navigate(Routes.chatScreen(openChatId))
-                if (!replyId.isNullOrBlank()) {
-                    globalChatViewModel.openChatAndFocusMessage(openChatId, replyId)
+            val activity = context as? MainActivity
+            if (activity != null) {
+                // 1. Process initial launch intent
+                handleIntent(activity.intent)
+                
+                // Clear intent extras to prevent double-navigation on rotation
+                activity.intent?.replaceExtras(Bundle())
+
+                // 2. Process incoming new intents (when tapped while app is in background/foreground)
+                activity.intentFlow.collect { newIntent ->
+                    handleIntent(newIntent)
                 }
             }
         } catch (_: Exception) {
@@ -313,6 +337,7 @@ fun NavGraph(navController: NavHostController) {
                 onEventsClick  = { navController.navigate(Routes.EVENT_LIST) },
                 onChatClick    = { navController.navigate(Routes.CHAT_LIST) },
                 viewModel      = feedViewModel,
+                chatViewModel  = globalChatViewModel,
             )
         }
 
@@ -371,8 +396,11 @@ fun NavGraph(navController: NavHostController) {
         // ── Event List ─────────────────────────────────────────────────────────
         composable(Routes.EVENT_LIST) {
             val vm: EventViewModel = viewModel()
+            val homeEntry = runCatching { navController.getBackStackEntry(Routes.HOME) }.getOrNull()
+            val feedShareViewModel = homeEntry?.let { viewModel<FeedViewModel>(it) }
             EventListScreen(
                 viewModel      = vm,
+                feedViewModel  = feedShareViewModel,
                 onEventClick   = { navController.navigate(Routes.eventDetail(it.id)) },
                 onCommentOpen  = { navController.navigate(Routes.eventDetail(it.id, true)) },
                 onCreateClick  = { navController.navigate(Routes.EVENT_CREATE) },
@@ -406,6 +434,8 @@ fun NavGraph(navController: NavHostController) {
             } else {
                 viewModel(back)
             }
+            val homeEntry = runCatching { navController.getBackStackEntry(Routes.HOME) }.getOrNull()
+            val feedShareViewModel = homeEntry?.let { viewModel<FeedViewModel>(it) }
             val state = vm.uiState.collectAsStateWithLifecycle().value
             val event = state.events.firstOrNull { it.id == eventId }
             if (event == null) {
@@ -428,6 +458,7 @@ fun NavGraph(navController: NavHostController) {
                     onSave       = { vm.toggleSave(event) },
                     onBack       = { navController.popBackStack() },
                     viewModel    = vm,
+                    feedViewModel = feedShareViewModel,
                     openComposer = openComposer,
                 )
             }

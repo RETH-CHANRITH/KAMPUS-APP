@@ -7,6 +7,7 @@ import android.net.Uri
 import androidx.work.Data
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
+import com.example.kampus.di.SupabaseModule
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.FirebaseStorage
@@ -61,11 +62,33 @@ class StoryRepository(
             outFile
         }
 
+    private suspend fun createVideoThumbnailFile(context: Context, inputUri: Uri, size: Int = 320): File? =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val retriever = android.media.MediaMetadataRetriever()
+                retriever.setDataSource(context, inputUri)
+                val timeUs = 1_000_000L // frame at 1 second
+                val original = retriever.getFrameAtTime(timeUs, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                retriever.release()
+                if (original != null) {
+                    val thumb = Bitmap.createScaledBitmap(original, size, (size * (original.height.toFloat() / original.width)).toInt(), true)
+                    val outFile = File(context.cacheDir, "story_video_thumb_${System.currentTimeMillis()}.jpg")
+                    FileOutputStream(outFile).use { fos ->
+                        thumb.compress(Bitmap.CompressFormat.JPEG, 75, fos)
+                        fos.flush()
+                    }
+                    outFile
+                } else null
+            }.getOrNull()
+        }
+
     private suspend fun uploadFileWithProgress(ref: StorageReference, file: Uri, onProgress: (Double) -> Unit) =
         suspendCancellableCoroutine { cont ->
             val task = ref.putFile(file)
             val listener = task.addOnProgressListener { snap ->
-                val progress = (snap.bytesTransferred.toDouble() / snap.totalByteCount.toDouble())
+                val progress = if (snap.totalByteCount > 0) {
+                    (snap.bytesTransferred.toDouble() / snap.totalByteCount.toDouble())
+                } else 0.0
                 try {
                     onProgress(progress)
                 } catch (ignored: Throwable) {
@@ -80,13 +103,17 @@ class StoryRepository(
         }
 
     /**
-     * Upload image story with compression, thumbnail, resumable upload (via Storage SDK) and progress callback.
+     * Upload image/video story with compression, thumbnail, and real-time progress callbacks.
      * Returns the created storyId on success.
      */
-    suspend fun uploadImageStory(
+    suspend fun uploadStory(
         context: Context,
         fileUri: Uri,
         caption: String = "",
+        overlayText: String = "",
+        overlayX: Float = 0f,
+        overlayY: Float = 0f,
+        overlayColor: Long = 0xFFFFFFFF,
         privacy: String = "friends",
         onProgress: (Double) -> Unit = {},
     ): Result<String> = runCatching {
@@ -95,23 +122,51 @@ class StoryRepository(
         val now = System.currentTimeMillis()
         val expiresAt = now + 86_400_000L
 
-        val basePath = "stories/$uid/$storyId"
-        val mediaRef = storage.reference.child("$basePath/media.jpg")
-        val thumbRef = storage.reference.child("$basePath/thumb.jpg")
+        val isVideo = runCatching {
+            val type = context.contentResolver.getType(fileUri)
+            type?.startsWith("video") == true || fileUri.toString().endsWith(".mp4", ignoreCase = true)
+        }.getOrDefault(false)
 
-        // Compress and create temp files
-        val compressed = compressImageToFile(context, fileUri)
-        val thumb = createThumbnailFile(context, fileUri)
+        val supabaseStorage = SupabaseModule.getStorageManager()
+        var mediaUrl = ""
+        var thumbUrl = ""
 
-        // Upload media with progress
-        uploadFileWithProgress(mediaRef, Uri.fromFile(compressed)) { p -> onProgress(p * 0.85) }
-        val mediaUrl = mediaRef.downloadUrl.await().toString()
+        onProgress(0.15) // Compression / preparation started
 
-        // Upload thumb (small part of progress)
-        uploadFileWithProgress(thumbRef, Uri.fromFile(thumb)) { p -> onProgress(0.85 + p * 0.15) }
-        val thumbUrl = thumbRef.downloadUrl.await().toString()
+        if (isVideo) {
+            // Upload raw video to Supabase
+            onProgress(0.30)
+            val mediaResult = supabaseStorage.uploadStoryMedia(uid, fileUri, "video")
+            mediaUrl = mediaResult.getOrThrow()
+            onProgress(0.80)
 
-        // Denormalized owner metadata (best-effort)
+            // Video thumbnail
+            val videoThumb = createVideoThumbnailFile(context, fileUri)
+            if (videoThumb != null) {
+                val thumbResult = supabaseStorage.uploadStoryMedia(uid, Uri.fromFile(videoThumb), "image")
+                thumbUrl = thumbResult.getOrThrow()
+                try { videoThumb.delete() } catch (_: Throwable) {}
+            }
+            onProgress(1.00)
+        } else {
+            // Compress and upload image
+            val compressed = compressImageToFile(context, fileUri)
+            val thumb = createThumbnailFile(context, fileUri)
+            onProgress(0.30)
+
+            val mediaResult = supabaseStorage.uploadStoryMedia(uid, Uri.fromFile(compressed), "image")
+            mediaUrl = mediaResult.getOrThrow()
+            onProgress(0.80)
+
+            val thumbResult = supabaseStorage.uploadStoryMedia(uid, Uri.fromFile(thumb), "image")
+            thumbUrl = thumbResult.getOrThrow()
+
+            try { compressed.delete() } catch (_: Throwable) {}
+            try { thumb.delete() } catch (_: Throwable) {}
+            onProgress(1.00)
+        }
+
+        // Get owner profile metadata
         val userDoc = firestore.collection("users").document(uid).get().await()
         val ownerName = userDoc.getString("displayName") ?: auth.currentUser?.displayName ?: "User"
         val ownerAvatarEmoji = userDoc.getString("avatarEmoji") ?: "👤"
@@ -122,10 +177,11 @@ class StoryRepository(
             "ownerId" to uid,
             "userId" to uid,
             "note" to caption,
-            "mediaType" to "image",
+            "mediaType" to (if (isVideo) "video" else "image"),
+            "storyType" to (if (isVideo) "video" else "image"),
             "imageUrl" to mediaUrl,
             "thumbUrl" to thumbUrl,
-            "mediaStoragePath" to basePath,
+            "mediaStoragePath" to "stories/$uid/$storyId",
             "privacy" to privacy,
             "createdAt" to now,
             "expiresAt" to expiresAt,
@@ -133,13 +189,13 @@ class StoryRepository(
             "ownerAvatarEmoji" to ownerAvatarEmoji,
             "ownerProfileImageUrl" to ownerProfileImageUrl,
             "ownerAvatarColor" to ownerAvatarColor,
+            "overlayText" to overlayText,
+            "overlayX" to overlayX,
+            "overlayY" to overlayY,
+            "overlayColor" to overlayColor,
         )
 
         firestore.collection("stories").document(storyId).set(storyData).await()
-
-        // Clean temporary files
-        try { compressed.delete() } catch (_: Throwable) {}
-        try { thumb.delete() } catch (_: Throwable) {}
 
         storyId
     }
@@ -161,4 +217,3 @@ class StoryRepository(
         WorkManager.getInstance(context).enqueue(work)
     }
 }
-

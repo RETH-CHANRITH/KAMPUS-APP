@@ -85,6 +85,22 @@ data class ProfileActivityItem(
 	val mediaUrls: List<String> = emptyList(),
 	val mediaTypes: List<String> = emptyList(),
 	val groupId: String? = null,
+	val sharedOriginalPostId: Int? = null,
+	val sharedOriginalAuthor: String? = null,
+	val sharedOriginalAuthorId: String? = null,
+	val sharedOriginalAvatar: String? = null,
+	val sharedOriginalProfileImageUrl: String? = null,
+	val sharedOriginalTime: String? = null,
+	val sharedOriginalTimestamp: Long? = null,
+	val sharedOriginalContent: String? = null,
+	val sharedOriginalMediaUrls: List<String> = emptyList(),
+	val sharedOriginalMediaTypes: List<String> = emptyList(),
+	val sharedOriginalMediaEmojis: List<String> = emptyList(),
+	val sharedOriginalLikes: Int? = null,
+	val sharedOriginalComments: Int? = null,
+	val sharedOriginalShares: Int? = null,
+	val sharedOriginalVisibility: com.example.kampus.ui.feed.PostItem.PostVisibility? = null,
+	val sharedOriginalIsVerified: Boolean? = null,
 )
 
 data class ActivityComment(
@@ -591,6 +607,22 @@ class ProfileViewModel(
 				mediaUrls = post.mediaUris.map { it.toString() },
 				mediaTypes = post.mediaTypes.map { it.name },
 				groupId = null,
+				sharedOriginalPostId = post.sharedOriginalPostId,
+				sharedOriginalAuthor = post.sharedOriginalAuthor,
+				sharedOriginalAuthorId = post.sharedOriginalAuthorId,
+				sharedOriginalAvatar = post.sharedOriginalAvatar,
+				sharedOriginalProfileImageUrl = post.sharedOriginalProfileImageUrl,
+				sharedOriginalTime = post.sharedOriginalTime,
+				sharedOriginalTimestamp = post.sharedOriginalTimestamp,
+				sharedOriginalContent = post.sharedOriginalContent,
+				sharedOriginalMediaUrls = post.sharedOriginalMediaUris.map { it.toString() },
+				sharedOriginalMediaTypes = post.sharedOriginalMediaTypes.map { it.name },
+				sharedOriginalMediaEmojis = post.sharedOriginalMediaEmojis,
+				sharedOriginalLikes = post.sharedOriginalLikes,
+				sharedOriginalComments = post.sharedOriginalComments,
+				sharedOriginalShares = post.sharedOriginalShares,
+				sharedOriginalVisibility = post.sharedOriginalVisibility,
+				sharedOriginalIsVerified = post.sharedOriginalIsVerified,
 			)
 		}
 
@@ -1160,22 +1192,35 @@ class ProfileViewModel(
 		}
 	}
 
-	fun editPostActivity(activity: ProfileActivityItem) {
+	fun editPostActivity(activity: ProfileActivityItem, newContent: String) {
 		viewModelScope.launch {
 			try {
+				val rawId = activity.postId?.toString() ?: activity.sourceId ?: return@launch
+				val cleanPostId = rawId.replace("post_", "")
 				val updatedAt = System.currentTimeMillis()
-				updateLocalActivity(activity) { current ->
-					current.copy(updatedAt = updatedAt)
+
+				// Update userTimelinePosts list immediately so the UI is responsive
+				val cleanPostIdInt = cleanPostId.toIntOrNull()
+				if (cleanPostIdInt != null) {
+					userTimelinePosts = userTimelinePosts.map { post ->
+						if (post.id == cleanPostIdInt) post.copy(content = newContent) else post
+					}
 				}
+
+				updateLocalActivity(activity) { current ->
+					current.copy(text = newContent, updatedAt = updatedAt)
+				}
+				postRepository.updatePostContent(cleanPostId, newContent)
 				updateActivityBackends(
 					activity,
 					mapOf(
+						"text" to newContent,
 						"updatedAt" to updatedAt,
 					),
 				)
 				ActivityLogger.logAction(
 					type = "edit_post",
-					text = "Edited ${activity.postId ?: activity.sourceId ?: activity.text}",
+					text = "Edited post content for $cleanPostId",
 				)
 			} catch (error: Exception) {
 				_uiState.update { it.copy(error = error.message ?: "Failed to update activity") }
@@ -1208,6 +1253,19 @@ class ProfileViewModel(
 		viewModelScope.launch {
 			try {
 				removeLocalActivity(activity)
+				val rawId = activity.postId?.toString() ?: activity.sourceId
+				if (rawId != null) {
+					val cleanPostId = rawId.replace("post_", "")
+
+					// Remove from userTimelinePosts immediately for responsive UI
+					val cleanPostIdInt = cleanPostId.toIntOrNull()
+					if (cleanPostIdInt != null) {
+						userTimelinePosts = userTimelinePosts.filterNot { it.id == cleanPostIdInt }
+					}
+
+					// Delete from both Supabase and Firestore collections
+					postRepository.deletePost(cleanPostId)
+				}
 				deleteActivityBackends(activity)
 			} catch (error: Exception) {
 				_uiState.update { it.copy(error = error.message ?: "Failed to delete activity") }

@@ -4,7 +4,84 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import kotlinx.coroutines.tasks.await
+import android.content.Context
+import android.content.Intent
+import android.app.NotificationManager
+import android.app.NotificationChannel
+import android.app.PendingIntent
+import android.os.Build
+import androidx.core.app.NotificationCompat
+import com.example.kampus.MainActivity
+import com.example.kampus.R
+
 object NotificationLogger {
+    fun showSystemNotification(
+        context: Context,
+        title: String,
+        body: String,
+        type: String,
+        targetId: String
+    ) {
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+        val channelId = "kampus_notifications"
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (manager.getNotificationChannel(channelId) == null) {
+                val channel = NotificationChannel(
+                    channelId,
+                    "General Notifications",
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "Kampus general notifications and alerts"
+                }
+                manager.createNotificationChannel(channel)
+            }
+        }
+
+        // Build intent to open MainActivity
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            
+            when (type) {
+                "comment", "like", "love", "reaction" -> {
+                    val postId = targetId.toIntOrNull() ?: -1
+                    if (postId != -1) {
+                        putExtra("openPostId", postId)
+                    }
+                }
+                "direct_message", "chat_message", "story_reply" -> {
+                    if (targetId.isNotBlank()) {
+                        putExtra("openChatId", targetId)
+                    }
+                }
+                else -> {
+                    // For follows, friend requests, event updates, and reports
+                    putExtra("openNotifications", true)
+                }
+            }
+        }
+
+        val notificationId = (title + body + type + targetId).hashCode().let { kotlin.math.abs(it) }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            notificationId,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
+        )
+
+        val notification = NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+
+        manager.notify(notificationId, notification)
+    }
+
     private val firestore: FirebaseFirestore
         get() = FirebaseFirestore.getInstance()
 

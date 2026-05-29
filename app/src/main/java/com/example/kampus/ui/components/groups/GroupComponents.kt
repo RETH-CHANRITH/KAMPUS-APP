@@ -251,7 +251,7 @@ fun GroupPostItem(
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                UserAvatar(post.authorAvatarUrl, post.authorName, 40.dp)
+                UserAvatar(post.authorAvatarUrl, post.authorName, 40.dp, userId = post.authorId)
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(post.authorName, color = C.TextPrimary, style = T.HeadingSmall)
@@ -296,14 +296,40 @@ fun GroupPostItem(
 }
 
 @Composable
-fun UserAvatar(imageUrl: String?, name: String, size: Dp) {
+fun UserAvatar(imageUrl: String?, name: String, size: Dp, userId: String? = null) {
+    var liveImageUrl by remember(imageUrl, userId) { mutableStateOf(imageUrl) }
+
+    androidx.compose.runtime.DisposableEffect(userId) {
+        var listenerRegistration: com.google.firebase.firestore.ListenerRegistration? = null
+        if (!userId.isNullOrBlank()) {
+            val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+            listenerRegistration = db.collection("users").document(userId)
+                .addSnapshotListener { snapshot, error ->
+                    if (error == null && snapshot != null && snapshot.exists()) {
+                        val dbUrl = snapshot.getString("profileImageUrl")
+                        if (!dbUrl.isNullOrBlank()) {
+                            liveImageUrl = dbUrl
+                        }
+                    }
+                }
+        }
+        onDispose {
+            listenerRegistration?.remove()
+        }
+    }
+
     val initials = remember(name) { name.split(" ").filter { it.isNotBlank() }.take(2).joinToString("") { it.first().uppercase() }.ifBlank { "K" } }
     Box(
         modifier = Modifier.size(size).clip(CircleShape).background(C.SurfaceElevated).border(1.dp, C.Border, CircleShape),
         contentAlignment = Alignment.Center,
     ) {
-        if (!imageUrl.isNullOrBlank()) {
-            AsyncImage(model = imageUrl, contentDescription = null, modifier = Modifier.matchParentSize())
+        if (!liveImageUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = liveImageUrl,
+                contentDescription = null,
+                modifier = Modifier.matchParentSize(),
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+            )
         } else {
             Text(initials, color = C.TextPrimary, style = T.LabelMedium, fontWeight = FontWeight.SemiBold)
         }

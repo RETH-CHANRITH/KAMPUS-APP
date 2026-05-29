@@ -37,6 +37,22 @@ data class PostItem(
     val taggedPeople: List<String> = emptyList(),
     val feelingEmoji: String? = null,
     val isPinned: Boolean = false,
+    val sharedOriginalPostId: Int? = null,
+    val sharedOriginalAuthor: String? = null,
+    val sharedOriginalAuthorId: String? = null,
+    val sharedOriginalAvatar: String? = null,
+    val sharedOriginalProfileImageUrl: String? = null,
+    val sharedOriginalTime: String? = null,
+    val sharedOriginalTimestamp: Long? = null,
+    val sharedOriginalContent: String? = null,
+    val sharedOriginalMediaUris: List<Uri> = emptyList(),
+    val sharedOriginalMediaTypes: List<MediaType> = emptyList(),
+    val sharedOriginalMediaEmojis: List<String> = emptyList(),
+    val sharedOriginalLikes: Int? = null,
+    val sharedOriginalComments: Int? = null,
+    val sharedOriginalShares: Int? = null,
+    val sharedOriginalVisibility: PostVisibility? = null,
+    val sharedOriginalIsVerified: Boolean? = null,
 ) {
     enum class PostVisibility { PUBLIC, FRIENDS, FOLLOWERS, UNIVERSITY, PRIVATE }
     enum class MediaType { IMAGE, VIDEO }

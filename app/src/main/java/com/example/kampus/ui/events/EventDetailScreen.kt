@@ -96,7 +96,10 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import androidx.compose.ui.window.Dialog
 import com.example.kampus.data.repository.EventComment
+import com.example.kampus.ui.feed.FeedViewModel
+import com.example.kampus.ui.feed.ShareComposerDialog
 import com.example.kampus.ui.events.EventColors as C
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -113,6 +116,7 @@ fun EventDetailScreen(
     onSave: () -> Unit,
     onBack: () -> Unit,
     viewModel: EventViewModel,
+    feedViewModel: FeedViewModel? = null,
     openComposer: Boolean = false,
 ) {
     val strings = com.example.kampus.ui.localization.rememberUiStrings()
@@ -127,8 +131,10 @@ fun EventDetailScreen(
     var showComposer by remember { mutableStateOf(openComposer) }
     var commentImageUri by remember { mutableStateOf<Uri?>(null) }
     var selectedTab by remember { mutableStateOf(0) }
+    var pendingShareEvent by remember { mutableStateOf<EventItem?>(null) }
     val focusRequester = remember { FocusRequester() }
     val commentMediaPickers = rememberMediaPickers(onPhotoSelected = { commentImageUri = it })
+    val currentUserId = remember { FirebaseAuth.getInstance().currentUser?.uid.orEmpty() }
 
     var commentsState by remember { mutableStateOf<List<EventComment>>(emptyList()) }
     // Collect comments from repository and keep a local copy so we can perform
@@ -864,37 +870,57 @@ fun EventDetailScreen(
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
                             items(commentsState) { comment ->
-                                    CommentRow(
-                                        comment = comment,
-                                        isOrganizer = comment.authorId == event.organizer,
-                                        onReply = {
-                                            replyingToCommentId = comment.id
-                                            // open composer when user taps Reply
-                                            showComposer = true
-                                            scope.launch {
-                                                try { scrollState.animateScrollTo(scrollState.maxValue) } catch (_: Exception) {}
-                                                focusRequester.requestFocus()
-                                            }
-                                        },
-                                        onToggleLike = {
-                                            // Optimistic UI update: toggle locally first
-                                            val previous = commentsState
-                                            commentsState = commentsState.map { c ->
-                                                if (c.id == comment.id) c.copy(
+                                CommentRow(
+                                    comment = comment,
+                                    isOrganizer = comment.authorId == event.organizer,
+                                    onReply = {
+                                        replyingToCommentId = comment.id
+                                        showComposer = true
+                                        scope.launch {
+                                            try { scrollState.animateScrollTo(scrollState.maxValue) } catch (_: Exception) {}
+                                            focusRequester.requestFocus()
+                                        }
+                                    },
+                                    onToggleLike = {
+                                        val previous = commentsState
+                                        commentsState = commentsState.map { c ->
+                                            if (c.id == comment.id) {
+                                                c.copy(
                                                     likedByCurrentUser = !c.likedByCurrentUser,
                                                     likesCount = if (c.likedByCurrentUser) c.likesCount - 1 else c.likesCount + 1,
-                                                ) else c
+                                                )
+                                            } else {
+                                                c
                                             }
+                                        }
 
-                                            // Fire the network update; revert on failure
-                                            scope.launch {
-                                                val res = viewModel.toggleCommentLike(event, comment.id)
-                                                if (res.isFailure) {
-                                                    commentsState = previous
-                                                }
+                                        scope.launch {
+                                            val res = viewModel.toggleCommentLike(event, comment.id)
+                                            if (res.isFailure) {
+                                                commentsState = previous
                                             }
-                                        },
-                                    )
+                                        }
+                                    },
+                                    onDelete = {
+                                        val previous = commentsState
+                                        commentsState = commentsState.mapNotNull { item ->
+                                            when {
+                                                item.id == comment.id -> null
+                                                item.replies.any { reply -> reply.id == comment.id } -> item.copy(
+                                                    replies = item.replies.filterNot { reply -> reply.id == comment.id },
+                                                )
+                                                else -> item
+                                            }
+                                        }
+
+                                        scope.launch {
+                                            val res = viewModel.deleteComment(event, comment.id)
+                                            if (res.isFailure) {
+                                                commentsState = previous
+                                            }
+                                        }
+                                    },
+                                )
 
                                 comment.replies.forEach { reply ->
                                     Row(
@@ -915,22 +941,48 @@ fun EventDetailScreen(
                                                 }
                                             },
                                             onToggleLike = {
-                                                // Optimistic update for replies
                                                 val previous = commentsState
                                                 commentsState = commentsState.map { parent ->
-                                                    if (parent.id == comment.id) parent else parent.copy(
-                                                        replies = parent.replies.map {
-                                                            if (it.id == reply.id) it.copy(
-                                                                likedByCurrentUser = !it.likedByCurrentUser,
-                                                                likesCount = if (it.likedByCurrentUser) it.likesCount - 1 else it.likesCount + 1,
-                                                            ) else it
-                                                        }
-                                                    )
+                                                    if (parent.id == comment.id) {
+                                                        parent.copy(
+                                                            replies = parent.replies.map { currentReply ->
+                                                                if (currentReply.id == reply.id) {
+                                                                    currentReply.copy(
+                                                                        likedByCurrentUser = !currentReply.likedByCurrentUser,
+                                                                        likesCount = if (currentReply.likedByCurrentUser) currentReply.likesCount - 1 else currentReply.likesCount + 1,
+                                                                    )
+                                                                } else {
+                                                                    currentReply
+                                                                }
+                                                            },
+                                                        )
+                                                    } else {
+                                                        parent
+                                                    }
                                                 }
 
                                                 scope.launch {
                                                     val res = viewModel.toggleCommentLike(event, reply.id)
-                                                    if (res.isFailure) commentsState = previous
+                                                    if (res.isFailure) {
+                                                        commentsState = previous
+                                                    }
+                                                }
+                                            },
+                                            onDelete = {
+                                                val previous = commentsState
+                                                commentsState = commentsState.map { parent ->
+                                                    if (parent.id == comment.id) {
+                                                        parent.copy(replies = parent.replies.filterNot { it.id == reply.id })
+                                                    } else {
+                                                        parent
+                                                    }
+                                                }
+
+                                                scope.launch {
+                                                    val res = viewModel.deleteComment(event, reply.id)
+                                                    if (res.isFailure) {
+                                                        commentsState = previous
+                                                    }
                                                 }
                                             },
                                         )
@@ -939,7 +991,6 @@ fun EventDetailScreen(
                             }
                         }
                     }
-                }
                 }
 
                 Row(
@@ -992,13 +1043,7 @@ fun EventDetailScreen(
                             .background(C.Surface)
                             .border(1.dp, C.Border, RoundedCornerShape(12.dp))
                             .clickable {
-                                viewModel.shareEvent(event)
-                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "text/plain"
-                                    putExtra(Intent.EXTRA_SUBJECT, event.title)
-                                    putExtra(Intent.EXTRA_TEXT, "Check out this event on Kampus: ${event.title}\n${event.description}")
-                                }
-                                context.startActivity(Intent.createChooser(shareIntent, "Share event"))
+                                pendingShareEvent = event
                             },
                         contentAlignment = Alignment.Center,
                     ) {
@@ -1026,7 +1071,6 @@ fun EventDetailScreen(
 
         Box(
             modifier = Modifier
-                .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .background(Brush.verticalGradient(listOf(Color.Transparent, C.Bg.copy(0.98f))))
                 .navigationBarsPadding()
@@ -1055,8 +1099,45 @@ fun EventDetailScreen(
             }
         }
 
+        pendingShareEvent?.let { sharedEvent ->
+            ShareComposerDialog(
+                sourceTitle = sharedEvent.title,
+                sourceBody = sharedEvent.description,
+                sourceAvatarUrl = sharedEvent.coverImageUrl.ifBlank { sharedEvent.imageUrl.orEmpty() },
+                sourceAvatarText = sharedEvent.coverEmoji,
+                sourceLabel = "Shared event",
+                onDismiss = { pendingShareEvent = null },
+                onShareNow = { draft ->
+                    viewModel.shareEvent(sharedEvent)
+                    val composedText = buildString {
+                        if (draft.caption.isNotBlank()) {
+                            append(draft.caption)
+                        }
+                        if (isNotBlank()) append("\n\n")
+                        append("Shared event: ")
+                        append(sharedEvent.title)
+                        if (sharedEvent.description.isNotBlank()) {
+                            append("\n")
+                            append(sharedEvent.description)
+                        }
+                    }
+                    val result = feedViewModel?.addPost(
+                        text = composedText,
+                        mediaUris = draft.mediaUris,
+                        mediaTypes = draft.mediaTypes,
+                        visibility = draft.visibility,
+                        taggedPeople = draft.taggedPeople,
+                    ) ?: Result.failure(IllegalStateException("Feed sharing is unavailable right now"))
+                    result
+                },
+            )
+        }
+
     }
 }
+
+}
+
 
 @Composable
 private fun StatPill(emoji: String, label: String) {
@@ -1103,7 +1184,10 @@ private fun CommentRow(
     isReply: Boolean = false,
     onReply: () -> Unit,
     onToggleLike: () -> Unit,
+    onDelete: () -> Unit = {},
 ) {
+    val currentUserId = remember { FirebaseAuth.getInstance().currentUser?.uid.orEmpty() }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1245,6 +1329,20 @@ private fun CommentRow(
                             .background(C.BlueSoft.copy(alpha = 0.10f))
                             .border(1.dp, C.Blue.copy(alpha = 0.18f), RoundedCornerShape(999.dp))
                             .clickable(onClick = onReply)
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                    )
+                }
+                if (comment.authorId == currentUserId) {
+                    Text(
+                        text = "Delete",
+                        color = C.Red,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(C.Red.copy(alpha = 0.10f))
+                            .border(1.dp, C.Red.copy(alpha = 0.20f), RoundedCornerShape(999.dp))
+                            .clickable(onClick = onDelete)
                             .padding(horizontal = 10.dp, vertical = 6.dp),
                     )
                 }

@@ -74,6 +74,16 @@ data class GroupPost(
     val createdAt: Long,
 )
 
+data class GroupPostComment(
+    val id: String,
+    val postId: String,
+    val authorId: String,
+    val authorName: String,
+    val authorAvatarUrl: String = "",
+    val content: String,
+    val createdAt: Long,
+)
+
 data class PostReport(
     val id: String,
     val postId: String,

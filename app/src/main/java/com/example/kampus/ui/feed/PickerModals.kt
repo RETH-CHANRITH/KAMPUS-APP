@@ -122,12 +122,31 @@ internal val FbLight = ComposerPalette(
 // Mock data
 private val mockFriends = listOf("John", "Sarah", "Mike", "Emma", "Carlos", "Luna", "Jacob", "Mia")
 private val mockLocations = listOf(
-    "New York", "San Francisco", "Los Angeles", "Chicago", "Boston", "Seattle", "Austin", "Denver",
-    "Miami", "Atlanta", "Portland", "Las Vegas", "Phoenix", "Philadelphia", "San Diego", "Dallas",
-    "Houston", "Washington DC", "London", "Paris", "Tokyo", "Sydney", "Toronto", "Dubai",
-    "Singapore", "Bangkok", "Amsterdam", "Berlin", "Madrid", "Barcelona", "Rome", "Venice",
-    "Bangkok", "Mumbai", "Delhi", "Bangkok", "Istanbul", "Cairo", "Johannesburg", "Mexico City",
-    "São Paulo", "Buenos Aires", "Santiago", "Lima", "Bogotá", "Cartagena", "Cancún", "Montego Bay"
+    "Phnom Penh",
+    "Banteay Meanchey",
+    "Battambang",
+    "Kampong Cham",
+    "Kampong Chhnang",
+    "Kampong Speu",
+    "Kampong Thom",
+    "Kampot",
+    "Kandal",
+    "Kep",
+    "Koh Kong",
+    "Kratie",
+    "Mondulkiri",
+    "Oddar Meanchey",
+    "Pailin",
+    "Preah Sihanouk",
+    "Preah Vihear",
+    "Prey Veng",
+    "Pursat",
+    "Ratanakiri",
+    "Siem Reap",
+    "Stung Treng",
+    "Svay Rieng",
+    "Takeo",
+    "Tboung Khmum",
 )
 private val mockEvents = listOf("Birthday", "Anniversary", "Wedding", "Graduation", "New Job", "Vacation", "Festival", "Concert", "Sports Event", "Movie Night", "Dinner", "Party")
 private val feelingEmojis = listOf(
@@ -373,6 +392,7 @@ internal fun LocationPicker(
     var currentLocation by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(true) }
     var hasPermission by remember { mutableStateOf(false) }
+    val cambodiaKeyword = "cambodia"
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions(),
@@ -442,14 +462,17 @@ internal fun LocationPicker(
                                         append(address.countryName)
                                     }
                                 }
-                                currentLocation = if (locationName.isNotEmpty()) locationName else "$lat, $lng"
+                                val countryName = address.countryName.orEmpty()
+                                currentLocation = if (countryName.contains(cambodiaKeyword, ignoreCase = true)) {
+                                    if (locationName.isNotEmpty()) locationName else "$lat, $lng"
+                                } else {
+                                    null
+                                }
                             } else {
-                                currentLocation = "$lat, $lng"
+                                currentLocation = null
                             }
                         } catch (e: Exception) {
-                            val lat = location.latitude
-                            val lng = location.longitude
-                            currentLocation = "$lat, $lng"
+                            currentLocation = null
                         }
                     }
                 }

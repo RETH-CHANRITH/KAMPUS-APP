@@ -31,14 +31,31 @@ import com.example.kampus.utils.LanguageManager
 import com.example.kampus.utils.FirestoreSeedData
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableSharedFlow
+import com.google.firebase.auth.FirebaseAuth
 
 class MainActivity : ComponentActivity() {
+    val intentFlow = MutableSharedFlow<android.content.Intent>(extraBufferCapacity = 1)
+    private var notificationsListener: com.google.firebase.firestore.ListenerRegistration? = null
+
     private val requestNotificationPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { }
 
     override fun attachBaseContext(newBase: android.content.Context) {
         super.attachBaseContext(LanguageManager.wrapContext(newBase))
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intentFlow.tryEmit(intent)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        notificationsListener?.remove()
+        notificationsListener = null
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -53,6 +70,44 @@ class MainActivity : ComponentActivity() {
         // Seed Firestore with sample data on first launch
         seedFirestoreData()
         requestNotificationPermissionIfNeeded()
+
+        // Start listening to real-time user notifications to show system alerts
+        val auth = FirebaseAuth.getInstance()
+        val listenerStartTime = System.currentTimeMillis()
+        
+        auth.addAuthStateListener { firebaseAuth ->
+            val currentUser = firebaseAuth.currentUser
+            notificationsListener?.remove()
+            notificationsListener = null
+            
+            if (currentUser != null) {
+                val db = FirebaseFirestore.getInstance()
+                notificationsListener = db.collection("users").document(currentUser.uid)
+                    .collection("notifications")
+                    .whereGreaterThan("createdAt", listenerStartTime)
+                    .addSnapshotListener { snapshots, error ->
+                        if (error != null || snapshots == null) return@addSnapshotListener
+                        for (change in snapshots.documentChanges) {
+                            if (change.type == com.google.firebase.firestore.DocumentChange.Type.ADDED) {
+                                val doc = change.document
+                                val title = doc.getString("title") ?: "New Notification"
+                                val body = doc.getString("body") ?: ""
+                                val type = doc.getString("type") ?: ""
+                                val targetId = doc.getString("targetId") ?: ""
+                                
+                                // Show local notification on device status bar
+                                com.example.kampus.utils.NotificationLogger.showSystemNotification(
+                                    context = this,
+                                    title = title,
+                                    body = body,
+                                    type = type,
+                                    targetId = targetId
+                                )
+                            }
+                        }
+                    }
+            }
+        }
         
         setContent {
             val context = LocalContext.current

@@ -603,6 +603,26 @@ class EventViewModel : ViewModel() {
         return result
     }
 
+    suspend fun deleteComment(event: EventItem, commentId: String): Result<Unit> {
+        val userId = currentUserId ?: return Result.failure(IllegalStateException("User not authenticated"))
+        val result = engagementRepository.deleteComment(
+            eventId = event.remoteId,
+            commentId = commentId,
+            userId = userId,
+        )
+
+        result.onSuccess {
+            bumpEventCount(event.remoteId, commentsDelta = -1)
+            ActivityLogger.logAction(
+                type = "delete_event_comment",
+                text = "Deleted a comment on event: ${event.title.ifBlank { "Untitled event" }}",
+                metadata = mapOf("eventId" to event.remoteId, "commentId" to commentId),
+            )
+        }
+
+        return result
+    }
+
     // ── Computed ──────────────────────────────────────────────────────────────
     fun filteredEvents(filter: String, query: String): List<EventItem> {
         val base = _uiState.value.events

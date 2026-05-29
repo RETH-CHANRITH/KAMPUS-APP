@@ -18,7 +18,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Shield
@@ -89,7 +89,7 @@ fun AdminPanelScreen(
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, null, tint = C.TextPrimary) }
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = C.TextPrimary) }
                 Icon(Icons.Filled.Shield, null, tint = C.Primary)
                 Text("Admin Panel", color = C.TextPrimary, style = T.HeadingLarge)
             }
@@ -222,7 +222,7 @@ private fun RequestsTab(
 private fun RequestCard(request: JoinRequest, onApprove: () -> Unit, onReject: () -> Unit) {
     Surface(color = C.Surface, shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, C.Border)) {
         Row(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            UserAvatar(request.userAvatarUrl, request.userName, 44.dp)
+            UserAvatar(request.userAvatarUrl, request.userName, 44.dp, userId = request.userId)
             Column(modifier = Modifier.weight(1f)) {
                 Text(request.userName, color = C.TextPrimary, style = T.HeadingSmall)
                 Text("Requested ${timeAgo(request.requestedAt)}", color = C.TextMuted, style = T.BodySmall)
@@ -258,7 +258,7 @@ private fun ReportedPostCard(post: GroupPost, onRemoveUser: () -> Unit, onDelete
     Surface(color = C.Surface, shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, C.Border)) {
         Column(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                UserAvatar(post.authorAvatarUrl, post.authorName, 40.dp)
+                UserAvatar(post.authorAvatarUrl, post.authorName, 40.dp, userId = post.authorId)
                 Column(modifier = Modifier.weight(1f)) {
                     Text(post.authorName, color = C.TextPrimary, style = T.HeadingSmall)
                     Text("${post.reportCount} reports", color = C.Error, style = T.Caption)
@@ -286,7 +286,7 @@ private fun MembersTab(members: List<GroupMember>, onRemove: (GroupMember) -> Un
 private fun MemberRow(member: GroupMember, onRemove: () -> Unit) {
     Surface(color = C.Surface, shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, C.Border)) {
         Row(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            UserAvatar(member.userAvatarUrl, member.userName, 44.dp)
+            UserAvatar(member.userAvatarUrl, member.userName, 44.dp, userId = member.userId)
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(member.userName, color = C.TextPrimary, style = T.HeadingSmall)

@@ -314,6 +314,41 @@ class EventEngagementRepository(
         Result.failure(e)
     }
 
+    suspend fun deleteComment(eventId: String, commentId: String, userId: String): Result<Unit> = try {
+        val summaryRef = summaryRoot.document(eventId)
+        val commentRef = summaryRef.collection("comments").document(commentId)
+
+        firestore.runTransaction { transaction ->
+            val commentSnapshot = transaction.get(commentRef)
+            if (!commentSnapshot.exists()) {
+                throw IllegalStateException("Comment not found")
+            }
+
+            val authorId = commentSnapshot.getString("authorId").orEmpty()
+            if (authorId != userId) {
+                throw IllegalStateException("You can only delete your own comment")
+            }
+
+            val summarySnapshot = transaction.get(summaryRef)
+            val currentCount = (summarySnapshot.getLong("commentsCount") ?: 0L).toInt()
+            val updatedCount = (currentCount - 1).coerceAtLeast(0)
+
+            transaction.delete(commentRef)
+            transaction.set(
+                summaryRef,
+                mapOf(
+                    "commentsCount" to updatedCount,
+                    "updatedAt" to FieldValue.serverTimestamp(),
+                ),
+                SetOptions.merge(),
+            )
+        }.await()
+
+        Result.success(Unit)
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
     suspend fun toggleCommentLike(
         eventId: String,
         commentId: String,

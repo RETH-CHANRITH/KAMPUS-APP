@@ -263,11 +263,10 @@ private fun TextBubble(message: Message, onLongPress: (() -> Unit)? = null, onRe
                     AttachmentPreview(message = message)
                 }
 
-                // Only show text if this is not an image attachment.
                 val currentUserId = FirebaseAuth.getInstance().currentUser?.uid
                 val isHiddenForMe = currentUserId != null && message.hiddenTextFor.contains(currentUserId)
 
-                if (!isHiddenForMe && message.text.isNotBlank() && !isImageAttachment) {
+                if (!isHiddenForMe && message.text.isNotBlank() && !isImageAttachment && !message.isStoryReply) {
                     Text(
                         text       = message.text,
                         color      = if (message.isSentByMe) Color.White else if (UiIsDark) Color.White else Color(0xFF111827),
@@ -283,7 +282,6 @@ private fun TextBubble(message: Message, onLongPress: (() -> Unit)? = null, onRe
                 }
             }
         }
-
         // Show all persisted reactions as tappable chips (emoji + count). Highlight if current user reacted.
             Spacer(Modifier.height(6.dp))
             val currentUserId = FirebaseAuth.getInstance().currentUser?.uid

@@ -46,16 +46,139 @@ object FirestoreSeedData {
             if (currentUser != null) {
                 Log.i(TAG, "Authenticated user=${currentUser.uid} email=${currentUser.email}")
                 seedUserProfile(firestore, currentUser.uid)
-                seedSocialRelationshipsForCurrentUser(firestore, currentUser.uid)
+                // NOTE: Social relationship seeding is intentionally disabled.
+                // New accounts should start with zero followers/following (Instagram-style).
+                // seedSocialRelationshipsForCurrentUser(firestore, currentUser.uid)
             } else {
                 Log.w(TAG, "No authenticated user found; skipping profile seed")
             }
+
+            // Seed default groups globally so all users see them in Discover
+            seedDefaultGroups(firestore)
             
             Log.i(TAG, "Firestore initialization complete")
         } catch (e: Exception) {
             Log.e(TAG, "Error seeding data", e)
         }
     }
+
+    /** Seeds a set of default campus groups into Firestore if none exist yet. */
+    private suspend fun seedDefaultGroups(firestore: FirebaseFirestore) {
+        try {
+            val existing = firestore.collection("groups").limit(1).get().await()
+            if (!existing.isEmpty) {
+                Log.i(TAG, "Groups already exist; skipping group seed")
+                return
+            }
+
+            Log.i(TAG, "Seeding default campus groups")
+
+            val defaultGroups = listOf(
+                mapOf(
+                    "id" to 1001,
+                    "name" to "Computer Science Hub",
+                    "category" to "Technology",
+                    "coverColor1" to 0xFF1E3A5F.toLong(),
+                    "coverColor2" to 0xFF2D6A9F.toLong(),
+                    "coverEmoji" to "💻",
+                    "description" to "A place for CS students to share knowledge, projects, and opportunities.",
+                    "members" to "128",
+                    "posts" to "47",
+                    "privacy" to "public",
+                    "isJoined" to false,
+                    "ownerId" to "system",
+                    "createdAt" to System.currentTimeMillis(),
+                ),
+                mapOf(
+                    "id" to 1002,
+                    "name" to "Business & Finance Club",
+                    "category" to "Business",
+                    "coverColor1" to 0xFF1A4731.toLong(),
+                    "coverColor2" to 0xFF2E7D52.toLong(),
+                    "coverEmoji" to "📊",
+                    "description" to "Discuss entrepreneurship, investments, and career opportunities.",
+                    "members" to "94",
+                    "posts" to "31",
+                    "privacy" to "public",
+                    "isJoined" to false,
+                    "ownerId" to "system",
+                    "createdAt" to System.currentTimeMillis(),
+                ),
+                mapOf(
+                    "id" to 1003,
+                    "name" to "Photography & Art",
+                    "category" to "Creative",
+                    "coverColor1" to 0xFF4A1942.toLong(),
+                    "coverColor2" to 0xFF8B3A8A.toLong(),
+                    "coverEmoji" to "📷",
+                    "description" to "Share your photos, artwork, and creative projects with fellow artists.",
+                    "members" to "76",
+                    "posts" to "89",
+                    "privacy" to "public",
+                    "isJoined" to false,
+                    "ownerId" to "system",
+                    "createdAt" to System.currentTimeMillis(),
+                ),
+                mapOf(
+                    "id" to 1004,
+                    "name" to "Study Together",
+                    "category" to "Academic",
+                    "coverColor1" to 0xFF1A2E4A.toLong(),
+                    "coverColor2" to 0xFF3A5F8A.toLong(),
+                    "coverEmoji" to "📚",
+                    "description" to "Find study partners, share notes, and prepare for exams together.",
+                    "members" to "212",
+                    "posts" to "156",
+                    "privacy" to "public",
+                    "isJoined" to false,
+                    "ownerId" to "system",
+                    "createdAt" to System.currentTimeMillis(),
+                ),
+                mapOf(
+                    "id" to 1005,
+                    "name" to "Sports & Fitness",
+                    "category" to "Sports",
+                    "coverColor1" to 0xFF4A2000.toLong(),
+                    "coverColor2" to 0xFF8A4A00.toLong(),
+                    "coverEmoji" to "⚽",
+                    "description" to "Connect with athletes, organize matches, and share fitness tips.",
+                    "members" to "63",
+                    "posts" to "28",
+                    "privacy" to "public",
+                    "isJoined" to false,
+                    "ownerId" to "system",
+                    "createdAt" to System.currentTimeMillis(),
+                ),
+                mapOf(
+                    "id" to 1006,
+                    "name" to "Engineering Society",
+                    "category" to "Engineering",
+                    "coverColor1" to 0xFF2A1F00.toLong(),
+                    "coverColor2" to 0xFF5A4400.toLong(),
+                    "coverEmoji" to "⚙️",
+                    "description" to "Discuss engineering projects, internships, and technical challenges.",
+                    "members" to "87",
+                    "posts" to "42",
+                    "privacy" to "public",
+                    "isJoined" to false,
+                    "ownerId" to "system",
+                    "createdAt" to System.currentTimeMillis(),
+                ),
+            )
+
+            val batch = firestore.batch()
+            defaultGroups.forEach { group ->
+                val ref = firestore.collection("groups").document()
+                batch.set(ref, group)
+            }
+            batch.commit().await()
+
+            Log.i(TAG, "Default groups seeded (${defaultGroups.size} groups)")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error seeding default groups", e)
+        }
+    }
+
 
     private suspend fun seedSocialRelationshipsForCurrentUser(firestore: FirebaseFirestore, userId: String) {
         try {
