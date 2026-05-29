@@ -1,7 +1,10 @@
 package com.example.kampus.viewmodel
 
 import android.net.Uri
+<<<<<<< HEAD
 import android.net.Uri
+=======
+>>>>>>> 16d62ee (done admin features)
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -82,9 +85,12 @@ class GroupsViewModel : ViewModel() {
     private val _selectedImageUri = MutableStateFlow<Uri?>(null)
     val selectedImageUri: StateFlow<Uri?> = _selectedImageUri.asStateFlow()
 
+<<<<<<< HEAD
     private val _commentsState = MutableStateFlow<List<GroupPostComment>>(emptyList())
     val commentsState: StateFlow<List<GroupPostComment>> = _commentsState.asStateFlow()
 
+=======
+>>>>>>> 16d62ee (done admin features)
     // ── Active listeners (cancelled when navigating away) ─────────────────────
 
     private var groupsListJob: Job? = null
@@ -92,7 +98,10 @@ class GroupsViewModel : ViewModel() {
     private var postsJob: Job? = null
     private var membersJob: Job? = null
     private var joinRequestsJob: Job? = null
+<<<<<<< HEAD
     private var commentsJob: Job? = null
+=======
+>>>>>>> 16d62ee (done admin features)
     private var userProfileListener: com.google.firebase.firestore.ListenerRegistration? = null
 
     // ── Search ────────────────────────────────────────────────────────────────
@@ -143,6 +152,7 @@ class GroupsViewModel : ViewModel() {
                     it.copy(currentUserName = name, currentUserProfileImageUrl = photoUrl)
                 }
             }
+<<<<<<< HEAD
         loadCurrentUserProfile()
     }
 
@@ -183,6 +193,8 @@ class GroupsViewModel : ViewModel() {
                     it.copy(currentUserName = name, currentUserProfileImageUrl = photoUrl)
                 }
             }
+=======
+>>>>>>> 16d62ee (done admin features)
     }
 
     // ── Groups list ───────────────────────────────────────────────────────────
@@ -396,6 +408,7 @@ class GroupsViewModel : ViewModel() {
         val imageUri = _selectedImageUri.value
         if (content.isBlank() && imageUri == null) return
 
+<<<<<<< HEAD
     fun onImageSelected(uri: Uri?) {
         _selectedImageUri.value = uri
     }
@@ -404,6 +417,8 @@ class GroupsViewModel : ViewModel() {
         val imageUri = _selectedImageUri.value
         if (content.isBlank() && imageUri == null) return
 
+=======
+>>>>>>> 16d62ee (done admin features)
         viewModelScope.launch {
             _groupDetailUiState.update { it.copy(isLoading = true, uploadError = null) }
 
@@ -570,7 +585,10 @@ class GroupsViewModel : ViewModel() {
         postsJob?.cancel()
         membersJob?.cancel()
         joinRequestsJob?.cancel()
+<<<<<<< HEAD
         commentsJob?.cancel()
+=======
+>>>>>>> 16d62ee (done admin features)
         userProfileListener?.remove()
     }
 }

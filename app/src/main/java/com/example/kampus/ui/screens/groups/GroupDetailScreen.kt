@@ -5,11 +5,14 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+<<<<<<< HEAD
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+=======
+>>>>>>> 16d62ee (done admin features)
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -29,30 +32,45 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+<<<<<<< HEAD
 import androidx.compose.foundation.layout.width
+=======
+>>>>>>> 16d62ee (done admin features)
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+<<<<<<< HEAD
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+=======
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Send
+>>>>>>> 16d62ee (done admin features)
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+<<<<<<< HEAD
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+=======
+>>>>>>> 16d62ee (done admin features)
 import androidx.compose.material.icons.filled.HourglassTop
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.AdminPanelSettings
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
+<<<<<<< HEAD
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
+=======
+>>>>>>> 16d62ee (done admin features)
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
@@ -60,6 +78,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+<<<<<<< HEAD
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -75,6 +94,13 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import com.example.kampus.data.model.GroupPostComment
+=======
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+>>>>>>> 16d62ee (done admin features)
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -89,6 +115,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
+<<<<<<< HEAD
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
@@ -101,6 +128,14 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.compose.AsyncImage
+=======
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil.compose.AsyncImage
+>>>>>>> 16d62ee (done admin features)
 import com.example.kampus.data.model.GroupPost
 import com.example.kampus.data.model.MembershipStatus
 import com.example.kampus.ui.components.CampusBottomNavBar
@@ -113,7 +148,10 @@ import com.example.kampus.ui.components.groups.timeAgo
 import com.example.kampus.ui.theme.KampusColors as C
 import com.example.kampus.ui.theme.KampusType as T
 import com.example.kampus.utils.rememberImagePickerLauncher
+<<<<<<< HEAD
 import com.example.kampus.utils.rememberImagePickerLauncher
+=======
+>>>>>>> 16d62ee (done admin features)
 import com.example.kampus.viewmodel.GroupsViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -132,6 +170,7 @@ fun GroupDetailScreen(
 ) {
     val state by viewModel.groupDetailUiState.collectAsStateWithLifecycle()
     val selectedImageUri by viewModel.selectedImageUri.collectAsStateWithLifecycle()
+<<<<<<< HEAD
     val selectedImageUri by viewModel.selectedImageUri.collectAsStateWithLifecycle()
     var postText by remember { mutableStateOf("") }
     var showLeaveDialog by remember { mutableStateOf(false) }
@@ -139,6 +178,11 @@ fun GroupDetailScreen(
     var activeCommentPost by remember { mutableStateOf<GroupPost?>(null) }
     val comments by viewModel.commentsState.collectAsStateWithLifecycle()
     val commentsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+=======
+    var postText by remember { mutableStateOf("") }
+    var showLeaveDialog by remember { mutableStateOf(false) }
+    var reportTarget by remember { mutableStateOf<GroupPost?>(null) }
+>>>>>>> 16d62ee (done admin features)
     val snackbarHostState = remember { androidx.compose.material3.SnackbarHostState() }
 
     val imagePicker = rememberImagePickerLauncher { uri ->
@@ -158,6 +202,7 @@ fun GroupDetailScreen(
         state.uploadError?.let { snackbarHostState.showSnackbar(it) }
     }
 
+<<<<<<< HEAD
     LaunchedEffect(activeCommentPost) {
         val post = activeCommentPost
         if (post != null) {
@@ -171,6 +216,11 @@ fun GroupDetailScreen(
 
     androidx.compose.material3.Scaffold(
     androidx.compose.material3.Scaffold(
+=======
+    val group = state.group
+
+    androidx.compose.material3.Scaffold(
+>>>>>>> 16d62ee (done admin features)
         containerColor = C.Background,
         snackbarHost = {
             androidx.compose.material3.SnackbarHost(snackbarHostState) { data ->
@@ -181,6 +231,7 @@ fun GroupDetailScreen(
                 )
             }
         },
+<<<<<<< HEAD
         snackbarHost = {
             androidx.compose.material3.SnackbarHost(snackbarHostState) { data ->
                 androidx.compose.material3.Snackbar(
@@ -190,6 +241,8 @@ fun GroupDetailScreen(
                 )
             }
         },
+=======
+>>>>>>> 16d62ee (done admin features)
         bottomBar = {
             Box(
                 modifier = Modifier
@@ -238,10 +291,13 @@ fun GroupDetailScreen(
                     CircularProgressIndicator(color = C.Primary, modifier = Modifier.size(32.dp))
                     Text("Loading group...", color = C.TextSecondary, style = T.BodyMedium)
                 }
+<<<<<<< HEAD
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     CircularProgressIndicator(color = C.Primary, modifier = Modifier.size(32.dp))
                     Text("Loading group...", color = C.TextSecondary, style = T.BodyMedium)
                 }
+=======
+>>>>>>> 16d62ee (done admin features)
             }
             return@Scaffold
         }
@@ -250,21 +306,32 @@ fun GroupDetailScreen(
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp),
+<<<<<<< HEAD
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             // ── Cover image ──────────────────────────────────────────────────
             // ── Cover image ──────────────────────────────────────────────────
+=======
+        ) {
+            // ── Cover image ──────────────────────────────────────────────────
+>>>>>>> 16d62ee (done admin features)
             item {
                 Box(modifier = Modifier.fillMaxWidth().height(220.dp)) {
                     if (group.coverImageUrl.isNotBlank()) {
                         AsyncImage(
                             model = group.coverImageUrl,
+<<<<<<< HEAD
                         AsyncImage(
                             model = group.coverImageUrl,
                             contentDescription = null,
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop,
                             contentScale = ContentScale.Crop,
+=======
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+>>>>>>> 16d62ee (done admin features)
                         )
                     } else {
                         Box(
@@ -274,6 +341,7 @@ fun GroupDetailScreen(
                                 )
                             )
                         )
+<<<<<<< HEAD
                         Box(
                             modifier = Modifier.fillMaxSize().background(
                                 Brush.linearGradient(
@@ -285,19 +353,30 @@ fun GroupDetailScreen(
 
                     // Gradient overlay for readability
                     // Gradient overlay for readability
+=======
+                    }
+
+                    // Gradient overlay for readability
+>>>>>>> 16d62ee (done admin features)
                     Box(
                         modifier = Modifier.fillMaxSize().background(
                             Brush.verticalGradient(
                                 listOf(Color.Transparent, Color.Transparent, C.Background.copy(alpha = 0.88f))
                             )
+<<<<<<< HEAD
                             Brush.verticalGradient(
                                 listOf(Color.Transparent, Color.Transparent, C.Background.copy(alpha = 0.88f))
                             )
+=======
+>>>>>>> 16d62ee (done admin features)
                         )
                     )
 
                     // Back button
+<<<<<<< HEAD
                     // Back button
+=======
+>>>>>>> 16d62ee (done admin features)
                     IconButton(
                         onClick = onBack,
                         modifier = Modifier
@@ -306,6 +385,7 @@ fun GroupDetailScreen(
                             .align(Alignment.TopStart)
                             .clip(CircleShape)
                             .background(Color.Black.copy(alpha = 0.28f)),
+<<<<<<< HEAD
                         modifier = Modifier
                             .statusBarsPadding()
                             .padding(start = 14.dp, top = 10.dp)
@@ -319,6 +399,13 @@ fun GroupDetailScreen(
 
                     // Admin panel button
                     // Admin panel button
+=======
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.White)
+                    }
+
+                    // Admin panel button
+>>>>>>> 16d62ee (done admin features)
                     if (state.currentUserRole == com.example.kampus.data.model.MemberRole.ADMIN) {
                         IconButton(
                             onClick = { onOpenAdminPanel(group.id) },
@@ -328,12 +415,15 @@ fun GroupDetailScreen(
                                 .align(Alignment.TopEnd)
                                 .clip(CircleShape)
                                 .background(C.Primary),
+<<<<<<< HEAD
                             modifier = Modifier
                                 .statusBarsPadding()
                                 .padding(end = 14.dp, top = 10.dp)
                                 .align(Alignment.TopEnd)
                                 .clip(CircleShape)
                                 .background(C.Primary),
+=======
+>>>>>>> 16d62ee (done admin features)
                         ) {
                             Icon(Icons.Outlined.AdminPanelSettings, null, tint = Color.White)
                         }
@@ -345,19 +435,25 @@ fun GroupDetailScreen(
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         Text(group.name, color = Color.White, style = T.HeadingLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+<<<<<<< HEAD
                     // Group name + privacy badge at bottom of cover
                     Column(
                         modifier = Modifier.align(Alignment.BottomStart).padding(horizontal = 18.dp, vertical = 14.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         Text(group.name, color = Color.White, style = T.HeadingLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+=======
+>>>>>>> 16d62ee (done admin features)
                         PrivacyBadge(group.privacy)
                     }
                 }
             }
 
             // ── Group meta info ──────────────────────────────────────────────
+<<<<<<< HEAD
             // ── Group meta info ──────────────────────────────────────────────
+=======
+>>>>>>> 16d62ee (done admin features)
             item {
                 Column(
                     modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
@@ -365,12 +461,15 @@ fun GroupDetailScreen(
                 ) {
                     // Stats chips
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+<<<<<<< HEAD
                 Column(
                     modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     // Stats chips
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+=======
+>>>>>>> 16d62ee (done admin features)
                         StatChip(text = formatCount(group.memberCount) + " members")
                         StatChip(text = formatCount(group.postCount) + " posts")
                         StatChip(text = group.category)
@@ -380,6 +479,7 @@ fun GroupDetailScreen(
                     if (group.description.isNotBlank()) {
                         Text(group.description, color = C.TextSecondary, style = T.BodyMedium)
                     }
+<<<<<<< HEAD
                     // Description
                     if (group.description.isNotBlank()) {
                         Text(group.description, color = C.TextSecondary, style = T.BodyMedium)
@@ -387,6 +487,10 @@ fun GroupDetailScreen(
 
                     // Join / Leave / Pending button
                     // Join / Leave / Pending button
+=======
+
+                    // Join / Leave / Pending button
+>>>>>>> 16d62ee (done admin features)
                     GroupActionButton(
                         membershipStatus = state.membershipStatus,
                         currentUserRole = state.currentUserRole,
@@ -401,11 +505,15 @@ fun GroupDetailScreen(
                     )
 
                     // Leave group (non-admin members only)
+<<<<<<< HEAD
                     // Leave group (non-admin members only)
+=======
+>>>>>>> 16d62ee (done admin features)
                     if (state.membershipStatus == MembershipStatus.MEMBER && state.currentUserRole != com.example.kampus.data.model.MemberRole.ADMIN) {
                         TextButton(onClick = { showLeaveDialog = true }) {
                             Text("Leave Group", color = C.Error, style = T.LabelMedium)
                         }
+<<<<<<< HEAD
                         TextButton(onClick = { showLeaveDialog = true }) {
                             Text("Leave Group", color = C.Error, style = T.LabelMedium)
                         }
@@ -413,6 +521,11 @@ fun GroupDetailScreen(
 
                     // Pending approval banner
                     // Pending approval banner
+=======
+                    }
+
+                    // Pending approval banner
+>>>>>>> 16d62ee (done admin features)
                     if (state.membershipStatus == MembershipStatus.PENDING) {
                         PendingApprovalBanner()
                     }
@@ -420,7 +533,10 @@ fun GroupDetailScreen(
             }
 
             // ── Post composer (members only) ─────────────────────────────────
+<<<<<<< HEAD
             // ── Post composer (members only) ─────────────────────────────────
+=======
+>>>>>>> 16d62ee (done admin features)
             if (state.membershipStatus == MembershipStatus.MEMBER) {
                 item {
                     PostComposer(
@@ -445,6 +561,7 @@ fun GroupDetailScreen(
             }
 
             // ── Recent posts header ──────────────────────────────────────────
+<<<<<<< HEAD
                     PostComposer(
                         postText = postText,
                         onTextChange = { postText = it },
@@ -467,15 +584,21 @@ fun GroupDetailScreen(
             }
 
             // ── Recent posts header ──────────────────────────────────────────
+=======
+>>>>>>> 16d62ee (done admin features)
             item {
                 val reportedCount = state.posts.count { it.isReported || it.reportCount > 0 }
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp),
+<<<<<<< HEAD
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp),
+=======
+>>>>>>> 16d62ee (done admin features)
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text("Recent Posts", color = C.TextPrimary, style = T.HeadingSmall, fontWeight = FontWeight.Bold)
+<<<<<<< HEAD
                     Text("Recent Posts", color = C.TextPrimary, style = T.HeadingSmall, fontWeight = FontWeight.Bold)
                     if (state.currentUserRole == com.example.kampus.data.model.MemberRole.ADMIN && reportedCount > 0) {
                         Badge(containerColor = C.Error.copy(alpha = 0.16f), contentColor = C.Error) {
@@ -483,13 +606,21 @@ fun GroupDetailScreen(
                         }
                         Badge(containerColor = C.Error.copy(alpha = 0.16f), contentColor = C.Error) {
                             Text("$reportedCount reported")
+=======
+                    if (state.currentUserRole == com.example.kampus.data.model.MemberRole.ADMIN && reportedCount > 0) {
+                        Badge(containerColor = C.Error.copy(alpha = 0.16f), contentColor = C.Error) {
+                            Text("$reportedCount reported")
+>>>>>>> 16d62ee (done admin features)
                         }
                     }
                 }
             }
 
             // ── Empty state ──────────────────────────────────────────────────
+<<<<<<< HEAD
             // ── Empty state ──────────────────────────────────────────────────
+=======
+>>>>>>> 16d62ee (done admin features)
             if (state.posts.isEmpty()) {
                 item {
                     Column(
@@ -497,6 +628,7 @@ fun GroupDetailScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
+<<<<<<< HEAD
                     Column(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 36.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -505,12 +637,19 @@ fun GroupDetailScreen(
                         Text("No posts yet", color = C.TextSecondary, style = T.HeadingSmall)
                         Text("Be the first to share something!", color = C.TextMuted, style = T.BodyMedium)
                         Text("Be the first to share something!", color = C.TextMuted, style = T.BodyMedium)
+=======
+                        Text("No posts yet", color = C.TextSecondary, style = T.HeadingSmall)
+                        Text("Be the first to share something!", color = C.TextMuted, style = T.BodyMedium)
+>>>>>>> 16d62ee (done admin features)
                     }
                 }
             } else {
                 items(state.posts, key = { it.id }) { post ->
                     GroupPostCard(
+<<<<<<< HEAD
                     GroupPostCard(
+=======
+>>>>>>> 16d62ee (done admin features)
                         post = post,
                         isAdmin = state.currentUserRole == com.example.kampus.data.model.MemberRole.ADMIN,
                         onLikeClick = { viewModel.toggleLikePost(group.id, post.id) },
@@ -519,16 +658,24 @@ fun GroupDetailScreen(
                         onDeleteClick = { viewModel.deletePost(group.id, post.id) },
                         onRemoveAuthorClick = { viewModel.removeMemberFromGroup(group.id, post.authorId) },
                         modifier = Modifier.padding(horizontal = 14.dp),
+<<<<<<< HEAD
                         modifier = Modifier.padding(horizontal = 14.dp),
                     )
                     Spacer(Modifier.height(10.dp))
                     Spacer(Modifier.height(10.dp))
+=======
+                    )
+                    Spacer(Modifier.height(10.dp))
+>>>>>>> 16d62ee (done admin features)
                 }
             }
         }
 
         // ── Leave dialog ─────────────────────────────────────────────────────
+<<<<<<< HEAD
         // ── Leave dialog ─────────────────────────────────────────────────────
+=======
+>>>>>>> 16d62ee (done admin features)
         if (showLeaveDialog) {
             AlertDialog(
                 onDismissRequest = { showLeaveDialog = false },
@@ -540,6 +687,7 @@ fun GroupDetailScreen(
                         onClick = { viewModel.leaveGroup(group.id); showLeaveDialog = false },
                         colors = ButtonDefaults.buttonColors(containerColor = C.Error, contentColor = Color.White),
                     ) { Text("Leave") }
+<<<<<<< HEAD
                     Button(
                         onClick = { viewModel.leaveGroup(group.id); showLeaveDialog = false },
                         colors = ButtonDefaults.buttonColors(containerColor = C.Error, contentColor = Color.White),
@@ -549,6 +697,8 @@ fun GroupDetailScreen(
                     TextButton(onClick = { showLeaveDialog = false }) {
                         Text("Cancel", color = C.TextSecondary)
                     }
+=======
+>>>>>>> 16d62ee (done admin features)
                 },
                 dismissButton = {
                     TextButton(onClick = { showLeaveDialog = false }) {
@@ -559,7 +709,10 @@ fun GroupDetailScreen(
         }
 
         // ── Report dialog ────────────────────────────────────────────────────
+<<<<<<< HEAD
         // ── Report dialog ────────────────────────────────────────────────────
+=======
+>>>>>>> 16d62ee (done admin features)
         reportTarget?.let { post ->
             ReportPostDialog(
                 onDismiss = { reportTarget = null },
@@ -951,6 +1104,7 @@ private fun GroupPostCard(
 //  Pending banner & stat chip helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+<<<<<<< HEAD
         // ── Comments Bottom Sheet ─────────────────────────────────────────────
         activeCommentPost?.let { post ->
             ModalBottomSheet(
@@ -1484,6 +1638,8 @@ private fun GroupPostCard(
 //  Pending banner & stat chip helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+=======
+>>>>>>> 16d62ee (done admin features)
 @Composable
 private fun PendingApprovalBanner() {
     Surface(
@@ -1498,12 +1654,15 @@ private fun PendingApprovalBanner() {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Icon(Icons.Filled.HourglassTop, null, tint = C.Warning, modifier = Modifier.size(15.dp))
+<<<<<<< HEAD
         Row(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Icon(Icons.Filled.HourglassTop, null, tint = C.Warning, modifier = Modifier.size(15.dp))
+=======
+>>>>>>> 16d62ee (done admin features)
             Text("Your request is waiting for admin approval.", color = C.TextSecondary, style = T.BodySmall)
         }
     }
@@ -1522,6 +1681,7 @@ private fun StatChip(text: String) {
             style = T.Caption,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
         )
+<<<<<<< HEAD
     Surface(
         color = C.Surface,
         shape = RoundedCornerShape(50),
@@ -1579,5 +1739,7 @@ private fun GroupCommentRow(comment: GroupPostComment) {
                 lineHeight = 18.sp
             )
         }
+=======
+>>>>>>> 16d62ee (done admin features)
     }
 }

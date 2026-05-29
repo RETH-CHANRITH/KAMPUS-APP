@@ -1519,17 +1519,26 @@ class FeedViewModel : ViewModel() {
     fun reportPost(postId: Int) {
         val currentUserId = FirebaseAuth.getInstance().currentUser?.uid ?: return
         val db = FirebaseFirestore.getInstance()
+<<<<<<< HEAD
         
         // Find the target post in the current posts state to grab its contents at this exact moment
         val targetPost = _posts.value.find { it.id == postId }
         
         val subCollectionReportDoc = mapOf(
+=======
+>>>>>>> 16d62ee (done admin features)
         val currentUserName = FirebaseAuth.getInstance().currentUser?.displayName ?: "Anonymous"
         val targetPost = _posts.value.firstOrNull { it.id == postId }
         val reportDoc = mapOf(
             "reporterId" to currentUserId,
-            "reportedAt" to System.currentTimeMillis(),
-            "reason" to "reported_from_feed"
+            "reportedByUserId" to currentUserId,
+            "reportedByName" to currentUserName,
+            "contentType" to "POST",
+            "contentId" to postId.toString(),
+            "contentPreview" to (targetPost?.content ?: "Reported feed post"),
+            "reason" to "reported_from_feed",
+            "status" to "open",
+            "createdAt" to System.currentTimeMillis()
         )
         
         val globalReportDoc = mutableMapOf<String, Any>(
@@ -1554,7 +1563,11 @@ class FeedViewModel : ViewModel() {
         
         viewModelScope.launch {
             try {
+<<<<<<< HEAD
                 // 1. Save report under the post's subcollection
+=======
+                db.collection("reports").add(reportDoc).await()
+>>>>>>> 16d62ee (done admin features)
                 db.collection("posts").document(postId.toString())
                     .collection("reports").document(currentUserId)
                     .set(subCollectionReportDoc).await()

@@ -183,8 +183,7 @@ fun EventListScreen(
                         onLike       = { viewModel.toggleLike(event) },
                         onSave       = { viewModel.toggleSave(event) },
                         onComment    = { onCommentOpen(event) },
-                        onShare      = {
-                            viewModel.shareEvent(event)
+                        onShare      = { 
                             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                 type = "text/plain"
                                 putExtra(Intent.EXTRA_SUBJECT, event.title)

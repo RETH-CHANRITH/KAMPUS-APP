@@ -83,8 +83,11 @@ import com.example.kampus.ui.feed.PostItem
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.navigationBarsPadding
 import com.google.firebase.auth.FirebaseAuth
+<<<<<<< HEAD
 import androidx.compose.foundation.layout.navigationBarsPadding
 import com.google.firebase.auth.FirebaseAuth
+=======
+>>>>>>> 16d62ee (done admin features)
 
 @Composable
 fun PostDetailScreen(
@@ -177,7 +180,10 @@ fun PostDetailScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
+<<<<<<< HEAD
                 .padding(paddingValues)
+=======
+>>>>>>> 16d62ee (done admin features)
                 .statusBarsPadding()
                 .padding(horizontal = 16.dp, vertical = 10.dp),
         ) {
@@ -253,7 +259,10 @@ fun PostDetailScreen(
                                         imageUrl = post.profileImageUrl.takeIf { it.isNotBlank() },
                                         size = 42.dp,
                                         userId = post.authorId,
+<<<<<<< HEAD
                                         userId = post.authorId,
+=======
+>>>>>>> 16d62ee (done admin features)
                                     )
                                     Column {
                                         Text(text = post.author, color = colors.onSurface, fontWeight = FontWeight.SemiBold)
@@ -406,20 +415,29 @@ private fun CommentComposer(
 ) {
     val colors = MaterialTheme.colorScheme
     val currentUserId = remember { FirebaseAuth.getInstance().currentUser?.uid.orEmpty() }
+<<<<<<< HEAD
     val currentUserId = remember { FirebaseAuth.getInstance().currentUser?.uid.orEmpty() }
+=======
+>>>>>>> 16d62ee (done admin features)
 
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
+<<<<<<< HEAD
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         // Replying to label if replying
         // Replying to label if replying
+=======
+    ) {
+        // Replying to label if replying
+>>>>>>> 16d62ee (done admin features)
         if (replyingToName != null) {
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(12.dp))
+<<<<<<< HEAD
                     .clip(RoundedCornerShape(12.dp))
                     .background(colors.primary.copy(alpha = 0.10f))
                     .border(1.dp, colors.primary.copy(alpha = 0.20f), RoundedCornerShape(12.dp))
@@ -429,6 +447,13 @@ private fun CommentComposer(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
+=======
+                    .background(colors.primary.copy(alpha = 0.10f))
+                    .border(1.dp, colors.primary.copy(alpha = 0.20f), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+>>>>>>> 16d62ee (done admin features)
             ) {
                 Text("Replying to @$replyingToName", color = colors.primary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 Icon(
@@ -443,6 +468,7 @@ private fun CommentComposer(
         }
 
         // Image preview if any
+<<<<<<< HEAD
                 Text("Replying to @$replyingToName", color = colors.primary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 Icon(
                     imageVector = Icons.Outlined.Close,
@@ -459,35 +485,51 @@ private fun CommentComposer(
         if (imageUri != null) {
             Box(
             Box(
+=======
+        if (imageUri != null) {
+            Box(
+>>>>>>> 16d62ee (done admin features)
                 modifier = Modifier
                     .size(60.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .border(1.dp, colors.outline.copy(alpha = 0.25f), RoundedCornerShape(8.dp))
+<<<<<<< HEAD
                     .size(60.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .border(1.dp, colors.outline.copy(alpha = 0.25f), RoundedCornerShape(8.dp))
+=======
+>>>>>>> 16d62ee (done admin features)
             ) {
                 AsyncImage(
                     model = imageUri,
                     contentDescription = "Photo preview",
                     modifier = Modifier.fillMaxSize(),
+<<<<<<< HEAD
                     contentDescription = "Photo preview",
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,
                 )
                 Box(
                 Box(
+=======
+                    contentScale = ContentScale.Crop,
+                )
+                Box(
+>>>>>>> 16d62ee (done admin features)
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(2.dp)
                         .size(16.dp)
                         .clip(CircleShape)
                         .background(Color.Black.copy(alpha = 0.6f))
+<<<<<<< HEAD
                         .align(Alignment.TopEnd)
                         .padding(2.dp)
                         .size(16.dp)
                         .clip(CircleShape)
                         .background(Color.Black.copy(alpha = 0.6f))
+=======
+>>>>>>> 16d62ee (done admin features)
                         .clickable(onClick = onRemovePhoto),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -498,6 +540,7 @@ private fun CommentComposer(
                         modifier = Modifier.size(10.dp),
                     )
                 }
+<<<<<<< HEAD
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
@@ -507,11 +550,16 @@ private fun CommentComposer(
                         modifier = Modifier.size(10.dp),
                     )
                 }
+=======
+>>>>>>> 16d62ee (done admin features)
             }
         }
 
         // Main input row
+<<<<<<< HEAD
         // Main input row
+=======
+>>>>>>> 16d62ee (done admin features)
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -574,7 +622,11 @@ private fun CommentComposer(
             val enabled = text.isNotBlank() || imageUri != null
             Box(
                 modifier = Modifier
+<<<<<<< HEAD
                     .size(46.dp)
+=======
+                    .size(36.dp)
+>>>>>>> 16d62ee (done admin features)
                     .clip(CircleShape)
                     .background(if (enabled) colors.primary else colors.surfaceVariant)
                     .clickable(enabled = enabled, onClick = onSubmit),
@@ -584,7 +636,11 @@ private fun CommentComposer(
                     imageVector = Icons.AutoMirrored.Outlined.Send,
                     contentDescription = "Send",
                     tint = if (enabled) Color.White else colors.onSurfaceVariant.copy(alpha = 0.4f),
+<<<<<<< HEAD
                     modifier = Modifier.size(22.dp)
+=======
+                    modifier = Modifier.size(16.dp)
+>>>>>>> 16d62ee (done admin features)
                 )
             }
         }
@@ -623,7 +679,10 @@ private fun CommentThread(
                     imageUrl = comment.userProfileImageUrl.takeIf { it.isNotBlank() },
                     size = 34.dp,
                     userId = comment.userId,
+<<<<<<< HEAD
                     userId = comment.userId,
+=======
+>>>>>>> 16d62ee (done admin features)
                 )
                 Column(modifier = Modifier.weight(1f)) {
                     Text(comment.username, color = colors.onSurface, fontWeight = FontWeight.SemiBold)
@@ -697,7 +756,10 @@ private fun AvatarChip(
     imageUrl: String?,
     size: androidx.compose.ui.unit.Dp,
     userId: String? = null,
+<<<<<<< HEAD
     userId: String? = null,
+=======
+>>>>>>> 16d62ee (done admin features)
 ) {
     val colors = MaterialTheme.colorScheme
     var liveImageUrl by remember(imageUrl, userId) { mutableStateOf(imageUrl) }
@@ -722,6 +784,7 @@ private fun AvatarChip(
     }
 
     if (!liveImageUrl.isNullOrBlank()) {
+<<<<<<< HEAD
     var liveImageUrl by remember(imageUrl, userId) { mutableStateOf(imageUrl) }
 
     androidx.compose.runtime.DisposableEffect(userId) {
@@ -747,6 +810,10 @@ private fun AvatarChip(
         AsyncImage(
             model = liveImageUrl,
             model = liveImageUrl,
+=======
+        AsyncImage(
+            model = liveImageUrl,
+>>>>>>> 16d62ee (done admin features)
             contentDescription = null,
             modifier = Modifier
                 .size(size)

@@ -1,7 +1,10 @@
 package com.example.kampus.ui.chat
 
 import android.content.Context
+<<<<<<< HEAD
 import android.content.Context
+=======
+>>>>>>> 16d62ee (done admin features)
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -399,9 +402,15 @@ class ChatViewModel : ViewModel() {
         storyType: String = "note",
     ): Result<String> {
         val hasMedia = !imageUri.isNullOrBlank() && (storyType == "image" || storyType == "video" || imageUri.startsWith("content:") || imageUri.startsWith("file:"))
+<<<<<<< HEAD
         val res = if (hasMedia) {
             _storyUploadProgress.value = 0.0
             val uploadRes = StoryRepository().uploadStory(
+=======
+        if (hasMedia) {
+            _storyUploadProgress.value = 0.0
+            val res = StoryRepository().uploadStory(
+>>>>>>> 16d62ee (done admin features)
                 context = context,
                 fileUri = Uri.parse(imageUri),
                 caption = note,
@@ -413,6 +422,7 @@ class ChatViewModel : ViewModel() {
                 onProgress = { p -> _storyUploadProgress.value = p }
             )
             _storyUploadProgress.value = null
+<<<<<<< HEAD
             uploadRes
         } else {
             runCatching {
@@ -491,6 +501,47 @@ class ChatViewModel : ViewModel() {
         }
 
         return res
+=======
+            return res
+        }
+
+        return runCatching {
+            val userId = auth.currentUser?.uid ?: throw IllegalStateException("User not signed in")
+            val now = System.currentTimeMillis()
+            val expiresAt = now + 86_400_000L
+            val userDoc = FirebaseFirestore.getInstance()
+                .collection("users")
+                .document(userId)
+                .get()
+                .await()
+
+            val storyData = mutableMapOf<String, Any>(
+                "ownerId" to userId,
+                "userId" to userId,
+                "note" to note,
+                "ownerName" to (userDoc.getString("displayName")?.ifBlank { null }
+                    ?: auth.currentUser?.displayName?.ifBlank { null }
+                    ?: auth.currentUser?.email?.substringBefore("@")
+                    ?: "User"),
+                "ownerAvatarEmoji" to (userDoc.getString("avatarEmoji")?.ifBlank { null } ?: "👤"),
+                "ownerProfileImageUrl" to (userDoc.getString("profileImageUrl")?.ifBlank { null } ?: ""),
+                "ownerAvatarColor" to ((userDoc.get("avatarColor") as? Number)?.toLong() ?: 0xFF3B82F6),
+                "overlayText" to overlayText,
+                "overlayX" to overlayX,
+                "overlayY" to overlayY,
+                "overlayColor" to overlayColor,
+                "privacy" to privacy,
+                "storyType" to storyType,
+                "createdAt" to now,
+                "expiresAt" to expiresAt,
+            )
+            FirebaseFirestore.getInstance()
+                .collection("stories")
+                .add(storyData)
+                .await()
+                .id
+        }
+>>>>>>> 16d62ee (done admin features)
     }
 
     suspend fun saveStoryDraft(
